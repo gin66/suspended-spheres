@@ -14,6 +14,19 @@ This document states **behaviour and constraints**. Specific design choices — 
 
 **Top-level safety requirement:** the installation shall be inherently safe — no ball motion, drop, or component failure shall be able to injure a person. Safety shall be achieved by the physical design (containment, masses, speeds, guards), not by relying on a safety-rated stop system.
 
+### 1.1 Notation
+
+| Symbol | Meaning |
+|--------|---------|
+| `m` | ball mass = 50 g (CON-002) |
+| `g` | gravitational acceleration = 9.81 m/s² |
+| `s` | height above the lower extreme of travel |
+| `v` | vertical speed |
+| `a` | vertical acceleration |
+| `F` | thread / drive force |
+| `T` | drum torque |
+| `r` | drum radius |
+
 ---
 
 ## 2. Stakeholders
@@ -39,15 +52,14 @@ This document states **behaviour and constraints**. Specific design choices — 
 | FR-MOT-001 | The system shall independently control the vertical position of all 120 balls simultaneously. | MUST |
 | FR-MOT-002 | Position quantization at the drum shall be ≤ 50 µm linear (ASM-014), so individual steps are not perceptible at any commanded speed. | SHOULD |
 | FR-MOT-003 | The system shall be able to follow the free-fall speed envelope v(s) = √(2 g s) on descent when a pattern calls for it. The envelope is concave, so ~4.4 m/s is reached only near the lower stop (s ≈ 1 m); a sustained 4.5 m/s segment does not exist. | MUST |
-| FR-MOT-004 | The drive shall cover the worst-case vertical load envelope: (a) hold at rest with a = g, so the holding force is F ≥ mg; and (b) arrest a full free-fall descent (4.43 m/s) within the last 1 cm, requiring a_catch = v²/(2·0.01) ≈ 981 m/s² and F ≈ 49 N (≈ 153 N including reflected inertia, ≈ 1.9 Nm at a 25 mm drum). The catch is the sizing case; the requirement is on system capability, not on which element provides it. | MUST |
+| FR-MOT-004 | The system shall arrest a ball moving at full free-fall speed (4.43 m/s) within the last 1 cm of travel (ASM-008). This requires a peak deceleration of ≈981 m/s² and a thread force of ≈49 N. The requirement is on system capability, not on which element provides it. | MUST |
 | FR-MOT-005 | Each ball shall operate within a vertical travel range of 1000 mm (1 m). | MUST |
 | FR-MOT-006 | The system shall support S-curve (jerk-limited) motion profiles. | SHOULD |
-| FR-MOT-008 | The system shall hold ball position against gravity without slipping. At standstill the equivalent acceleration is g, so the required holding force is F ≥ mg; this corresponds to a static holding torque of ≥ 0.01 Nm at the drum with margin. | MUST |
+| FR-MOT-008 | The system shall hold each ball at rest against gravity without slipping, with a holding-force capability of at least 2× the ball weight (F ≥ 2mg ≈ 1.0 N). Drum torque is a design outcome (T = F × r). | MUST |
 | FR-MOT-009 | The system shall provide exactly one position-reference endstop. Its location (upper or lower) and detection method are design choices; it shall be detected on every homing attempt and shall not false-trigger during commanded motion. | MUST |
 | FR-MOT-010 | The system shall perform an automatic homing sequence on power-up: move to the reference endstop, record the home position, return to a safe offset. Homing shall complete within 60 s; if the stop is not detected within travel + margin, the system shall stop and report a fault. The offset shall keep all balls clear of the stop and of the lower extreme of travel. | MUST |
 | FR-MOT-011 | The red stop button shall remove power from the drives. After power removal the balls shall either be held by the drives' de-energised detent torque or descend to the lower limit of travel; no powered action is required. This is an operational stop, not a safety-rated function. | MUST |
 | FR-MOT-012 | During ordinary motion the thread shall remain in tension and shall not go slack, including through control transients. The downward-acceleration limit intended to achieve this is 0.9 g (ASM-010), to be confirmed by a visual test. | MUST |
-| FR-MOT-013 | The system shall support an intentional free-fall descent with a braked catch within the last 1 cm (catch distance per ASM-008). | SHOULD |
 | FR-MOT-015 | A digital/PC stop command shall halt all motion at the next control opportunity, decelerating within the configured limits, and shall retain each ball's position so that no re-homing is required. | MUST |
 
 ### 3.2 Pattern Generation
@@ -91,6 +103,7 @@ This document states **behaviour and constraints**. Specific design choices — 
 | FR-MON-003 | The system shall log error events (overcurrent, stall, communication loss) with timestamps on the global timeline. | MUST |
 | FR-MON-004 | The system shall provide a monitoring interface for the operator. | SHOULD |
 | FR-MON-005 | The system shall indicate controller health locally with a visible OK/fault indication. | MUST |
+| FR-MON-006 | The system shall provide a global visual status indicator, visible to the operator, showing at least: operable/ready, error/fault, and preparation (homing/start-up) mode. | MUST |
 
 ### 3.7 User Interface
 
@@ -118,7 +131,7 @@ This document states **behaviour and constraints**. Specific design choices — 
 | NFR-REL-001 | Mean time between failures (MTBF): ≥ 1000 hours. | SHOULD |
 | NFR-REL-002 | The remaining balls shall continue operating if a controller fails (degraded mode). | SHOULD |
 | NFR-REL-003 | Single controller failure shall not affect operation of other controllers. | MUST |
-| NFR-REL-004 | Thread failure (breakage) on one ball shall not cause cascading failures. Detection of the breakage is not required. | MUST |
+| NFR-REL-004 | Thread failure (breakage) on one ball shall not cause cascading failures. Continuous detection is not required; a break can be inferred during homing when the step count exceeds the travel limit before the reference is found (see FR-MOT-010). | MUST |
 | NFR-REL-005 | Power loss recovery: the system shall re-home all balls on power restoration (per FR-MOT-010). | MUST |
 
 ### 4.2 Safety
@@ -130,7 +143,7 @@ This document states **behaviour and constraints**. Specific design choices — 
 | NFR-SAFE-004 | Per-motor overcurrent protection shall be provided. | MUST |
 | NFR-SAFE-005 | The system shall include warning signage, and access interlocks that stop motion when an enclosure is opened. | MUST |
 | NFR-SAFE-006 | The frame shall withstand the worst-case load — all 120 balls catching simultaneously (≈5.9 kN) plus static weight — with a safety factor of ≥ 2. | MUST |
-| NFR-SAFE-007 | The system shall be grounded/earthed for electrical safety. | MUST |
+| NFR-SAFE-007 | All exposed metal parts shall be bonded to protective earth (grounded). | MUST |
 | NFR-SAFE-010 | The system shall be designed against fire: the supply shall have overcurrent and short-circuit protection, and enclosure, cable, and decorative materials shall be fire-retardant where practical. Unattended operation shall only be permitted with these protections in place. | MUST |
 
 ### 4.3 Environmental
@@ -218,7 +231,7 @@ This document states **behaviour and constraints**. Specific design choices — 
 | ASM-004 | Thermal effects on thread strength are within material limits at operating temperatures. |
 | ASM-005 | The installation environment is stable (no significant vibration or air currents). |
 | ASM-006 | Viewers are at 0.5–3 m distance from the sculpture. |
-| ASM-007 | Power is available: 24 V DC, ~1200 W continuous. |
+| ASM-007 | Power is available: 24 V DC, ~1200 W continuous (preliminary, depends on motor selection). |
 | ASM-008 | Braked catch distance for an intentional free-fall drop is 1 cm — an engineering proposal pending designer approval. |
 | ASM-009 | Grid form and pitch are not yet fixed by the designer; a rectangular 10 × 12 layout at 100 mm pitch is an engineering proposal pending designer approval. |
 | ASM-010 | Limiting downward acceleration to 0.9 g (T ≥ 0.1 mg) keeps the thread visibly taut during ordinary motion; to be verified by a visual test. The limit is waived only for the intentional free-fall drop. |
@@ -233,7 +246,7 @@ This document states **behaviour and constraints**. Specific design choices — 
 
 | ID | Test | Verifies |
 |----|------|----------|
-| T-DROP-001 | Make the drop: execute an intentional free-fall descent and monitor the thread (visual and/or tension sensor). Confirm the thread stays taut during ordinary motion and goes slack only during the intended drop, and that the catch arrests the ball within 1 cm. | FR-MOT-003, FR-MOT-012, FR-MOT-013, ASM-008, ASM-010 |
+| T-DROP-001 | Make the drop: execute an intentional free-fall descent and monitor the thread (visual and/or tension sensor). Confirm the thread stays taut during ordinary motion and goes slack only during the intended drop, and that the catch arrests the ball within 1 cm. | FR-MOT-003, FR-MOT-004, FR-MOT-012, ASM-008, ASM-010 |
 | T-SMOOTH-001 | Run the fastest acceleration/deceleration transitions and observe visually that no jerk or stepping is perceived. | FR-MOT-002, FR-MOT-006, ASM-011 |
 | T-FRAME-001 | Apply a static proof load of 2× the worst-case dynamic load (≈12 kN) to the frame and verify no failure or permanent deformation. | NFR-SAFE-006 |
 | T-VISUAL-001 | Move a ball in 50 µm increments and observe from the closest viewing distance (0.5 m) whether the displacement is perceptible. | ASM-014, FR-MOT-002 |
