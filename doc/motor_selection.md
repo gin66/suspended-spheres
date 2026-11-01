@@ -1,8 +1,9 @@
 # Motor Selection — Cheap Variants Compared
 
 > Trade study of low-cost motor options against the current requirement set
-> (system_requirements.md v4.0): 100–120 hollow ornaments (≤ 50 g), ~2 m
-> travel, very slow motion (≤ 0.3 m/s), single position reference.
+> (system_requirements.md): 100–120 hollow ornaments (≤ 50 g), ~2 m
+> travel, slow motion with a nominal fast tier of 0.44–0.59 m/s and an
+> optional 0.8–1.3 m/s short-effect tier (ASM-015), single position reference.
 >
 > **Prices checked on AliExpress (DE, EUR) on 2026-11-01.** They are
 > indicative and fluctuate; shipping and import treatment are noted
@@ -20,27 +21,32 @@ Static hold force per ball:
 F_hold = m g = 0.050 × 9.81 = 0.491 N
 ```
 
-`FR-MOT-008` requires a 2× holding margin, and the slow lift adds only
-≈ 0.05 N, so the sizing torque is essentially the holding torque:
+`FR-MOT-008` requires a 2× holding margin. The nominal lift adds ≈ 0.08 N and
+the optional 4 m/s² tier ≈ 0.20 N, but the reflected motor/drum inertia is the
+larger term at speed. The sizing torque is still essentially the holding
+torque:
 
-| Drum Ø | Radius | Static torque | With 2× margin |
-|--------|--------|---------------|----------------|
-| 10 mm | 5 mm | 0.0025 Nm | **0.005 Nm** |
-| 20 mm | 10 mm | 0.0049 Nm | **0.010 Nm** |
-| 30 mm | 15 mm | 0.0074 Nm | **0.015 Nm** |
+| Drum Ø | Radius | Static torque | With 2× margin | At 4 m/s² + inertia |
+|--------|--------|---------------|----------------|---------------------|
+| 10 mm | 5 mm | 0.0025 Nm | **0.005 Nm** | 0.005 Nm |
+| 20 mm | 10 mm | 0.0049 Nm | **0.010 Nm** | 0.011 Nm |
+| 30 mm | 15 mm | 0.0074 Nm | **0.015 Nm** | 0.016 Nm |
+| 40 mm | 20 mm | 0.0098 Nm | **0.020 Nm** | 0.022 Nm |
 
 Even at the largest drum this is tiny. Every candidate below exceeds it;
-**torque is not the discriminator** — cost, speed, backlash, and noise are.
+**torque is not the discriminator** — speed, backlash, and noise are.
 
 ### 1.2 Speed
 
-At the required 0.3 m/s:
+| Drum Ø | RPM @ 0.6 m/s (nominal) | RPM @ 0.8 m/s (3 s) | RPM @ 1.2 m/s (2 s) |
+|--------|--------------------------|----------------------|----------------------|
+| 20 mm | 573 | 764 | 1,146 |
+| 25 mm | 458 | 611 | 917 |
+| 30 mm | 382 | 509 | 764 |
+| 40 mm | 286 | 382 | 573 |
 
-| Drum Ø | Required RPM |
-|--------|-------------|
-| 10 mm | 573 |
-| 20 mm | 286 |
-| 30 mm | 191 |
+The 40 mm drum keeps the optional tier below 600 RPM; the 20 mm drum needs
+1,146 RPM, where torque and noise must be verified.
 
 ### 1.3 Position / backlash
 
@@ -106,13 +112,13 @@ Beyond the three motors you listed, the search turned up:
 
 ## 3. Suitability matrix
 
-Rating: 5 = excellent, 1 = unsuitable. "Speed" is scored against 0.3 m/s at a
-20–30 mm drum.
+Rating: 5 = excellent, 1 = unsuitable. "Speed" is scored against the nominal
+0.6 m/s tier and the optional 1.2 m/s tier at a 25–40 mm drum.
 
 | Criterion | 28BYJ-48 | 24BYG48 | NEMA-8 | NEMA-11 | NEMA-14 | NEMA-17 | NEMA-17 pancake | BLDC+FOC |
 |-----------|:--------:|:-------:|:------:|:-------:|:-------:|:-------:|:---------------:|:--------:|
 | Torque margin | 4 | 3 | 2 | 4 | 4 | 5 (overkill) | 4 | 3 |
-| Speed (0.3 m/s) | **1** | **1** | 4 | 5 | 5 | 5 | 4 | 5 |
+| Speed (0.6 / 1.2 m/s) | **1** | **1** | 3 | 4 | 5 | 5 | 4 | 5 |
 | Backlash / position | **1** | **1** | 5 | 5 | 5 | 5 | 5 | 5 |
 | Power-off hold | 4 | 4 | 2 | 3 | 3–4 | 4 | 3 | 1 |
 | Noise | 2 | 2 | 4 | 4 | 4 | 4 | 4 | 5 |
@@ -127,7 +133,7 @@ Rating: 5 = excellent, 1 = unsuitable. "Speed" is scored against 0.3 m/s at a
 
 ### 28BYJ-48 / 24BYG48 — not suitable
 - **Speed:** 28BYJ output ≈ 15–25 RPM gives only ≈ 0.016–0.039 m/s on a
-  20–30 mm drum; the 24BYG48 is similar. Cannot meet 0.3 m/s.
+  20–30 mm drum; the 24BYG48 is similar. Cannot meet the 0.6 m/s nominal tier.
 - **Backlash:** 1:64 gearboxes have ≈ 1–2° of backlash (≈ 0.2–0.5 mm at a
   20–30 mm drum), larger than the 50 µm scale budget and visible at
   reversals.
@@ -143,8 +149,10 @@ Rating: 5 = excellent, 1 = unsuitable. "Speed" is scored against 0.3 m/s at a
 
 ### NEMA-11 — recommended
 - Direct drive: negligible backlash, quiet with microstepping.
-- Torque margin ≈ 5–10× the 2× holding requirement.
-- Speed ample (190–290 RPM needed).
+- Torque margin ≈ 5–10× the 2× holding requirement at low speed.
+- Speed: 458–573 RPM nominal and ~917 RPM optional on a 25 mm drum. Verify
+  high-speed torque and noise on the specific unit; it is the least
+  comfortable candidate for the 1.2 m/s tier.
 - Generic units around 6–7 €; branded/UMOT units 19–27 €.
 - Detent is marginal; accept the power-off descent allowed by `FR-MOT-011`,
   or add a brake if that behaviour is unwanted.
@@ -153,9 +161,12 @@ Rating: 5 = excellent, 1 = unsuitable. "Speed" is scored against 0.3 m/s at a
 - A 3.55 € mini and 7–9 € standard units make it the cheapest direct-drive
   option found.
 - Torque 0.11–0.18 Nm; ample.
+- Speed: 382–509 RPM nominal and 764 RPM optional on a 30 mm drum; the
+  1.2 m/s tier is only ~917 RPM on a 25 mm drum.
 - Check the specific listing: some 2.5–3.5 € units are very small and may
   have lower torque and shorter leads.
-- Functionally equivalent to NEMA-11 for this duty.
+- Functionally equivalent to NEMA-11 for this duty, with a better speed
+  margin.
 
 ### NEMA-17 (full) — over-specified and most expensive
 - Meets every requirement with the largest margin and best detent.
@@ -167,7 +178,7 @@ Rating: 5 = excellent, 1 = unsuitable. "Speed" is scored against 0.3 m/s at a
 - 42×23 mm short-stack, 16 N·cm, ≈ 6.6–7 €/pc in 5-packs.
 - Direct drive, low profile, ample torque, adequate speed.
 - The cheapest direct-drive option with real margin; verify the specific
-  listing's speed and detent.
+  listing's torque at ~900 RPM and its detent.
 
 ### BLDC gimbal + FOC — noise option
 - Quietest, smooth at low speed.
@@ -179,14 +190,22 @@ Rating: 5 = excellent, 1 = unsuitable. "Speed" is scored against 0.3 m/s at a
 
 ## 5. Impact of drum choice
 
-| Drum Ø | Torque needed (2×) | RPM @ 0.3 m/s | Turns for 2.5 m | Single-layer width |
-|--------|--------------------|---------------|-----------------|--------------------|
-| 10 mm | 0.005 Nm | 573 | ≈ 80 | ≈ 40 mm (wide) |
-| 20 mm | 0.010 Nm | 286 | ≈ 40 | ≈ 20 mm |
-| 30 mm | 0.015 Nm | 191 | ≈ 27 | ≈ 13 mm |
+| Drum Ø | Torque needed (2×) | RPM @ 0.6 / 1.2 m/s | Turns for 2.5 m | Single-layer width |
+|--------|--------------------|----------------------|-----------------|--------------------|
+| 10 mm | 0.005 Nm | 1,146 / 2,292 | ≈ 80 | ≈ 40 mm (wide) |
+| 20 mm | 0.010 Nm | 573 / 1,146 | ≈ 40 | ≈ 20 mm |
+| 25 mm | 0.012 Nm | 458 / 917 | ≈ 32 | ≈ 16 mm |
+| 30 mm | 0.015 Nm | 382 / 764 | ≈ 27 | ≈ 13 mm |
+| 40 mm | 0.020 Nm | 286 / 573 | ≈ 20 | ≈ 10 mm |
 
-A 20–30 mm drum keeps RPM low and the winding compact. The geared motors are
-speed-limited at every drum size.
+A **40 mm drum** is the best fit for the fuller envelope: it keeps the optional
+1.2 m/s tier at 573 RPM, narrows the winding to ~10 mm, and still meets the
+50 µm resolution at 1/16 (39.3 µm). A 25–30 mm drum is the fallback if a smaller
+spool is preferred; 30 mm at 1/16 covers 2 m in ~3 s comfortably, and 2 s is
+marginal. A 20 mm drum needs 1/8 microstepping to reach 1.2 m/s within the
+40 kHz step-rate ceiling, at 1,146 RPM.
+
+The geared motors are speed-limited at every drum size.
 
 ---
 
@@ -199,17 +218,23 @@ speed-limited at every drum size.
 3. **Cheapest direct drive:** NEMA-14 (3.5–9 €), verifying the small/weak
    variants.
 4. **NEMA-11** remains the safe, widely available baseline at ~6–7 €
-   generic.
-5. **NEMA-17 full-size:** over-specified and the most expensive; keep only
+   generic, but verify ~900 RPM torque/noise before using it for the 1.2 m/s
+   tier.
+5. **Drum:** 40 mm with 1/16 microstepping is the baseline for the full
+   envelope (39.3 µm, 30.6 kHz at 1.2 m/s, 573 RPM). A 30 mm drum at 1/16
+   covers 2–3 s effects with better resolution margin but misses 1.2 m/s by
+   ~2 %; a 20 mm drum needs 1/8 for 1.2 m/s and runs at 1,146 RPM.
+6. **NEMA-17 full-size:** over-specified and the most expensive; keep only
    as a fallback.
-6. **28BYJ-48 / 24BYG48:** reject (speed and backlash).
-7. **NEMA-8:** poor value (price close to NEMA-17, torque much lower).
-8. Revisit **BLDC + FOC** only if measured noise from a direct-drive stepper
+7. **28BYJ-48 / 24BYG48:** reject (speed and backlash).
+8. **NEMA-8:** poor value (price close to NEMA-17, torque much lower).
+9. Revisit **BLDC + FOC** only if measured noise from a direct-drive stepper
    is unacceptable.
 
 > Before committing, buy one of each shortlisted type and test at the chosen
-> drum: achievable speed, backlash at reversals, audible noise, and detent
-> hold with a 50 g load. Those four measurements decide the final choice.
+> drum: achievable speed at 1.2 m/s, step rate against the 40 kHz ceiling,
+> backlash at reversals, audible noise, and detent hold with a 50 g load.
+> Those five measurements decide the final choice.
 
 ---
 

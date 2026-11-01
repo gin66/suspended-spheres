@@ -24,9 +24,9 @@ A real-time kinetic art installation featuring **100–120 hollow chrome-finishe
 | **Grid** | 10 × 10 or 10 × 12 (layout proposal) |
 | **Travel** | ~2000 mm (2 m) |
 | **Footprint** | ~3 × 3 m (3 × 3.5 m possible), under a 3 m ceiling |
-| **Motion** | very slow and smooth; max commanded speed ≤ 0.3 m/s (proposal) |
+| **Motion** | mostly very slow and smooth; nominal fast tier 2 m in 4–5 s, optional short effects 2–3 s |
 
-> The piece is designed for slow, hypnotic motion. Free-fall and high-speed catch behaviour are not required.
+> The piece is designed for slow, hypnotic motion, with a faster tier for occasional effects. Free-fall and high-speed catch behaviour are not required.
 
 ---
 

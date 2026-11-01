@@ -51,14 +51,14 @@ This document states **behaviour and constraints**. Specific design choices — 
 |----|-------------|----------|
 | FR-MOT-001 | The system shall independently control the vertical position of all balls (100–120) simultaneously. | MUST |
 | FR-MOT-002 | Position quantization at the drum shall be ≤ 50 µm linear (ASM-014), so individual steps are not perceptible at any commanded speed. | SHOULD |
-| FR-MOT-003 | The system shall produce continuous vertical motion over the full travel at commanded speeds up to 0.3 m/s (ASM-015), with smooth acceleration. No free-fall mode is required. | MUST |
+| FR-MOT-003 | The system shall produce continuous vertical motion over the full travel at commanded speeds up to the nominal fast envelope and, where provided, the optional short-effect envelope (ASM-015), with smooth acceleration. No free-fall mode is required. | MUST |
 | FR-MOT-005 | Each ball shall operate within a usable vertical travel of ~2000 mm (2 m). | MUST |
 | FR-MOT-006 | The system shall support S-curve (jerk-limited) motion profiles. | SHOULD |
 | FR-MOT-008 | The system shall hold each ball at rest against gravity without slipping, with a holding-force capability of at least 2× the ball weight (F ≥ 2mg ≈ 1.0 N). Drum torque is a design outcome (T = F × r). | MUST |
 | FR-MOT-009 | The system shall provide exactly one position-reference endstop. Its location (upper or lower) and detection method are design choices; it shall be detected on every homing attempt and shall not false-trigger during commanded motion. | MUST |
 | FR-MOT-010 | The system shall perform an automatic homing sequence on power-up: move to the reference endstop, record the home position, return to a safe offset. Homing shall complete within 60 s; if the stop is not detected within travel + margin, the system shall stop and report a fault. The offset shall keep all balls clear of the stop and of the lower extreme of travel. | MUST |
 | FR-MOT-011 | The red stop button shall remove power from the drives. After power removal the balls shall either be held by the drives' de-energised detent torque or descend to the lower limit of travel; no powered action is required. This is an operational stop, not a safety-rated function. | MUST |
-| FR-MOT-012 | During ordinary motion the thread shall remain in tension and shall not go slack, including through control transients. At the slow operating speeds the commanded downward acceleration stays far below g (ASM-015). | MUST |
+| FR-MOT-012 | During ordinary motion the thread shall remain in tension and shall not go slack, including through control transients. Across the operating envelope the commanded downward acceleration stays below g (ASM-015). | MUST |
 | FR-MOT-015 | A digital/PC stop command shall halt all motion at the next control opportunity, decelerating within the configured limits, and shall retain each ball's position so that no re-homing is required. | MUST |
 
 ### 3.2 Pattern Generation
@@ -196,7 +196,7 @@ This document states **behaviour and constraints**. Specific design choices — 
 |----|-------------|----------|
 | IR-ELEC-001 | Motor supply voltage: 24 V DC nominal (preliminary, depends on motor selection; see ASM-007). | SHOULD |
 | IR-ELEC-002 | Average system power consumption shall fit the available supply (design budget ≤ 1200 W; preliminary, depends on motor selection). | SHOULD |
-| IR-ELEC-004 | The grounding and bonding scheme shall prevent ground loops and common-mode noise between motor power returns, controller logic ground, and the field-bus reference. Motor power and signal grounds shall be separated as the drive requires. | MUST |
+| IR-ELEC-004 | The grounding and bonding scheme shall prevent ground loops and common-mode noise between motor power returns, controller logic ground, and any signal or clock reference. Motor power and signal grounds shall be separated as the drive requires. | MUST |
 
 ### 5.3 Software Interfaces
 
@@ -213,7 +213,7 @@ This document states **behaviour and constraints**. Specific design choices — 
 |----|-----------|----------|
 | CON-001 | 100–120 balls and ~2 m usable vertical travel; installation footprint ~3 × 3 m (3 × 3.5 m possible) under a 3 m ceiling. Grid arrangement and pitch are proposals (ASM-009). | MUST |
 | CON-002 | Ball mass: ≤ 50 g each — fixed. | MUST |
-| CON-003 | Motion is slow by design: maximum commanded vertical speed ≤ 0.3 m/s (ASM-015), with smooth acceleration. Free-fall is not required. | MUST |
+| CON-003 | Motion is primarily slow and smooth. The nominal fast setting completes the ~2 m stroke in 4–5 s; short optional effects may complete it in 2–3 s; most choreography is much slower. Speeds and accelerations are bounded by ASM-015. Free-fall is not required. | MUST |
 | CON-006 | Exactly one position-reference endstop; its location (upper or lower) and implementation are design choices. The stop is the position reference. | MUST |
 | CON-008 | The control architecture shall be modular; controller grouping, node count, and bus segmentation are design choices. | MUST |
 | CON-009 | Indoor installation — no weatherproofing required. | MUST |
@@ -226,7 +226,7 @@ This document states **behaviour and constraints**. Specific design choices — 
 | ID | Assumption |
 |----|-----------|
 | ASM-001 | Balls are suspended from a rigid overhead frame. |
-| ASM-003 | Air resistance is negligible at ≤ 0.3 m/s for a 60–80 mm hollow sphere (drag force ≲ 0.15 mN, well under 0.1 % of ball weight). |
+| ASM-003 | Air resistance is negligible across the envelope for a 60–80 mm hollow sphere: at 0.3 m/s the drag force is ≲ 0.15 mN; at the 1.2 m/s optional ceiling it is ≲ 2.1 mN (well under 0.5 % of ball weight). |
 | ASM-004 | Thermal effects on thread strength are within material limits at operating temperatures. |
 | ASM-005 | The installation environment is stable (no significant vibration or air currents). |
 | ASM-006 | Viewers are at 0.5–3 m distance from the sculpture. |
@@ -236,8 +236,8 @@ This document states **behaviour and constraints**. Specific design choices — 
 | ASM-012 | A smooth transition from the old to the new pattern over ~1 s is assumed to look good and be acceptable for live changes; to be verified visually. |
 | ASM-013 | A replacement module is available in stock, so module exchange time (≤ 10 min) is the binding recovery metric. |
 | ASM-014 | Ball vertical displacements up to 50 µm are visually acceptable (imperceptible at the viewing distances of ASM-006); to be verified by a visual test. |
-| ASM-015 | Maximum commanded vertical speed is 0.3 m/s with peak acceleration ~0.5 m/s², consistent with the intended very slow, hypnotic motion; pending designer confirmation. |
-| ASM-016 | The supporting structure (substantial steel beams) is designed and verified by the designer; the control system imposes only static and slow-motion loads (≤ ~0.52 N per ball). |
+| ASM-015 | Speed envelope: the **nominal fast setting** completes the ~2 m stroke in 4–5 s (peak ≈ 0.44–0.59 m/s at ≈ 1.0–1.5 m/s²). **Optional short effects** complete it in 2–3 s (peak ≈ 0.8–1.3 m/s at ≈ 2–4 m/s²); the 2 s end is a stretch, not required for acceptance. Most choreography is much slower (≤ 0.3 m/s). Every tier must still meet the 50 µm resolution of ASM-014. The optional tier is welcome only if it does not materially increase cost. |
+| ASM-016 | The supporting structure (substantial steel beams) is designed and verified by the designer; the control system imposes static and slow-motion loads, with a worst case of ≈ 0.7 N per ball (≈ 83 N total) at the optional 4 m/s² tier. |
 
 ---
 
@@ -260,4 +260,4 @@ This document states **behaviour and constraints**. Specific design choices — 
 
 ---
 
-*Document version: 4.0*
+*Document version: 5.0 — speed envelope clarified: nominal 2 m in 4–5 s, optional 2–3 s effects (`ASM-015`).*

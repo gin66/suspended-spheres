@@ -2,11 +2,13 @@
 
 > Detailed evaluation of microcontroller platforms for the 100–120-ball kinetic sculpture.
 >
-> **Operating point updated.** The piece now uses 100–120 hollow chrome-finish
-> spheres (Ø 60–80 mm, ≤ 50 g) over ~2 m of travel at very slow speeds
-> (≤ 0.3 m/s, `ASM-015`). Figures below that still refer to the earlier
-> 4.5 m/s free-fall concept are marked as such; the platform/bus conclusions
-> (local motion generation, modular grouping) remain valid.
+> **Operating point updated.** The piece uses 100–120 hollow chrome-finish
+> spheres (Ø 60–80 mm, ≤ 50 g) over ~2 m of travel. The nominal fast tier is
+> 0.44–0.59 m/s (2 m in 4–5 s); optional short effects reach 0.8–1.3 m/s
+> (2 m in 2–3 s); most choreography is much slower. See `ASM-015`. Figures that
+> still refer to the earlier 4.5 m/s free-fall concept are marked as such; the
+> platform/bus conclusions (local motion generation, modular grouping) remain
+> valid.
 
 ---
 
@@ -16,10 +18,11 @@ Before evaluating controllers, we define the hard requirements:
 
 | Requirement | Value |
 |-------------|-------|
-| Motors per controller | design choice (12-motor grouping as baseline) |
-| Communication | modular field bus (CAN 2.0B as baseline) |
-| Max speed | 0.3 m/s (`ASM-015`) |
-| Max acceleration | ~0.5 m/s² (`ASM-015`) |
+| Motors per controller | design choice: 16 (custom) or 4–8 (COTS); §11–§12 |
+| Communication | WiFi (grouped nodes, buffered commands, broadcast/FTM timebase) |
+| Nominal fast speed | 0.44–0.59 m/s (`ASM-015`) |
+| Optional effect speed | 0.8–1.3 m/s (`ASM-015`) |
+| Acceleration | ~1.0–1.5 m/s² nominal; ~2–4 m/s² optional |
 | Synchronization precision | < 1 ms across all 100–120 balls |
 | Position reference | exactly one endstop (`FR-MOT-009`) |
 | Real-time motion control | Yes — deterministic timing, local trajectories |
@@ -28,16 +31,15 @@ Before evaluating controllers, we define the hard requirements:
 
 ## 2. Candidate Platforms
 
-### 2.1 ESP32-S3 (classic CAN; CAN-FD needs an external controller)
+### 2.1 ESP32-S3 (WiFi + FTM)
 
 | Specification | Value |
 |--------------|-------|
 | **CPU** | Dual-core Xtensa LX7, 240 MHz |
 | **Flash** | 8 MB+ (QSPI module) |
 | **SRAM** | 512 KB (internal) + up to 16 MB PSRAM |
-| **CAN** | TWAI controller: **classic CAN 2.0B only, no CAN-FD**; no on-chip transceiver |
 | **GPIO** | ~45 usable pins |
-| **PWM** | 8 LEDC channels |
+| **PWM** | 8 LEDC channels (not used for stepper timing) |
 | **I2S** | 2 I2S peripherals |
 | **SPI** | 2 SPI peripherals |
 | **I2C** | 2 I2C peripherals |
@@ -47,55 +49,47 @@ Before evaluating controllers, we define the hard requirements:
 | **Package** | QFN-56 (usually supplied as a module) |
 | **Cost** | ~$3–5 per module |
 
-#### Stepper Control Architecture
+#### Stepper Control Architecture — FastAccelStepper
 
-**Direct PWM approach (6–8 channels):**
-- Use LEDC PWM to generate step pulses for 6–8 steppers directly
-- Each channel handles one stepper's STEP signal
-- DIR and ENABLE lines are GPIO
+Use **FastAccelStepper exclusively** on the ESP32-S3. Do not bit-bang steps or use raw LEDC PWM for step generation.
 
-**I2S shift-register approach:**
-- I2S outputs a serial frame that a shift register on the driver board demuxes into per-driver step/dir/enable bits
-- The timing study in §8 sizes one such frame; it does not imply a four-channel-per-I2S limit
+| FastAccelStepper driver | Steppers | Max step rate | Use here |
+|-------------------------|----------|---------------|----------|
+| **I2S mux** + 74HC595 | **16** step + dir (32 step-only) | 40 kHz | **Baseline: 16 per board** |
+| **RMT / MCPWM-PCNT** | up to 8 (4 RMT + 4 MCPWM/PCNT) | 200 kHz | Small builds, spares |
+| **I2S direct** | 1–3 | 200 kHz | Not needed at 16 axes |
 
-#### CAN Bus
-
-- The ESP32-S3 TWAI controller speaks **classic CAN 2.0B**, up to 1 Mbit/s. It is not a CAN-FD controller; CAN-FD frames are bus errors.
-- There is no on-chip transceiver: an external CAN transceiver is required.
-- CAN is **half-duplex**.
-- For CAN-FD on an S3, add an **MCP2518FD** (SPI) plus a transceiver. That pair, not the S3 itself, provides FD.
+- The library owns step timing, ramps, command queues and start synchronization; the application sets speed, acceleration and target only.
+- I2S mux: one DMA buffer drives all 16 steppers, so they are inherently synchronized. Direction reversal costs 500 µs (DIR on a mux slot) or ~1 ms (DIR on GPIO).
+- §8 sizes the I2S mux frame; §12 covers the 16-stepper grouping.
 
 #### Pros
 - ✅ High CPU headroom for local motion planning and pattern generation
 - ✅ Plenty of GPIO, PSRAM for trajectory buffers, WiFi/BT for configuration and monitoring
 - ✅ Large community and ecosystem
-- ✅ Classic CAN is sufficient with local trajectories (§9.5.8)
+- ✅ WiFi + broadcast/FTM timebase is sufficient with grouped, buffered controllers (§9)
 
 #### Cons
-- ⚠️ No CAN-FD without an external MCP2518FD
-- ⚠️ No on-chip CAN transceiver
 - ⚠️ Higher power consumption (~200–500 mA active)
 - ⚠️ Heat generation at sustained high CPU load
 
-#### Verdict: **Strong choice** for a classic-CAN column controller. Add an MCP2518FD only if CAN-FD is actually wanted.
+#### Verdict: **Baseline choice** for a WiFi column controller: WiFi + FTM, I2S mux, PSRAM.
 
 ---
 
-### 2.1a ESP32-C5 (on-chip CAN-FD)
+### 2.1a ESP32-C5 (WiFi 6)
 
 | Specification | Value |
 |--------------|-------|
 | **CPU** | Single HP RISC-V core, up to 240 MHz |
 | **SRAM** | 384 KB HP SRAM |
-| **CAN** | **Two TWAI controllers, classic CAN and CAN-FD (ISO 11898-1)** |
 | **GPIO** | 29 |
-| **Connectivity** | WiFi 6 (2.4 and 5 GHz) |
+| **Connectivity** | WiFi 6 (2.4 and 5 GHz), FTM |
 | **Logic level** | 3.3 V |
-| **Transceiver** | Still external |
 
-The C5 is the on-chip CAN-FD option. It removes the MCP2518FD, not the transceiver. Its single core and smaller GPIO count are the trade-off against the S3.
+The C5 adds WiFi 6 and FTM at the cost of a single core and fewer GPIO. It is a valid alternative if 5 GHz operation or WiFi 6 is specifically wanted; the S3 remains the baseline for 16 steppers and PSRAM.
 
-#### Verdict: **Preferred when CAN-FD must be on-chip.** For classic CAN, the ESP32-S3 is the more flexible part.
+#### Verdict: **Not the baseline.** Use it only if WiFi 6 / 5 GHz is a site requirement.
 
 ---
 
@@ -106,9 +100,8 @@ The C5 is the on-chip CAN-FD option. It removes the MCP2518FD, not the transceiv
 | **CPU** | Dual ARM Cortex-M33, 150 MHz |
 | **Flash** | 2 MB (QSPI, on-board) |
 | **SRAM** | **520 KB** |
-| **CAN** | ❌ **No native CAN controller** — needs an external controller **and** a transceiver |
 | **GPIO** | 30 (QFN-60) or 48 (QFN-80) |
-| **PIO** | **3 PIO blocks × 4 state machines = 12**; each block has 32 instructions, shared |
+| **PIO** | **3 PIO blocks × 4 state machines = 12**; FastAccelStepper allocates **8 steppers** on ARM (12 on RISC-V) |
 | **USB** | USB 1.1 full-speed Device/Host |
 | **SPI** | 2× SPI controllers |
 | **I2C** | 2× I2C controllers |
@@ -116,174 +109,93 @@ The C5 is the on-chip CAN-FD option. It removes the MCP2518FD, not the transceiv
 | **Package** | QFN-60 (30 GPIO) or QFN-80 (48 GPIO) |
 | **Cost** | ~$3–4 per chip |
 
-#### Stepper Control via PIO
+#### Stepper Control via PIO (FastAccelStepper)
 
-- **One PIO state machine can produce the step stream for one motor.** DIR and ENABLE are ordinary GPIO.
-- With 12 state machines, 12 step streams fit directly; no three-machines-per-stepper scheme is needed.
-- Each PIO block shares 32 instructions across its four state machines, so plan the program footprint.
+- FastAccelStepper's Pico driver uses PIO: **one state machine per stepper**, up to **200 kHz per stepper**.
+- The RP2350 has 3 PIO blocks × 4 state machines = 12 in hardware. With the Arduino/ARM core, FastAccelStepper can allocate **8 steppers** (two PIOs); the RISC-V core can allocate all 12.
+- FastAccelStepper claims a whole PIO block and uses its full 32-instruction program space, so unused state machines in a claimed block are not available to the application.
+- DIR and ENABLE are ordinary GPIO; set a direction delay.
 
 ```
-  RP2350 PIO State Machines
+  RP2350 PIO (ARM: 8 steppers, RISC-V: 12)
     │
     ├─ SM0: Step stream ──► Stepper 1
     ├─ SM1: Step stream ──► Stepper 2
     ├─ ...
-    └─ SM11: Step stream ──► Stepper 12
-       (DIR / ENABLE on GPIO)
+    └─ SM7: Step stream ──► Stepper 8
+       (SM8–11 with RISC-V)
 ```
 
-#### CAN Bus — The Problem
+#### WiFi — The Problem
 
-The RP2350 has **no built-in CAN controller**. Options:
-
-| Option | Description | Cost/Complexity |
-|--------|-------------|-----------------|
-| **MCP2518FD** | SPI CAN-FD **controller** (currently preferred) | ~$2, plus SPI |
-| **MCP2517FD** | Older SPI CAN-FD controller | ~$2 |
-| **MCP2515** | SPI classic CAN 2.0B controller (no FD) | ~$1 |
-| **SJA1000** | Parallel-interface CAN **controller**, not a transceiver | ~$3, more pins |
-| **I2C ring bus** | Alternative to CAN entirely | Novel, unproven at scale |
-
-Each choice still needs an external CAN **transceiver**.
-
-#### I2C Ring Bus Alternative
-
-If CAN is unacceptable, an I2C ring bus could work:
-
-```
-  Master (Pico 2)
-      │
-      ├─ SDA/SCL ──► Controller 1
-      │                └─ SDA/SCL ──► Controller 2
-      │                                 └─ SDA/SCL ──► Controller 3
-      │                                          ...
-      └─ (daisy-chained I2C)
-```
-
-- Each controller has an I2C slave address
-- Master polls controllers for status
-- Controllers report motor positions/speeds
-- **Limitation:** I2C max 400 kHz (standard) or 3.4 MHz (fast-mode plus)
-- **Latency concern:** 120 motors on a slow I2C ring may be too slow for deterministic multi-axis control
+The RP2350 has **no WiFi**. Add an ESP32 (or ESP32-C3) as a bridge over UART/SPI, or use a Pico 2 W variant. The bridge also supplies the broadcast/FTM timebase; the PIO remains the step generator.
 
 #### Pros
 - ✅ PIO allows deterministic, hardware-level step pulse generation
 - ✅ Low power consumption (~50–100 mA active)
-- ✅ 12 state machines cover 12 motors directly
+- ✅ 8 steppers on ARM, 12 on RISC-V, at up to 200 kHz
 - ✅ Dual cores allow separation of communication and motion control
 
 #### Cons
-- ❌ **No native CAN controller** — needs a controller plus a transceiver
-- ❌ No CAN-FD without an external controller
 - ❌ Lower CPU (150 MHz vs 240 MHz)
-- ❌ No WiFi/Bluetooth
-- ❌ I2C ring bus alternative is unproven at 120-motor scale
+- ❌ No WiFi/Bluetooth; needs a bridge or a Pico 2 W variant
 
-#### Verdict: **Viable alternative** if an external CAN controller and transceiver are acceptable. PIO is the best step-pulse tool; the CAN gap is a controller plus a transceiver, not a missing crystal.
-
----
-
-### 2.3 ATmega328P + MCP2515 (Not Recommended)
-
-| Specification | Value |
-|--------------|-------|
-| **CPU** | 8-bit AVR, 20 MHz |
-| **Flash** | 32 KB |
-| **SRAM** | 2 KB |
-| **EEPROM** | 1 KB |
-| **CAN** | ❌ No native — external MCP2515 (SPI) |
-| **GPIO** | 23 usable pins |
-| **Timers** | 3 (8/16-bit) |
-| **ADC** | 6× 10-bit |
-| **UART** | 1 |
-| **SPI** | 1 |
-| **I2C (TWI)** | 1 |
-| **Cost** | ~$1 (chip) + ~$2 (MCP2515 module) |
-
-#### Stepper Control
-
-- Bit-banged step pulses via GPIO
-- Max practical stepper channels: 2–4 per chip
-- No hardware step pulse generation
-- Interrupt-driven control is slow at 20 MHz
-
-#### CAN Bus
-
-- MCP2515: SPI-connected, max 10 MHz SPI, CAN 2.0B only (no FD)
-- Software bit-timing, no hardware FIFO
-- Limited throughput for 12 motors
-
-#### Pros
-- ✅ Very cheap
-- ✅ Simple, well-understood
-- ✅ Good for single-ball proof-of-concept
-
-#### Cons
-- ❌ **Too slow** for deterministic motion (less critical at 0.3 m/s, but still not recommended)
-- ❌ No CAN-FD
-- ❌ Only 2 KB SRAM — insufficient for trajectory buffers
-- ❌ 8-bit CPU — poor floating-point performance
-- ❌ Limited I/O for 12 motors
-- ❌ No real-time guarantees for synchronized multi-ball moves
-
-#### Verdict: ❌ **Not recommended for production.** Acceptable for a single-ball proof-of-concept only.
+#### Verdict: **Viable alternative** if a WiFi bridge is added. PIO is the best step-pulse tool; the missing WiFi is the integration cost, not the PIO.
 
 ---
 
 ## 3. Comparative Summary
 
-| Feature | ESP32-S3 | ESP32-C5 | Pico 2 (RP2350) | ATmega328P + MCP2515 |
-|---------|----------|----------|-----------------|---------------------|
-| **CPU** | 240 MHz dual-core | 240 MHz single-core | 150 MHz dual-core | 20 MHz single-core |
-| **CAN** | Classic CAN 2.0B on-chip; FD only via MCP2518FD | ✅ **On-chip CAN-FD** | ❌ External controller + transceiver | ❌ External controller (no FD) |
-| **Stepper ch.** | 6–8 direct PWM; shift-register fan-out | GPIO/PWM | **12 PIO state machines** | 2–4 bit-banged |
-| **Step precision** | Good (PWM) | Good (PWM) | **Excellent (PIO)** | Poor (bit-bang) |
-| **SRAM** | 512 KB + PSRAM | 384 KB | **520 KB** | 2 KB |
-| **Real-time** | Good | Good | **Best (PIO)** | Poor |
-| **Power** | ~300 mA | ~200 mA | ~75 mA | ~30 mA |
-| **Connectivity** | WiFi + BT | WiFi 6 | USB only | None |
-| **Cost per controller** | ~$5–8 (+ FD controller if used) | ~$5–8 | ~$5–8 + controller + transceiver | ~$3–4 |
-| **Suitability for 12 balls** | ✅ Excellent | ✅ Excellent | ✅ Good | ❌ Poor |
-| **Suitability for 120 balls** | ✅ Excellent | ✅ Excellent | ✅ Good (w/ CAN) | ❌ Not viable |
+| Feature | ESP32-S3 | ESP32-C5 | Pico 2 (RP2350) |
+|---------|----------|----------|-----------------|
+| **CPU** | 240 MHz dual-core | 240 MHz single-core | 150 MHz dual-core |
+| **WiFi / FTM** | ✅ WiFi + FTM | ✅ WiFi 6 + FTM | ❌ Needs a bridge |
+| **Stepper ch.** | **16 I2S mux** (32 step-only) via FastAccelStepper; 8 RMT/MCPWM | GPIO/PWM | **8 PIO steppers (12 RISC-V)** |
+| **Step precision** | Good (PWM) | Good (PWM) | **Excellent (PIO)** |
+| **SRAM** | 512 KB + PSRAM | 384 KB | **520 KB** |
+| **Real-time** | Good | Good | **Best (PIO)** |
+| **Power** | ~300 mA | ~200 mA | ~75 mA |
+| **Connectivity** | WiFi + BT + FTM | WiFi 6 + FTM | USB only (needs a WiFi bridge) |
+| **Cost per controller** | ~$5–8 | ~$5–8 | ~$5–8 + WiFi bridge |
+| **Suitability for 12 balls** | ✅ Excellent | ✅ Excellent | ✅ Good |
+| **Suitability for 120 balls** | ✅ Excellent | ✅ Good (fewer GPIO) | ⚠️ Needs WiFi bridge |
 
 ---
 
 ## 4. Recommendation Matrix
 
-### If CAN-FD is required:
 | Priority | Choice |
 |----------|--------|
-| **On-chip CAN-FD** | **ESP32-C5** (still needs a transceiver) |
-| **S3 ecosystem with CAN-FD** | ESP32-S3 + **MCP2518FD** + transceiver |
-| Best step precision | Pico 2 + MCP2518FD + transceiver |
+| **Best overall (custom)** | **ESP32-S3** (WiFi + FTM, I2S mux, 16 steppers/board) |
+| **Production COTS** | Duet 3 Mini 5+ WiFi / Big Dipper, Octopus + WiFi, FYSETC E4 (§11.5) |
+| **Custom module carrier** | ESP32-S3 + 16 TMC2209 StepSticks, 8 nodes (§11.6) |
+| Cheapest PoC | FYSETC E4 or ESP32 + TMC2209 modules (§11) |
+| Best step precision | Pico 2 (needs a WiFi bridge; not the baseline) |
 
-### If classic CAN is sufficient:
-| Priority | Choice |
-|----------|--------|
-| **Best overall** | **ESP32-S3** (TWAI classic CAN, I2S/shift-register fan-out, WiFi) |
-| Lowest power | Pico 2 |
-| Cheapest PoC | ATmega328P + MCP2515 (single ball only) |
-
-### Final Recommendation: **ESP32-S3 for classic CAN; ESP32-C5 if CAN-FD must be on-chip**
+### Final Recommendation: **ESP32-S3, WiFi-only**
 
 **Rationale:**
-1. With local trajectories on the column controllers (§9.5.8), classic CAN at 1 Mbit/s is sufficient. CAN-FD is optional headroom.
-2. The ESP32-S3's TWAI is classic CAN only. Do not put an S3 TWAI node on a bus that carries FD frames.
-3. If CAN-FD is wanted, use the ESP32-C5 (on-chip FD) or an ESP32-S3 plus MCP2518FD. Either way, add a transceiver.
-4. WiFi/Bluetooth remains the operator path for configuration, monitoring, and pattern upload.
-5. PSRAM allows large trajectory buffers for complex patterns.
+1. Grouped controllers (8 nodes × 16 steppers custom, or 15–30 COTS boards), buffered commands (20–100 ms) and a broadcast/FTM timebase make WiFi sufficient (§9, §11).
+2. No data cabling; each board needs 24 V and its motor harness only.
+3. The ESP32-S3 supports 802.11mc FTM. Classic ESP32 does not; use S3, S2 or C6 if FTM sync is required.
+4. WiFi/Bluetooth remains the operator path for configuration, monitoring, pattern upload and OTA.
+5. PSRAM allows trajectory and pattern buffers.
+6. COTS boards are a valid production path with 15–30 nodes; see §11.3–§11.5 for the trade-offs.
 
-**Per-controller BOM (ESP32-S3, classic CAN):**
+**Per-controller BOM (ESP32-S3, WiFi-only):**
 
 | Item | Qty | Cost (est.) |
 |------|-----|-------------|
 | ESP32-S3 module | 1 | $4.00 |
-| CAN transceiver | 1 | $1.00 |
-| TMC5160 driver | 12 | $60.00 |
+| TMC5160 driver | 16 | $80.00 |
+| 74HC595 demux chain | 4 | $1.00 |
 | Decoupling caps, resistors | 1 set | $2.00 |
-| Connector board | 1 | $3.00 |
-| **Total per controller** | | **~$70** |
-| **Total for 10 controllers** | | **~$700** |
+| Connector board / terminals | 1 | $4.00 |
+| Antenna / connector | 1 | $0.50 |
+| **Total per controller** | | **~$92** |
+| **Total for 8 controllers (120 axes)** | | **~$735** |
+
+> With TMC2209 instead of TMC5160 the driver cost drops to ~$25–35 per board; see §12.5. Torque at 50 g does not require TMC5160.
 
 ---
 
@@ -299,71 +211,69 @@ For completeness, brushless DC motors with Field-Oriented Control (FOC) were con
 | Noise | StealthChop (quiet) | Quiet |
 | Complexity | Simpler | Encoder + FOC algorithm |
 | Cost | Lower | Higher (encoder + driver) |
-| Max speed 0.3 m/s | Easy | Easy |
+| Max speed 1.2 m/s (optional) | Easy | Easy |
 
-**Verdict:** At 0.3 m/s both are easily sufficient. Steppers are simpler and cheaper; BLDC + FOC remains an option for lower noise or if the speed target rises substantially.
+**Verdict:** At the 0.6–1.2 m/s envelope both are easily sufficient. Steppers are simpler and cheaper; BLDC + FOC remains an option for lower noise or if the speed target rises substantially.
 
 ---
 
 ## 6. Driver IC Comparison
 
-The drivers sit on the column board and are not CAN bus nodes. Only the ESP32 (or an external controller such as the MCP2518FD) is a bus node.
+The drivers sit on the column board and are not network nodes. Only the ESP32 is a WiFi node.
 
-| Driver | Interface | CAN | StallGuard2 | Ramp generator | Notes |
-|--------|-----------|-----|-------------|----------------|-------|
-| **TMC5160** | SPI + step/dir | ❌ | ✅ | ✅ | **Recommended** — mature, on-driver ramp, high current |
-| **TMC2209** | UART or step/dir | ❌ | ✅ | Basic | Cheap, quiet (StealthChop); step/dir path must be verified at the catch step rate |
-| **TMC5130** | SPI + step/dir | ❌ | ✅ | ✅ | Lower current; **has a ramp generator** |
-| **TMC6200** | SPI | ❌ | ❌ | — | Gate driver, no StallGuard |
-| **TMC6300** | 6× PWM | ❌ | ❌ | — | **3-phase BLDC gate driver**, 2–11 V, ~2 A peak. Not a stepper driver and not a bus node |
-| **BTS7971B** | — | ❌ | ❌ | — | BLDC, not a stepper |
+| Driver | Interface | StallGuard2 | Ramp generator | Notes |
+|--------|-----------|-------------|----------------|-------|
+| **TMC5160** | SPI + step/dir | ✅ | ✅ | **Recommended** — mature, on-driver ramp, high current |
+| **TMC2209** | UART or step/dir | ✅ | Basic | Cheap, quiet (StealthChop); step/dir path must be verified at the faster tier |
+| **TMC5130** | SPI + step/dir | ✅ | ✅ | Lower current; **has a ramp generator** |
+| **TMC6200** | SPI | ❌ | — | Gate driver, no StallGuard |
+| **TMC6300** | 6× PWM | ❌ | — | **3-phase BLDC gate driver**, 2–11 V, ~2 A peak. Not a stepper driver |
+| **BTS7971B** | — | ❌ | — | BLDC, not a stepper |
 
-**Recommendation:** **TMC5160** for production. It provides StallGuard2, an on-driver ramp, and generates the step edges locally. TMC2209 is the cheaper quiet alternative where its step/dir rate is adequate. No driver in this table provides CAN or eliminates the CAN transceiver.
-
-> The earlier recommendation of a "TMC6300 with native CAN-FD" was wrong: the TMC6300 is a low-voltage 3-phase BLDC gate driver with no CAN, no StallGuard2, and no NEMA-17 capability.
+**Recommendation:** **TMC5160** for production. It provides StallGuard2, an on-driver ramp, and generates the step edges locally. TMC2209 is the cheaper quiet alternative where its step/dir rate is adequate.
 
 ---
 
-## 7. Per-Controller Block Diagram (ESP32-S3, classic CAN)
+## 7. Per-Controller Block Diagram (ESP32-S3, WiFi)
 
 ```
-  ┌─────────────────────────────────────────────────────┐
-  │                  ESP32-S3 Controller                 │
-  │                                                     │
-  │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐  │
-  │  │  TWAI    │  │  I2S     │  │  SPI + GPIO      │  │
-  │  │ (classic │  │ (step/   │  │  (TMC5160 config │  │
-  │  │  CAN)    │  │  dir mux)│  │   DIR/ENABLE)    │  │
-  │  └────┬─────┘  └────┬─────┘  └────────┬─────────┘  │
-  │       │             │                  │            │
-  │       ▼             ▼                  ▼            │
-  │  ┌──────────┐  ┌────────────────────────────────┐  │
-  │  │ CAN      │  │  12 × TMC5160                  │  │
-  │  │transceiver│ │  (SPI daisy chain + step/dir)  │  │
-  │  └────┬─────┘  └───────────────┬────────────────┘  │
-  │       │                        │                    │
-  │       ▼                        ▼                    │
-  │   CAN bus                12 × NEMA-17               │
-  │                                                     │
-  │  24 V Power ──► DC-DC ──► Motor + Logic Supplies    │
-  └─────────────────────────────────────────────────────┘
+  ┌──────────────────────────────────────────────────────┐
+  │                 ESP32-S3 Controller                  │
+  │                                                      │
+  │  ┌──────────┐  ┌──────────┐  ┌───────────────────┐  │
+  │  │ WiFi STA │  │ I2S mux  │  │ UART / SPI        │  │
+  │  │ + FTM    │  │ step/dir │  │ driver config     │  │
+  │  └────┬─────┘  └────┬─────┘  └────────┬──────────┘  │
+  │       │             │                  │             │
+  │       ▼             ▼                  ▼             │
+  │   AP / master   74HC595 chain     16 × TMC2209/5160  │
+  │  (UDP/ESP-NOW)  (32 outputs)      step/dir + config  │
+  │       │             │                  │             │
+  │       │             └────────┬─────────┘             │
+  │       │                      ▼                       │
+  │       │               16 × motors                    │
+  │       │                                              │
+  │  24 V ──► DC-DC ──► logic                            │
+  └──────────────────────────────────────────────────────┘
 ```
 
-For CAN-FD, replace the transceiver/ESP32-S3 pair with an ESP32-C5 + transceiver, or add an MCP2518FD between the S3 and a CAN-FD transceiver.
+Only 24 V and the motor harness connect to the board. WiFi carries commands, timebase and telemetry; the I2S mux plus a 74HC595 chain fans out 16 step/dir pairs.
 
 ---
 
-## 8. Stepping Resolution Analysis: 1/16 µ-Step vs. I2S Mux (~4 µs Resolution)
+## 8. Stepping Resolution Analysis: 1/16 µ-Step vs. I2S Mux (4 µs Frame, 40 kHz Ceiling)
 
-This section answers a critical design question: **is 1/16 microstepping sufficient**, or do we need finer resolution, given that the I2S multiplexing approach has ~4 µs timing granularity?
+This section answers a critical design question: **is 1/16 microstepping sufficient**, or do we need finer resolution, given that the I2S multiplexing approach has 4 µs frame granularity?
+
+> The I2S mux ceiling is **40 kHz per stepper**, not the ~416 kHz implied by an 80 MHz shift-register calculation. The figures below use the FastAccelStepper implementation (ESP-IDF ≥ 5.3): 250 kHz sample rate, 32-bit frame = 4 µs, 25 µs minimum step period. The 40 mm drum at 1/16 is the baseline: 15.3 kHz at the 0.6 m/s nominal tier and 30.6 kHz at the 1.2 m/s optional tier.
 
 ### 8.1 The Core Trade-off
 
-| Approach | Timing Resolution | Max µ-Stepping | Linear Resolution (20 mm drum) | Max Step Rate @ 0.3 m/s |
-|----------|------------------|----------------|-------------------------------|------------------------|
-| **I2S mux** | ~4 µs | 1/16 (practical) | 19.6 µm | 15.3 kHz |
-| **PIO (Pico 2)** | ~6.7 ns | 1/32+ | 9.8 µm | 30.6 kHz |
-| **Direct GPIO (ESP32)** | ~50–100 ns | 1/32+ | 9.8 µm | 30.6 kHz |
+| Approach | Timing Resolution | Chosen µ-Stepping | Linear Resolution (40 mm drum) | Required Step Rate @ 1.2 m/s |
+|----------|------------------|-------------------|-------------------------------|-----------------------------|
+| **I2S mux** | 4 µs frame (25 µs min) | 1/16 | 39.3 µm | 30.6 kHz |
+| **PIO (Pico 2)** | 62.5 ns tick; 200 kHz max | 1/32 | 19.6 µm | 61.1 kHz |
+| **RMT/MCPWM (ESP32, ≤8)** | 16 MHz tick; 200 kHz max | 1/32 | 19.6 µm | 61.1 kHz |
 
 ### 8.2 Linear Resolution by Drum Diameter and Microstepping
 
@@ -379,108 +289,143 @@ Linear resolution = (π × drum_Ø) / steps_per_rev
 | 15 mm | 0.236 mm | 58.9 µm | 29.5 µm | **14.7 µm** | 7.4 µm |
 | 20 mm | 0.314 mm | 78.5 µm | 39.3 µm | **19.6 µm** | 9.8 µm |
 | 30 mm | 0.471 mm | 117.8 µm | 58.9 µm | **29.5 µm** | 14.7 µm |
+| 40 mm | 0.628 mm | 157.1 µm | 78.5 µm | **39.3 µm** | 19.6 µm |
 
-**Key finding:** At 1/16 microstepping with a 20 mm drum, linear resolution is **19.6 µm** — well within the 50 µm limit of `ASM-014`. At 1/8 microstepping the same drum gives 39.3 µm, which still meets the requirement; 1/16 is chosen for margin.
+**Key finding:** At the 40 mm baseline, 1/16 microstepping gives **39.3 µm** — within the 50 µm limit of `ASM-014` with 10.7 µm to spare. At 20 mm, 1/16 gives 19.6 µm and 1/8 gives 39.3 µm; both meet the limit. At 30 mm, 1/8 (58.9 µm) fails, and at 40 mm, 1/8 (78.5 µm) fails clearly.
 
-### 8.3 Is 19.6 µm Good Enough? (Visual Perception Analysis)
+### 8.3 Is 39.3 µm Good Enough? (Visual Perception Analysis)
 
-The ball is ~23 mm in diameter. A 19.6 µm step displacement is:
+The ball is ~23 mm in diameter. A 39.3 µm step displacement (40 mm drum, 1/16) is:
 
 ```
-19.6 µm / 23,000 µm = 0.085% of ball diameter
+39.3 µm / 23,000 µm = 0.17% of ball diameter
 ```
 
 `ASM-014` sets the perceptual limit at 50 µm (below the ~85 µm acuity limit at 0.5 m).
 
 ```
-19.6 µm < 50 µm
+39.3 µm < 50 µm
 ```
 
-**Conclusion:** 1/16 microstepping resolution is **visually imperceptible** — the step transitions appear perfectly smooth. 1/8 (39.3 µm) also meets `ASM-014`; finer microstepping (1/32, 1/256) provides no visual benefit at this scale.
+**Conclusion:** 1/16 microstepping is **visually imperceptible** — the step transitions appear perfectly smooth. At the 40 mm baseline, 1/16 gives 39.3 µm, still under the 50 µm limit; 1/8 at 40 mm gives 78.5 µm and fails. At 20 mm, 1/8 gives 39.3 µm and remains acceptable. Finer microstepping (1/32, 1/256) provides no visual benefit at this scale.
 
-### 8.4 Timing Analysis at Maximum Speed (0.3 m/s)
-
-**Step rate required at max speed:**
-```
-Steps/sec = velocity / linear_resolution_per_step
-```
-
-| Microstepping | 10 mm Drum | 20 mm Drum | 30 mm Drum |
-|--------------|-----------|-----------|-----------|
-| Full Step | 1,910 Hz | 955 Hz | 637 Hz |
-| 1/4 µ-Step | 7,639 Hz | 3,820 Hz | 2,546 Hz |
-| 1/8 µ-Step | 15,279 Hz | 7,639 Hz | 5,093 Hz |
-| **1/16 µ-Step** | **30,558 Hz** | **15,279 Hz** | **10,186 Hz** |
-| 1/32 µ-Step | 61,115 Hz | 30,558 Hz | 20,372 Hz |
-
-**At 1/16 µ-Step with 20 mm drum @ 0.3 m/s:**
-- Step frequency: **15,279 steps/sec**
-- Time per step: **65.4 µs**
-
-### 8.5 I2S Mux Timing Budget
-
-The I2S peripheral on ESP32-S3 runs at up to **80 MHz**.
+### 8.4 Timing Analysis at the Speed Envelope
 
 ```
-I2S clock = 80 MHz
-Bit time = 12.5 ns
+Steps/sec = velocity × steps_per_rev / (π × drum Ø)
 ```
 
-For stepper step pulses sent via I2S multiplexing:
+| Drum / µ-step | @ 0.6 m/s (nominal) | @ 0.8 m/s (3 s) | @ 1.2 m/s (2 s) |
+|---------------|---------------------|-----------------|-----------------|
+| **40 mm / 1/16** | **15,279** | **20,372** | **30,558** |
+| 40 mm / 1/8 | 7,639 | 10,186 | 15,279 |
+| 30 mm / 1/16 | 20,372 | 27,163 | 40,743 |
+| 30 mm / 1/8 | 10,186 | 13,581 | 20,372 |
+| 20 mm / 1/16 | 30,558 | 40,744 | 61,115 |
+| 20 mm / 1/8 | 15,279 | 20,372 | 30,558 |
 
-```
-I2S mux frame structure (per stepper channel):
-  ┌────────────────────────────────────────┐
-  │ 1 bit: step pulse high  │ 1 bit: low    │
-  │ 1 bit: dir bit          │ 1 bit: enable │
-  │ padding / guard bits    │              │
-  └────────────────────────────────────────┘
-  ~8–16 bits per stepper per frame
-  12 steppers → ~96–192 bits per frame
-```
+At the baseline **40 mm drum, 1/16, 1.2 m/s**:
+- Step frequency: **30,558 steps/sec**
+- Time per step: **32.7 µs**
+- 0.6 m/s: 15,279 steps/s (65.4 µs); 0.8 m/s: 20,372 steps/s (49.1 µs)
 
-**Time per I2S frame (12 steppers, 16 bits each = 192 bits):**
-```
-Frame time = 192 bits / 80 MHz = 2.4 µs
-```
+The 1/8 rows halve the rate and double the linear step (39.3 µm at 40 mm,
+58.9 µm at 30 mm). At 30 mm, 1/8 fails the 50 µm limit; at 20 mm, 1/8 is the
+only way to reach 1.2 m/s inside 40 kHz.
 
-This means the I2S mux can update all 12 steppers every **~2.4 µs**, which translates to a **maximum step pulse frequency of ~416 kHz per motor** (if every frame contains a step pulse).
+### 8.5 I2S Mux Timing Budget (FastAccelStepper implementation)
 
-**At 1/16 µ-Step, 20 mm drum, 0.3 m/s:**
-- Required: 15,279 Hz (65.4 µs per step)
-- I2S mux capability: ~416,000 Hz (2.4 µs per frame)
-- **Margin: 27×** — ✅ very comfortable
+The ESP32 I2S peripheral is an audio transmitter clocked at 250 kHz in 16-bit stereo, i.e. one 32-bit frame every 4 µs. Each bit of the frame is one demultiplexed output (step or direction). It is not an 80 MHz raw shift register.
+
+| Parameter | Value |
+|-----------|-------|
+| Sample rate | 250 kHz |
+| Frame | 32 bits = 16-bit L + 16-bit R = **4 µs** |
+| Bit clock | 8 MHz BCLK |
+| Step pulse width | 4 µs (one frame) |
+| Minimum step period | 25 µs (6 frames) → **40 kHz per stepper** |
+| Steppers per mux | **32** step-only; **16** step + dir; **10** step + dir + enable |
+| Demux | 74HC595 chain, or 74HC154 / 74HC138 cascade |
+| Synchronism | All mux steppers share one DMA buffer → inherently synchronized |
+| Direction latency | 500 µs when DIR is a mux slot; ~1 ms when DIR is a GPIO |
+
+**At 1/16 µ-Step with the 40 mm drum:**
+- 0.6 m/s: 15,279 Hz (65.4 µs) → **2.6× margin**
+- 0.8 m/s: 20,372 Hz (49.1 µs) → **2.0× margin**
+- 1.2 m/s: 30,558 Hz (32.7 µs) → **1.31× margin**
+
+Because step periods are quantized to 4 µs frames, the driver cannot place an
+edge at exactly 65.4 µs; it emits 64/68 µs alternating. The mux fill carries the
+sub-frame remainder into the next step, so there is **no cumulative timing
+error**: the average period is the requested one, and the instantaneous jitter
+is bounded.
+
+#### 8.5.1 Speed resolution and jitter — deeper analysis
+
+The queue period is expressed in 16 MHz ticks (62.5 ns). The mux fill converts
+the low phase to whole 4 µs frames and carries the remainder (`off_ticks`) into
+the next step. All 16 step bits latch in the same frame; there is no per-stepper
+serialization penalty. That gives two different quantities:
+
+- **Average speed resolution:** one tick, i.e. `62.5 ns / period`. At 30.6 kHz this is 0.19 % of the period; at 15.3 kHz it is 0.10 %. This is the common 16 MHz timer limit, shared with RMT/MCPWM — not an I2S mux penalty.
+- **Instantaneous jitter:** one frame at most. The step intervals alternate rather than drift.
+
+| Speed (40 mm, 1/16) | Requested period | Emitted periods | Peak deviation | Position deviation (`v × Δt`) |
+|---------------------|------------------|-----------------|----------------|-------------------------------|
+| 0.3 m/s | 130.9 µs | 128 / 132 µs | ≈ 2 µs | ≈ 0.6 µm |
+| 0.6 m/s | 65.4 µs | 64 / 68 µs | ≈ 2.6 µs | ≈ 1.6 µm |
+| 1.2 m/s | 32.7 µs | 32 / 36 µs | ≈ 3.3 µs | ≈ 4.0 µm |
+| Worst case | — | one frame | 4 µs | 4.8 µm at 1.2 m/s |
+
+Interpretation:
+
+- The jitter does **not accumulate**. The sub-frame remainder is carried forward, so position error oscillates within the bound and returns; there is no slow drift or lost step.
+- The worst-case displacement error, 4.8 µm, is about **12 % of a 39.3 µm microstep** and **under 10 % of the 50 µm perceptual limit**. At 0.6 m/s it is 2.4 µm.
+- The events are at 15–30 kHz, far above the mechanical bandwidth of the ball/rotor; inertia filters the 4 µs modulation. This is a timing ripple, not a visible position step.
+- At low speed the same 4 µs bound is a smaller fraction of a long period (0.4 % at 1 kHz, 0.04 % at 100 Hz) **and** a smaller displacement (`v × 4 µs`), so slow choreography is the easiest case, not the hardest.
+- The real I2S mux limits are the **40 kHz ceiling** (1.31× at 1.2 m/s) and the **500 µs / 1 ms direction-reversal pause**, not speed resolution.
+
+Putting it together: the I2S mux does **not** quantize the average speed to 4 µs; it quantizes the placement of an edge. The average is tick-exact, the instantaneous error is bounded by one frame, and the mechanics filter it. Speed resolution as such is set by the 16 MHz tick and the microstep size, not by the mux frame.
+
+If a future pattern needs more than 40 kHz per stepper, the answer is not a finer frame: split the group to ≤ 8 axes and use RMT/MCPWM (200 kHz), or use Pico 2 (200 kHz). Sixteen axes cannot exceed 40 kHz on one I2S mux.
+
+Two implementation costs must be budgeted:
+
+- **Direction reversal** inserts a driver-level pause: 500 µs with DIR on an I2S mux slot, ~1 ms with DIR on a GPIO. At 1.2 m/s that is 0.6–1.2 mm of delayed motion per reversal (0.3–0.6 mm at 0.6 m/s) unless the trajectory accounts for it.
+- **Hardware validation**: the mux code is implemented, but the end-to-end 74HC595 validation is still listed as open in the FastAccelStepper driver document. Budget a bring-up.
 
 ### 8.6 What About 1/32 Microstepping via I2S Mux?
 
-```
-Required step rate (1/32, 20 mm drum, 0.3 m/s): 30,558 Hz
-Time per step: 32.7 µs
-I2S mux frame time: 2.4 µs
-```
+At 40 mm, 1/32 halves the linear step to 19.6 µm and doubles the step rate:
 
-**Margin: 13.6×** — ✅ **I2S mux can sustain 1/32 µ-Step at 0.3 m/s**.
+| Speed | Step rate | Margin vs 40 kHz |
+|-------|-----------|------------------|
+| 0.6 m/s | 30,558 Hz | 1.31× |
+| 0.8 m/s | 40,744 Hz | 0.98× — just over |
+| 1.2 m/s | 61,115 Hz | 0.65× — not feasible |
 
-The I2S mux would need to run faster or use a wider frame, but this would consume more CPU bandwidth and introduce jitter.
+So 1/32 at 40 mm is usable only for the slow and nominal tiers, not for the
+1.2 m/s optional effects. The 2 s tier requires 1/16 at 40 mm (or 1/8 at
+20–25 mm). For margin, **1/16 with a 40 mm drum is the safe default**; 1/32 is
+a slow-tier refinement after the 74HC595 bring-up shows no additional losses.
 
 ### 8.7 PIO (Pico 2) Comparison
 
-The Pico 2's PIO runs at the CPU clock (150 MHz):
-```
-PIO instruction cycle = 1 / 150 MHz = 6.67 ns
-```
+Use FastAccelStepper's Pico driver, not a hand-counted PIO instruction budget. Its published limits are:
 
-A single step pulse can be generated in **2–3 PIO instructions**:
-```
-Minimum step pulse width = 2 × 6.67 ns = 13.3 ns
-Maximum step frequency = 1 / 13.3 ns = 75 MHz (theoretical)
-Practical max (with overhead): ~5–10 MHz
-```
+| Parameter | Value |
+|-----------|-------|
+| Max step rate | **200 kHz per stepper** |
+| Timing tick | 16 MHz (62.5 ns) |
+| Steppers | **8** on Arduino/ARM; **12** on RISC-V |
+| PIO usage | One state machine per stepper; FastAccelStepper claims the whole PIO block |
 
-**At 1/32 µ-Step, 20 mm drum, 0.3 m/s:**
+**At 1/16 µ-Step, 40 mm drum, 1.2 m/s:**
 - Required: 30,558 Hz (32.7 µs per step)
-- PIO capability: ~5,000,000 Hz (conservative)
-- **Margin: ~164×** — ✅ far more than sufficient
+- FastAccelStepper Pico 2 capability: 200,000 Hz
+- **Margin: ~6.5×** — ample, but not the ~164× a theoretical 5 MHz PIO calculation suggested
+
+At 1/32 the margin is ~3.3×. The Pico 2 still has no WiFi; a bridge is required, which is the real reason it is not the baseline.
 
 ### 8.8 Summary: Resolution Recommendation
 
@@ -489,434 +434,111 @@ Practical max (with overhead): ~5–10 MHz
 | **Visual smoothness** | ✅ Imperceptible steps | ✅ (no visible improvement) |
 | **Holding torque** | Good | ~2× better (lower ripple) |
 | **Resonance damping** | Acceptable | Better (finer control) |
-| **I2S mux @ 0.3 m/s** | ✅ 27× margin | ✅ 13.6× margin |
-| **PIO @ 0.3 m/s** | ✅ 327× margin | ✅ 164× margin |
+| **I2S mux @ 1.2 m/s, 40 mm** | ✅ 1.31× margin | ❌ 0.65× — not feasible |
+| **I2S mux @ 0.6 m/s, 40 mm** | ✅ 2.6× margin | ✅ 1.31× margin |
+| **I2S mux direction reversal** | ⚠️ 0.6–1.2 mm at 1.2 m/s | same |
+| **PIO @ 1.2 m/s, 40 mm** | ✅ 6.5× margin | ✅ 3.3× margin |
+| **ESP32 RMT/MCPWM @ 1.2 m/s, ≤8** | ✅ 6.5× margin | ✅ 3.3× margin |
 | **CPU load** | Lower | ~2× higher |
-| **Bus load** | No difference | No difference (steps are local, not on CAN) |
+| **Network load** | No difference | No difference (steps are local, not on the network) |
 
 ### 8.9 Final Recommendation
 
 **1/16 microstepping is the optimal choice for the I2S multiplexing approach:**
 
 1. **Visually indistinguishable** from finer stepping — ball motion appears perfectly smooth
-2. **Fits within I2S mux timing** with 27× margin at max speed (0.3 m/s)
+2. **Fits within I2S mux timing** with **2.6× margin at 0.6 m/s** and **1.31× at 1.2 m/s** using the 40 mm drum
 3. **Sufficient holding torque** for 50 g ball + acceleration forces
-4. **No CAN-bus penalty** — step generation is local; microstepping does not change CAN traffic
+4. **No network penalty** — step generation is local; microstepping does not change network traffic
 5. **Acceptable resonance** — stepper motors at 1/16 have manageable resonance peaks
 
-At the slow operating speed, 1/32 is also feasible on the I2S mux. It remains optional; 1/16 already meets the 50 µm limit with margin.
+1/32 at 40 mm is feasible for the slow and nominal tiers (1.31× at 0.6 m/s) but not for the 1.2 m/s optional effects; 1/16 at 40 mm is the baseline that covers the full envelope and already meets the 50 µm limit with margin. Smaller drums do not help: 1/32 at 20 mm exceeds 40 kHz even at 0.6 m/s.
 
-For the **Pico 2 with PIO**, 1/32 microstepping is feasible and provides slightly smoother low-speed motion, but the visual benefit is marginal. **1/16 remains the recommended default** for both platforms; once the ramp is local, microstepping does not load the CAN bus.
+For the **Pico 2 with FastAccelStepper**, 1/32 is feasible with ~3.3× step-rate margin and provides slightly smoother low-speed motion, but the visual benefit is marginal and WiFi still needs a bridge. **1/16 remains the recommended default** for both platforms; once the ramp is local, microstepping does not load the network.
 
 ---
 
-## 9. CAN vs WiFi — Is CAN Needed When Using ESP32 with WiFi?
-
-This is a critical architectural question. The ESP32-S3 has WiFi and classic CAN (CAN-FD needs an external controller). Since WiFi is available, **can we skip CAN entirely** and use WiFi (or Ethernet) for controller-to-master communication?
-
-### 9.1 The Short Answer
-
-**Yes, CAN is still strongly recommended** — even (and especially) when the ESP32 has WiFi. Here's why:
-
-| Requirement | CAN | WiFi | Ethernet |
-|-------------|-----|------|----------|
-| **Deterministic latency** | ✅ < 1 ms (bus arbitration) | ❌ 10–100+ ms (CSMA/CA, retries) | ⚠️ ~1–5 ms (switched) |
-| **Real-time priority** | ✅ Hardware arbitration | ❌ No priority queuing | ⚠️ Limited (QoS) |
-| **Collision handling** | ✅ Bitwise arbitration (deterministic) | ❌ Exponential backoff (non-deterministic) | ⚠️ Store-and-forward |
-| **Message loss tolerance** | ✅ Retransmission in < 1 ms | ❌ TCP retransmission: 10–500 ms | ⚠️ Variable |
-| **Broadcast efficiency** | ✅ 120 messages, ~1 ms total | ❌ 120 messages, seconds of airtime | ⚠️ Switch flooding |
-| **Power consumption** | ✅ ~5 mA (idle), ~30 mA (active) | ❌ ~80–200 mA (WiFi active) | ⚠️ ~100 mA (Ethernet PHY) |
-| **EMI / RF interference** | ✅ Shielded twisted pair | ❌ 2.4 GHz crowded spectrum | ✅ Shielded cable |
-| **Single point of failure** | ✅ Bus survives partial failure | ❌ AP failure = total loss | ⚠️ Switch failure = total loss |
-| **Installation complexity** | ✅ Simple twisted pair | ❌ WiFi coverage, channels, interference | ❌ Switch + Cat5 cabling |
-| **Cost** | ✅ ~$0.50 (transceiver) | ✅ Built-in (free) | ⚠️ Switch + cables |
-
-### 9.2 Detailed Analysis: Why CAN Wins for This Application
-
-#### 9.2.1 Real-Time Determinism
-
-**CAN bus (1 Mbit/s):**
-```
-Worst-case message delivery:
-  - Arbitration: < 1 ms (bitwise, hardware)
-  - Propagation: < 10 µs (twisted pair, ~200 ns/m)
-  - Total worst-case: < 1.1 ms
-  - 120 messages on bus: ~120 ms total (sequential)
-  - With CAN-FD (8 Mbit/s data phase): ~15 ms total
-```
-
-**WiFi (802.11n/g, 2.4 GHz):**
-```
-Worst-case message delivery:
-  - CSMA/CA contention: 0–100+ ms (random backoff)
-  - Retransmission (packet loss): 10–500 ms
-  - Interference (microwave, Bluetooth, neighbors): variable
-  - Total worst-case: 50–500+ ms (highly variable)
-  - 120 messages: seconds of airtime (shared medium)
-  - Channel congestion in urban environments: severe
-```
-
-> **Key point:** CAN provides **deterministic** latency (< 1.1 ms worst case). WiFi provides **stochastic** latency (10–500+ ms, highly variable). For synchronized motion control of 120 balls, deterministic timing is **essential**.
-
-#### 9.2.2 Synchronization Precision
-
-The system requires < 1 ms synchronization across all 120 balls.
-
-| Metric | CAN (1 Mbit/s) | CAN-FD (1 M/8 Mbit/s) | WiFi 802.11n | Ethernet (100 Mbps) |
-|--------|---------------|----------------------|---------------|-------------------|
-| Worst-case latency | < 1.1 ms | < 0.5 ms | 10–500+ ms | 1–5 ms |
-| Jitter | < 100 µs | < 50 µs | 5–100 ms | 0.5–2 ms |
-| Sync accuracy | < 50 µs | < 20 µs | 1–10 ms | 0.1–1 ms |
-| Deterministic? | ✅ Yes | ✅ Yes | ❌ No | ⚠️ Mostly |
-
-> **WiFi cannot achieve < 1 ms synchronization reliably.** The CSMA/CA protocol, channel contention, and retransmission make WiFi fundamentally non-deterministic.
-
-#### 9.2.3 Reliability in Real-World Conditions
-
-**CAN bus advantages:**
-- Shielded twisted pair — immune to RF interference
-- No channel congestion (unlike 2.4 GHz WiFi)
-- Built-in error detection and retransmission
-- Works in electrically noisy environments (motors, power supplies)
-- Point-to-point wiring — no infrastructure (AP, switch) required
-
-**WiFi disadvantages in this application:**
-- 2.4 GHz is **crowded** (WiFi, Bluetooth, microwaves, Zigbee)
-- Line-of-sight not required but **multipath fading** causes signal drops
-- **Interference from motors** (EMI) can disrupt WiFi packets
-- **Density problem:** 10 controllers plus 10 operator devices on one 2.4 GHz channel; if every ball carried WiFi it would be 120 nodes and severe congestion
-- **AP/single-point failure:** If the access point fails, the entire system is dead
-- **Range limitations:** 1200–1800 mm tall sculpture may have dead zones
-- **Regulatory:** 2.4 GHz power limits vary by region
-
-#### 9.2.4 Power Consumption
-
-| Mode | CAN (transceiver) | WiFi (ESP32-S3) | Ethernet (LAN8720) |
-|------|----------------------|-----------------|-------------------|
-| Idle | ~5 mA | ~80 mA (beaconing) | ~15 mA |
-| Active tx/rx | ~30 mA | ~200 mA (tx burst) | ~30 mA |
-| Per 10 controllers | **0.3 W** | **2 W** | **0.3 W** |
-
-> WiFi consumes **6–8× more power** than CAN for the same communication load. The machine has **10 controllers**, not 120; the power figures here are per 10 controllers.
-
-#### 9.2.5 System Architecture Comparison
-
-**With CAN (recommended):**
-```
-  Master (PC/ESP32)
-      │
-      └─ CAN bus (twisted pair, 120 Ω termination)
-          │
-          ├─ Controller 1 (ESP32-S3 + transceiver)
-          ├─ Controller 2 (ESP32-S3 + transceiver)
-          └─ ... Controller 10
-```
-- Simple twisted pair wiring
-- No infrastructure required
-- Deterministic, real-time
-- Low power
-- Robust in noisy environments
-
-**Without CAN, WiFi only:**
-```
-  WiFi Access Point (or Master with WiFi)
-      │
-      └─ 2.4 GHz wireless (shared medium)
-          │
-          ├─ Controller 1 (ESP32-S3, WiFi)
-          ├─ Controller 2 (ESP32-S3, WiFi)
-          └─ ... Controller 10
-```
-- Requires AP or master with WiFi
-- Channel congestion at 120 devices
-- Non-deterministic latency
-- High power consumption
-- EMI from motors degrades signal
-- Single point of failure (AP)
-
-### 9.3 When WiFi CAN Be Used (Limited Cases)
-
-WiFi is **acceptable** for:
-- **Configuration/monitoring** (non-real-time): uploading patterns, reading status
-- **Infrequent commands** (pattern changes, parameter adjustments)
-- **Diagnosis and logging** (error reports, health checks)
-
-WiFi is **NOT acceptable** for:
-- **Real-time motion commands** (position updates at 100+ Hz)
-- **Global synchronization** (< 1 ms precision)
-- **Emergency stop** (must be deterministic, < 10 ms)
-- **Per-ball position feedback** (120 balls × 100 Hz = 12 kHz real-time)
-
-### 9.4 Recommended Hybrid Architecture
-
-**Use CAN for real-time control, WiFi for configuration/monitoring:**
-
-```
-  ┌─────────────────────────────────────────────────┐
-  │                    Master                        │
-  │  ┌─────────────┐  ┌──────────────────────────┐  │
-  │  │  CAN-FD     │  │  WiFi (AP / Station)     │  │
-  │  │  (real-time)│  │  (config / monitoring)   │  │
-  │  └──────┬──────┘  └──────────────────────────┘  │
-  └─────────┼───────────────────────────────────────┐
-            │ CAN bus (1 Mbit/s)                    │
-            │                                       │
-  ┌─────────┼───────────────────────────────────────┐
-  │         ▼                                       │
-  │  ┌───────────────────────────────────────────┐  │
-  │  │  Controller (ESP32-S3)                    │  │
-  │  │  ┌───────────┐  ┌───────────────────────┐ │  │
-  │  │  │ CAN       │  │  WiFi (AP/Station)    │ │  │
-  │  │  │ (real-    │  │  (config / monitoring)│ │  │
-  │  │  │  time)    │  │                       │ │  │
-  │  │  └────┬──────┘  └───────────────────────┘ │  │
-  │  │       ▼                                   │  │
-  │  │  12 × TMC5160 → 12 × NEMA-17 motors       │  │
-  │  └───────────────────────────────────────────┘  │
-  └─────────────────────────────────────────────────┘
-```
-
-| Channel | Purpose | Protocol | Latency Requirement |
-|---------|---------|----------|-------------------|
-| **CAN bus** | Real-time motion commands, status, sync, E-stop | CAN 2.0B @ 1 Mbit/s (FD optional) | < 1 ms |
-| **WiFi** | Pattern upload, parameter adjustment, diagnostics, logging | TCP/UDP | < 100 ms |
-
-### 9.5 CAN Bus Traffic Analysis — Corrected
-
-This section was previously wrong. Here is the **corrected analysis**.
-
-#### 9.5.1 The Real Numbers
-
-**System:** 120 motors, 1 kHz control rate (kinematic position updates)
-
-**Two architectures:**
-
-| Architecture | Messages/Cycle | Bytes/Cycle | Messages/Sec (1 kHz) |
-|-------------|---------------|-------------|---------------------|
-| **Per-motor** (120 messages) | 120 | 120 × 8 = 960 B | 120,000 msg/s |
-| **Per-controller batch** (10 messages) | 10 | 10 × 96 = 960 B | 10,000 msg/s |
-
-Total data payload is the same (960 bytes/cycle), but **CAN frame overhead** differs by 12× in message count.
-
-#### 9.5.2 Classic CAN (8-byte payload) at 1 Mbit/s
-
-Each classic CAN frame: ~108 bits (11-bit ID + arbitration + control + data + CRC + ACK + inter-frame bits)
-
-| Architecture | Bits/Cycle | Bits/Sec (1 kHz) | Bus Utilization @ 1 Mbit/s |
-|-------------|-----------|-----------------|-------------------------|
-| **Per-motor** (120 frames) | 120 × 108 = 12,960 | 12,960,000 | **1296% — IMPOSSIBLE** |
-| **Per-controller batch** (10 frames) | 10 × 108 = 1,080 | 1,080,000 | **108% — STILL TOO HIGH** |
-
-> **Classic CAN at 1 Mbit/s CANNOT handle 1 kHz per-motor updates for 120 motors.**
-> Even batch messages (10 controllers) exceed 1 Mbit/s at 1 kHz.
-
-**What rate works on classic CAN (1 Mbit/s)?**
-```
-Max sustainable rate (at 80% utilization = 800 kbit/s):
-  1080 bits/cycle × f_Hz × 0.8 = 800,000
-  f_Hz = 800,000 / 1080 = 741 Hz (batch messages)
-  
-Per-motor messages:
-  12,960 bits/cycle × f_Hz × 0.8 = 800,000
-  f_Hz = 800,000 / 12,960 = 61.7 Hz (per-motor)
-```
-
-| Mode | Max Rate @ 1 Mbit/s (Classic CAN) |
-|------|----------------------------------|
-| Per-motor (120 messages) | **~60 Hz** |
-| Per-controller batch (10 messages) | **~740 Hz** |
-
-#### 9.5.3 CAN-FD (Flexible Data Rate) at 1 Mbit/s (base) / 8 Mbit/s (data phase)
-
-CAN-FD frames with 64-byte payload: ~300 bits (including arbitration at 1 Mbit/s base rate)
-
-| Architecture | Bits/Cycle | Bits/Sec (1 kHz) | Bus Utilization @ 1 Mbit/s | Bus Utilization @ 8 Mbit/s (data phase) |
-|-------------|-----------|-----------------|-------------------------|--------------------------------------|
-| **Per-motor** (120 frames) | 120 × 300 = 36,000 | 36,000,000 | 3600% — IMPOSSIBLE | 450% — STILL TOO HIGH |
-| **Per-controller batch** (10 frames) | 10 × 300 = 3,000 | 3,000,000 | 300% — TOO HIGH | 37.5% — OK! |
-| **Per-controller batch** (10 frames, 100 Hz) | 3,000 | 300,000 | 30% — OK | 3.75% — trivially OK |
-
-> **Key finding:** CAN-FD with 8 Mbit/s data phase CAN handle 1 kHz per-motor updates **only with batch messages** (10 controllers, not 120). Per-motor CAN-FD messages at 1 kHz still exceed 8 Mbit/s.
-
-#### 9.5.4 Corrected Recommendation: Batch Messages Required
-
-**If full positions are streamed, per-controller batch messages (one message per controller, containing all 12 motor positions) are REQUIRED for real-time control at 1 kHz.** Local trajectory generation (§9.5.8) removes this requirement.
-
-| Configuration | Classic CAN @ 1 Mbit/s | CAN-FD @ 1/8 Mbit/s |
-|--------------|----------------------|---------------------|
-| Per-motor, 1 kHz | ❌ 1296% (impossible) | ❌ 450% (impossible) |
-| Per-motor, 100 Hz | ❌ 129.6% (too high) | ❌ 45% (too high) |
-| Per-motor, 60 Hz | ❌ 77.8% (barely OK) | ❌ 27% (barely OK) |
-| **Batch (10 msgs), 1 kHz** | ❌ 108% (too high) | ✅ 37.5% (OK!) |
-| **Batch (10 msgs), 100 Hz** | ✅ 10.8% (plenty) | ✅ 3.75% (trivial) |
-| **Batch (10 msgs), 500 Hz** | ❌ 54% (OK) | ✅ 18.75% (plenty) |
-
-#### 9.5.5 CAN Bus Protocol Design — Batch Messages
-
-Each controller sends **one batch message per cycle** containing all 12 motor positions:
-
-```
-CAN-FD Frame (64-byte payload, data phase @ 8 Mbit/s):
-┌─────────────────────────────────────────────────────┐
-│ 11-bit ID: Controller # (0-9)                        │
-│ DLC: 64 bytes (data phase)                           │
-│ Data:                                              │
-│   Motor 0: position (32-bit int), velocity (16-bit)  │
-│   Motor 1: position (32-bit int), velocity (16-bit)  │
-│   ...                                              │
-│   Motor 11: position (32-bit int), velocity (16-bit) │
-│   Flags: status, error, endstop (32-bit)             │
-└─────────────────────────────────────────────────────┘
-Payload: 12 × (4 + 2) + 4 = 76 bytes → fits in one 64-byte frame? No.
-  → Split into 2 CAN-FD frames per controller (64 + 12 bytes)
-```
-
-**Revised frame structure (2 frames per controller):**
-
-| Frame | Payload | Content |
-|-------|---------|--------|
-| Frame 1 (64 bytes) | 64 | 10 motors × (4 B pos + 2 B vel) + 4 B flags = 76 B → split: 64 B + 12 B |
-| Frame 2 (12 bytes) | 12 | Remaining 2 motors × 6 B = 12 B |
-
-**Total bus load (batch, 1 kHz, 2 frames/controller):**
-- 20 CAN-FD frames/cycle × 300 bits = 6,000 bits/cycle
-- At 1 kHz: 6,000,000 bits/s = 6 Mbit/s
-- At 8 Mbit/s data phase: **75% utilization** — acceptable but tight
-- At 500 Hz: **37.5% utilization** — comfortable
-- At 200 Hz: **15% utilization** — plenty
-
-#### 9.5.6 Mixed Controller Architecture (4/8/12 per controller)
-
-If controllers with different motor counts (4, 8, 12) are mixed on the same bus:
-
-| Configuration | Controllers | Frames/Cycle (2 per ctrl) | Bus Load @ 1 kHz (8 Mbit/s) | Bus Load @ 500 Hz (8 Mbit/s) |
-|--------------|------------|-------------------------|---------------------------|---------------------------|
-| All 12-motor | 10 | 20 | 75% | 37.5% |
-| All 8-motor | 15 | 30 | 112.5% | 56.25% |
-| All 4-motor | 30 | 60 | 225% | 112.5% |
-| Mixed (avg 8) | 15 | 30 | 112.5% | 56.25% |
-| Mixed (avg 12) | 10 | 20 | 75% | 37.5% |
-
-> **Key insight:** Mixed controllers with 4 motors each (30 controllers) make 1 kHz **impossible** even on CAN-FD at 8 Mbit/s (225% utilization). The system must either:
-> 1. Use controllers with 12 motors each (10 controllers → 75% at 1 kHz)
-> 2. Reduce control rate to 500 Hz (37.5% at 12-motor controllers)
-> 3. Use CAN-FD with higher data phase bitrate (e.g., 12 Mbit/s)
-
-#### 9.5.7 Practical Recommendation
-
-| Parameter | Value |
-|-----------|-------|
-| Controller grouping | **12 motors per controller** (10 controllers total) |
-| Control rate | **500 Hz** (ample for ≤ 0.3 m/s motion) |
-| Bus protocol | **CAN-FD** if streaming positions (1 Mbit/s base / 8 Mbit/s data phase); **classic CAN 2.0B** if trajectories are local (§9.5.8) |
-| Messages per cycle | 20 (2 frames × 10 controllers) |
-| Bus utilization @ 500 Hz | **37.5%** (comfortable margin) |
-| Messages per cycle (status, 10 Hz) | 10 (1 frame × 10 controllers) |
-| Status bus utilization | **< 1%** (negligible) |
-| Total bus utilization (500 Hz + 10 Hz) | **~38%** |
-
-> **Conclusion:** If the master streams full positions, CAN-FD with an 8 Mbit/s data phase is needed, and 12-motor controllers (not 4-motor) keep the load manageable. If the controllers run local trajectories (§9.5.8), bus use falls below ~12 % and classic CAN is sufficient; CAN-FD becomes optional headroom. The architecture choice, not the bus, is what makes the traffic close.
-
-#### 9.5.8 Bandwidth Reduction via On-Controller Ramp Generation
-
-The previous analysis assumed the master sends **full position/velocity for every motor every cycle**. This is wasteful. If each controller has its own **motion planner** (ramp / S-curve generator), the master only sends **motion parameters** infrequently, and the controller interpolates locally at high rate.
-
-**Key insight:** The master sends a new motion command only when the ball's trajectory changes (e.g., new target position). Between commands, the controller generates the ramp/S-curve locally at 1 kHz — **zero CAN traffic** during motion execution.
-
-**Scenario comparison:**
-
-| Scenario | Master sends | Controller does | CAN traffic |
-|----------|-------------|----------------|-------------|
-| **Naive** (previous analysis) | Full position/velocity 120×/cycle | Just set position | 37.5% @ 1 kHz |
-| **With ramp gen** | Motion params when target changes | Interpolate at 1 kHz | **~2%** (see below) |
-
-**How it works:**
-
-```
-Master (pattern engine):
-  1. Computes trajectory for a ball (or group)
-  2. Sends ONE motion command:
-     { motor_id, target_position, velocity_profile_params }
-  3. Controller stores command in its motion queue
-  4. Controller's internal planner generates position/velocity
-     at 1 kHz — NO CAN traffic needed
-  5. New command sent only when trajectory changes
-```
-
-**Typical pattern: traveling sine wave across 120 balls**
-
-```
-Phase 1 — Command distribution (brief burst):
-  Master sends 120 motion commands sequentially:
-    CMD_MOVE { motor_0, pos=100mm, vel_profile=S-curve }
-    CMD_MOVE { motor_1, pos=105mm, vel_profile=S-curve }
-    ...
-    CMD_MOVE { motor_119, pos=95mm, vel_profile=S-curve }
-  Duration: 120 commands × (300 bits/frame / 8 Mbit/s) = 4.5 ms
-  (2 frames per controller × 10 controllers = 20 frames)
-  
-Phase 2 — Execution (no CAN traffic):
-  Each controller's internal planner interpolates at 1 kHz
-  CAN bus is IDLE — 0% utilization
-  Duration: depends on pattern (e.g., 2 seconds for one wave cycle)
-  
-Phase 3 — Next command (brief burst):
-  When pattern changes, master re-sends updated targets
-  Same 4.5 ms burst
-```
-
-**Bus utilization by pattern type:**
-
-| Pattern | Command Burst Duration | Cycle Duration | Duty Cycle | Bus Utilization @ 8 Mbit/s |
-|---------|----------------------|---------------|-----------|-------------------------|
-| **Static hold** (balls at rest) | 0 (no commands) | ∞ | 0% | **0%** |
-| **Slow breathing** (period 10 s) | 4.5 ms | 10,000 ms | 0.045% | **0.045%** |
-| **Sine wave** (period 5 s) | 4.5 ms | 5,000 ms | 0.09% | **0.09%** |
-| **Medium wave** (period 2 s) | 4.5 ms | 2,000 ms | 0.225% | **0.225%** |
-| **Fast wave** (period 0.5 s) | 4.5 ms | 500 ms | 0.9% | **0.9%** |
-| **Rapid cascade** (period 0.2 s) | 4.5 ms | 200 ms | 2.25% | **2.25%** |
-| **Maximum aggression** (period 0.1 s) | 4.5 ms | 100 ms | 4.5% | **4.5%** |
-
-> **Key finding:** With on-controller ramp generation, CAN bus utilization is **negligible** (< 5% even for the most aggressive patterns). The CAN bus is essentially idle between command bursts.
-
-**Status feedback traffic (controller → master):**
-
-Controllers report status at 10 Hz (not 1 kHz — position feedback is not needed in real-time):
-
-```
-10 controllers × 10 Hz × 2 frames/controller × 300 bits/frame = 600,000 bits/s
-Bus utilization: 600,000 / 8,000,000 = 7.5% (data phase)
-```
-
-**Total bus utilization (commands + status):**
-
-| Pattern | Command Burst | Status Feedback | Total |
-|---------|-------------|----------------|-------|
-| Static hold | 0% | 7.5% | **7.5%** |
-| Slow breathing | 0.045% | 7.5% | **7.55%** |
-| Fast wave | 0.9% | 7.5% | **8.4%** |
-| Maximum aggression | 4.5% | 7.5% | **12%** |
-
-> **Conclusion:** With on-controller ramp generation, CAN bus utilization is **always under 12%** even for the most aggressive patterns. The CAN bus is **massively over-provisioned**. Even classic CAN at 250 kbit/s would suffice for most patterns.
-
-**Critical design requirement:** Each controller MUST have its own motion planner (ramp / S-curve generator). The master sends motion commands, and the controller interpolates locally at high rate (≥ 1 kHz). This reduces CAN traffic by **two orders of magnitude** compared to the naive per-motor position update approach.
+## 9. Communication — WiFi-Only Baseline
+
+> **Conclusion: WiFi is sufficient.** The conditions are grouped controllers (8–30 nodes; 16 motors per custom board, 4–8 per COTS board), commands buffered 20–100 ms ahead, and a common timebase. The simplest timebase is a **numbered broadcast timestamped on reception**: all nodes see the same transmission, so propagation is common-mode, and a linear fit over many beacons gives offset and drift without a two-way exchange. If the measured receive-timestamp jitter is too high, **802.11mc FTM** provides hardware timestamps (the FTS project reports < 100 ns jitter and ~1.7 ns regression standard deviation on ESP32-S3).
+
+The earlier analysis assumed **120 per-ball WiFi nodes and immediate commands**. Both assumptions are removed: the architecture groups steppers (8–30 nodes), buffers commands, and runs trajectories locally.
+
+### 9.1 Why WiFi is sufficient
+
+| Concern | Why it does not bind |
+|---------|----------------------|
+| **Latency / jitter** | Commands are scheduled at a beacon epoch 20–100 ms ahead; network latency is absorbed by the buffer. |
+| **Packet loss** | Commands are idempotent, sequenced and repeated; the next window replaces a lost one before `T`. |
+| **Bandwidth** | 120 steppers × 6 B = 720 B per window. At 10–20 Hz plus repeats that is < 50 kB/s. |
+| **Node density** | 8–30 nodes, not 120. A dedicated router AP handles them. |
+| **Determinism** | Only the timebase must be real-time, not packet delivery. |
+| **E-stop** | Hardwired power removal (`FR-MOT-011`). A WiFi stop is operational only. |
+| **Failure** | Nodes finish the buffer, then hold/stop on heartbeat loss. No safety function depends on the network. |
+
+### 9.2 Timebase: three options, simplest first
+
+**A. Broadcast plus receive-time (simplest).** The master broadcasts a small numbered beacon (or the command window itself) at 1–10 Hz. Every node timestamps its arrival in the earliest receive callback and records `(beacon_index, local_time)`.
+
+- Because all nodes receive the **same transmission**, propagation is common-mode and cancels in node-to-node differences. That is the key point: for relative sync you do not need the absolute one-way delay, only the differences between nodes.
+- If the beacon carries the master's transmit timestamp, use it as the regressor; the queue/airtime delay is also common to all receivers and cancels in the differences.
+- **No feedback and no inter-node exchange are required.** Each node maps its local clock to the same beacon timeline; the common delay is identical for all nodes, so it does not affect relative timing.
+- Use a **beacon-relative timeline**: commands say “execute at beacon *k* + Δ”, not “at absolute master time T”. The unknown one-way delay then cancels; no two-way exchange is required.
+- A linear fit of `local_time` against `beacon_index` over many beacons gives both offset and **rate** (drift) per node. Drift is very recognizable this way.
+- **A single repeat is not enough.** Two samples give a poor offset/rate estimate; use 1–10 Hz and fit 10–100 beacons. Averaging reduces jitter, but it does not remove a constant unknown delay — only the common-mode broadcast comparison does that.
+- **The real limit is the receive timestamp.** A software timestamp in the application task carries milliseconds of scheduling jitter. Timestamp in the WiFi receive callback, pin WiFi and the handler, disable power save (`WIFI_PS_NONE`), and measure. Expect tens of µs to ~1 ms; with calibration of the fixed per-node latency, likely well under 1 ms.
+- Fixed latency differences between nodes remain as a constant phase bias. Calibrate once (scope/LED) or accept the residual.
+
+**B. FTM (hardware timestamps).** If A's measured residual is too high, use 802.11mc FTM: one master responder and the grouped nodes as initiators. The **FTS project** (ESP32-S3, native ESP-IDF) reports **< 100 ns jitter** and a regression standard deviation of **~1.7 ns** between master and slaves. Treat that as a bench result and validate in situ; even a 1000× degradation is 100 µs.
+
+**C. NTP-style two-way exchange.** If neither A nor B is available, a two-way timestamp exchange over UDP at 1–10 Hz gives 0.2–1 ms. Use it only as a fallback.
+
+A wired PPS/sync line is not required. If in-situ measurement ever shows otherwise, it is a one-wire addition, not a data bus.
+
+### 9.3 Transport and buffering
+
+- The master sends command windows referencing the **beacon timeline** (`epoch k`, `Δ`) or an absolute time in that timeline. The lookahead `L` is **20–30 ms** for interactive/audio-reactive use, **100 ms** for robustness.
+- Transport: UDP broadcast (the same packet is also the sync beacon), UDP unicast to the grouped nodes with ACK/retry, or **ESP-NOW** (16 × 6 B = 96 B; 32 × 6 B = 192 B, inside the 250 B payload). Broadcast is attractive because the sync event and the command share one transmission.
+- Each node buffers commands, maps the beacon timeline to its local clock, runs its local S-curve, and starts at the commanded epoch.
+- Sequence numbers and idempotent commands; a lost packet is replaced by the next window. Missing beacons are harmless for the fit.
+- Buffer depth must exceed `2 × update interval + worst observed latency`.
+
+### 9.4 Failure modes and limits
+
+| Event | Response |
+|-------|----------|
+| Master / AP loss | Nodes finish the buffer, then hold position and flag a fault. The hardwired E-stop remains. |
+| Packet loss | The next window replaces it; the buffer covers several losses. |
+| WiFi congestion / EMI | Dedicated channel, 8–30 nodes, external antennas, retries; the buffer absorbs jitter. |
+| Clock offset / drift | FTM clock model; §10 correction; verify before each pattern. |
+| Node reset | Re-home (`FR-MOT-010`). This is not a link-layer issue. |
+| Safety | No safety function depends on WiFi. |
+
+### 9.5 Local motion planners
+
+Each controller must generate its own trajectory from parameters, not consume per-ball position samples:
+
+- The master sends a target position plus a profile (speed, acceleration, S-curve).
+- The controller interpolates locally at ≥ 1 kHz and drives the step generator.
+- The network is idle between parameter updates; its load is independent of control rate.
+- This is what keeps a WiFi command window at ~720 B instead of ~120 position samples per cycle.
 
 ### 9.6 Final Verdict
 
 | Question | Answer |
 |----------|--------|
-| **Can WiFi replace CAN for real-time control?** | ❌ No — non-deterministic latency makes it unsuitable |
-| **Can WiFi replace CAN for monitoring/config?** | ✅ Yes — WiFi is excellent for this |
-| **Should CAN be kept when using ESP32 with WiFi?** | ✅ **Yes — CAN for real-time, WiFi for config** |
-| **What is the minimum viable communication?** | Classic CAN 2.0B at 1 Mbit/s with local trajectories |
-| **Is CAN-FD necessary?** | ❌ No. With local trajectories, bus use stays under about 12 %; classic CAN at 250 kbit/s would do for most patterns. CAN-FD is optional headroom. |
-| **Must controllers have motion planners?** | **YES — this is critical.** Without on-controller ramp generation, CAN traffic is 37.5% (batch) or 450% (per-motor) at 1 kHz — impossible. With ramp generation, utilization drops to < 12%. |
+| **Is WiFi sufficient for real-time control?** | ✅ **Yes** — grouped nodes, buffered commands, and a broadcast timebase remove the latency objection |
+| **Is any additional wired link needed?** | ❌ **No.** WiFi is the control channel |
+| **What is the minimum viable communication?** | 8–30 grouped WiFi nodes, UDP/ESP-NOW broadcast, 20–100 ms lookahead, numbered beacons timestamped on reception |
+| **Is WiFi acceptable for the E-stop?** | ❌ No — keep the hardwired power removal of `FR-MOT-011` |
+| **Must controllers have motion planners?** | ✅ **Yes.** The master sends parameters; each controller interpolates locally at ≥ 1 kHz |
+| **What if broadcast receive-time is not accurate enough?** | Use FTM (hardware timestamps), then NTP-style two-way (0.2–1 ms), then one sync wire; relax `FR-SYNC-001` only with a visual justification |
 
-**Recommendation: Use classic CAN 2.0B as the primary real-time bus at 1 Mbit/s (CAN-FD is optional headroom). Use WiFi exclusively for configuration, monitoring, and pattern upload. Each controller MUST have its own motion planner (ramp / S-curve generator) to minimize CAN traffic. This hybrid approach gives the best of both worlds: deterministic real-time control + convenient wireless configuration.**
+**Recommendation: WiFi-only baseline.** Use grouped controllers — 8 × 16-axis custom boards, or 15–30 COTS boards — with UDP/ESP-NOW command windows buffered 20–100 ms ahead, numbered broadcast beacons for the timebase (FTM if receive-time jitter is too high), local S-curve generation, and a hardwired E-stop.
 
-**Critical design rule:** The master sends motion **parameters** (target position + profile type), not position samples. The controller's internal motion planner generates the trajectory at ≥ 1 kHz locally. This reduces CAN traffic by 2 orders of magnitude and makes the system feasible.
+**Critical design rule:** The master sends motion **parameters** (target position + profile), not position samples. Each controller generates the trajectory locally. This is what makes the network load trivial.
 
-> The earlier claim that CAN-FD is "necessary" contradicted §9.5.8. The architecture that makes the traffic tables close is local trajectory generation; with it, classic CAN is sufficient and CAN-FD is headroom. Also note the step rate: at 1/16 microstep and a 25 mm drum the ceiling is about 180 000 steps/s per motor, and on the order of two million per column if the column drops together. A TMC5160 generates those edges itself. Step/dir from the MCU (TMC2209, or the I2S stream in §8) has to be shown to sustain that rate before it is the catch path.
+> Step-rate note: at 1/16 microstep and a 40 mm drum, 1.2 m/s is about 30.6 kHz per motor — inside the 40 kHz I2S mux ceiling of §8.5 by 1.31×. That is the binding real-time constraint, not the network.
 
 ---
 
@@ -952,11 +574,11 @@ Drift_rate = 2 × max_frequency_error (one fast, one slow)
 | 1 minute | 4.2 ms | 600 µs |
 | 5 minutes | 21 ms | 3 ms |
 | 15 minutes | 63 ms | 9 ms |
-| 1 hour | 2.5 s | 18 ms |
-| 8 hours | 20 s | 144 ms |
-| 24 hours | 60 s | 432 ms |
+| 1 hour | 252 ms | 18 ms |
+| 8 hours | 2.0 s | 144 ms |
+| 24 hours | 6.05 s | 432 ms |
 
-> **Key finding:** With consumer-grade quartz (35 ppm), two controllers can drift **21 ms apart after just 5 minutes** and **2.5 seconds apart after 1 hour**. For synchronized wave patterns requiring sub-millisecond alignment, this is **unacceptable without correction**.
+> **Key finding:** With consumer-grade quartz (35 ppm), two controllers can drift **21 ms apart after just 5 minutes** and **252 ms apart after 1 hour**. For synchronized wave patterns requiring sub-millisecond alignment, this is **unacceptable without correction**.
 >
 > The 70 ppm figure is the worst case: one fast and one slow crystal at 35 ppm each. Two crystals drifting the same way need less. Design for the worst case.
 
@@ -967,14 +589,15 @@ Drift_rate = 2 × max_frequency_error (one fast, one slow)
 Position error from timing drift: Δx = v × Δt
 ```
 
-| Pattern Speed | Drift @ 5 min (21 ms) | Drift @ 1 hour (2.5 s) |
-|--------------|----------------------|------------------------|
+| Pattern Speed | Drift @ 5 min (21 ms) | Drift @ 1 hour (252 ms) |
+|--------------|----------------------|-------------------------|
 | Static (v = 0) | 0 mm | 0 mm |
-| Very slow (v = 0.05 m/s) | 1.05 mm | 125 mm |
-| Slow wave (v = 0.15 m/s) | 3.2 mm | 375 mm |
-| Fastest (v = 0.3 m/s) | 6.3 mm | 750 mm |
+| Very slow (v = 0.05 m/s) | 1.05 mm | 12.6 mm |
+| Slow wave (v = 0.15 m/s) | 3.2 mm | 37.8 mm |
+| Nominal fast (v = 0.6 m/s) | 12.6 mm | 151 mm |
+| Optional effect (v = 1.2 m/s) | 25.2 mm | 302 mm |
 
-> **Critical finding:** Even in the slow regime, controllers drift **6.3 mm after 5 minutes** at the fastest speed and **0.75 m after 1 hour** — larger than the ~300 mm grid pitch and clearly visible in a wave pattern. Clock correction is still required.
+> **Critical finding:** At the nominal fast tier, controllers drift **12.6 mm after 5 minutes**; at the optional 1.2 m/s tier, **25 mm after 5 minutes** and **302 mm after 1 hour** — about one grid pitch. Clock correction is still required, and the faster tier tightens the budget.
 
 ### 10.4 Correction Strategy: Pause-Based Clock Alignment
 
@@ -983,42 +606,35 @@ Position error from timing drift: Δx = v × Δt
 **How it works:**
 
 ```
-  Controller A (fast clock)          Controller B (slow clock)
-  ───────────────────────          ─────────────────────────
-  Time: 0 ms                         Time: 0 ms
-  Motion: move to 100mm              Motion: move to 100mm
-  (finishes at t=500ms)              (finishes at t=510ms)
-  
-  Ball at rest: 100mm                Ball at rest: 100mm
-  
-  ┌─ 2-second rest period ─┐        ┌─ 2-second rest period ─┐
-  │                         │        │                         │
-  │  Master sends SYNC      │        │  Receives SYNC          │
-  │  Controller A:          │        │  Controller B:          │
-  │  "You are 10ms ahead"   │        │  "You are 10ms behind"  │
-  │  Insert 10ms pause      │        │  Remove 10ms pause      │
-  │  (extend rest by 10ms)  │        │  (shorten rest by 10ms) │
-  │                         │        │                         │
-  └─────────────────────────┘        └─────────────────────────┘
-  
-  Next motion starts synchronized     Next motion starts synchronized
+  Master broadcast:     Beacon k        Beacon k+1      Beacon k+2
+  Common airtime:       T_k             T_k+1           T_k+2
+                          │               │               │
+  Node A local receive: t_A(k)          t_A(k+1)        t_A(k+2)
+  Node B local receive: t_B(k)          t_B(k+1)        t_B(k+2)
+
+  Each node fits local_time = a × beacon_index + b.
+  A slope difference means a faster/slower local clock.
+  Correction is applied locally during rest; no reply is sent.
 ```
 
 **Algorithm per controller (during rest):**
 
 ```
 while (ball is at rest):
-  1. Receive SYNC message from master (contains global timestamp)
-  2. Compare local timer with global time
-  3. Compute drift = local_time − global_time
-  4. If |drift| > threshold (e.g., 100 µs):
-       a. Calculate correction = drift
+  1. Receive numbered broadcast beacon; record (beacon_index, local_time)
+  2. Update the local fit: local_time = a * beacon_index + b
+     (a gives the rate/drift, b the offset in the beacon timeline)
+  3. Compare the commanded epoch with the local mapping
+  4. If |error| > threshold (e.g., 100 µs):
+       a. Calculate correction = error
        b. Spread correction over remaining rest time:
           - If fast: insert small pauses in motion loop
           - If slow: remove small pauses from motion loop
        c. Apply correction gradually (avoid position jumps)
-  5. Sleep until next SYNC (e.g., 100 ms interval)
+  5. Sleep until the next beacon (e.g., 100 ms–1 s interval)
 ```
+
+The nodes do not need a per-controller offset from the master; each node fits its own clock to the common beacon timeline. This is what makes one-way broadcast sufficient.
 
 ### 10.5 Pause Magnitude and Frequency
 
@@ -1085,24 +701,26 @@ Insert 1–10 µs pauses between motion loop iterations:
 
 > **Recommendation:** Use **Method A** (extend rest) when balls are at rest. Use **Method C** (micro-pauses) when balls are in motion but changing direction slowly. Never use Method B (slow down ramp) as it affects visible motion.
 
-### 10.8 SYNC Message Protocol for Clock Correction
+### 10.8 Broadcast Beacon for Clock Correction
 
 ```
-CAN-FD SYNC message (from master to all controllers):
+WiFi broadcast beacon (master -> all controllers):
 ┌─────────────────────────────────────────────┐
-│ ID: 0x7FF (global broadcast)                │
-│ DLC: 32 bytes (CAN-FD)                      │
-│ Data:                                       │
-│   Global timestamp (64-bit, µs precision)   │
-│   Master's estimated drift per controller   │
-│   (10 × 16-bit signed µs offsets)           │
-│   Correction flag (per controller)          │
+│ magic + version                             │
+│ beacon_index (32-bit)                       │
+│ master transmit timestamp (optional)        │
+│ event / command payload (optional)          │
+│ CRC                                         │
 └─────────────────────────────────────────────┘
 ```
 
-**Update frequency:** SYNC messages every **100 ms** (10 Hz) during rest, every **1 s** during motion.
+Each node records `(beacon_index, local_receive_time)` in the earliest receive callback and fits a line. The beacon doubles as the sync event and the command carrier; the master does not need per-node offsets.
 
-**Correction threshold:** Apply correction when |drift| > 100 µs (consumer quartz) or > 10 µs (TCXO).
+**Update frequency:** 1–10 Hz is enough for drift; use 10 Hz during rest and 1 Hz during motion. Fit over 10–100 beacons; a single repeat (two samples) is not sufficient.
+
+**Correction threshold:** Apply correction when |error| > 100 µs (consumer quartz) or > 10 µs (TCXO).
+
+**Timestamp quality:** software receive timestamps carry interrupt/scheduling jitter; timestamp in the WiFi receive callback, disable power save, pin WiFi and the handler, and measure. If the residual exceeds 1 ms, move to FTM (§9.2B).
 
 ### 10.9 Worst-Case Analysis
 
@@ -1122,9 +740,9 @@ Correction needed: 3.5 µs per 100 ms = 0.0035%
 ```
 No rest periods → no pause-based correction
 Drift accumulates: 35 µs/s
-After 30 s: 1.05 ms drift → 0.32 mm position error at 0.3 m/s
-After 5 min: 10.5 ms drift → 3.2 mm position error at 0.3 m/s
-(At the 70 ppm worst case: 21 ms → about 6.3 mm.)
+After 30 s: 1.05 ms drift → 1.26 mm position error at 1.2 m/s
+After 5 min: 10.5 ms drift → 12.6 mm position error at 1.2 m/s
+(At the 70 ppm worst case: 21 ms → about 25 mm at 1.2 m/s.)
 ```
 
 **Solution for continuous-motion patterns:** Use a **TCXO (temperature-compensated crystal oscillator)** with ± 5 ppm drift. Corrections needed only every 15–30 minutes, and even then, only ~300 µs per correction.
@@ -1149,3 +767,312 @@ After 5 min: 10.5 ms drift → 3.2 mm position error at 0.3 m/s
 6. **Rest periods are sufficient:** Most artistic patterns naturally include rest at motion peaks — use these for clock correction when they exist.
 
 > Do not freeze the 100 Hz SYNC rate, the 5 ms pause, or a TCXO into the requirement set. Those are implementation choices; the requirement is the ≤ 1 ms alignment.
+
+---
+
+## 11. Off-the-Shelf Controllers — Production Assessment (November 2026)
+
+> **These are candidates for the installed piece, not bench-only experiments.** They are evaluated for WiFi, included drivers, DIAG availability, node count for 120 axes, cost, and production fit. Prices are approximate, in EUR including German VAT, excluding shipping; AliExpress “from” prices usually refer to a bare board or accessory variant.
+>
+> The architecture is grouping-agnostic: **4–16 motors per node**. A COTS board fixes the grouping (4–8); the custom board uses 16. The timebase, buffering and local-planner design in §9/§12 apply to both.
+
+### 11.1 ESP32 CNC boards — native WiFi
+
+| Board | Axes / driver sockets | Drivers included? | WiFi | StallGuard / DIAG | Approx. price |
+|-------|----------------------|-------------------|------|-------------------|---------------|
+| **MKS DLC32 V2.1** | 3 (X/Y/Z) | No — bare, or kit with 3 × TMC2209 | ✅ ESP32 on board | ⚠️ UART must be soldered to the I²C pins, plus a DIAG wire; three drivers need a 470 Ω modification | €20 bare, €30–35 with 3 drivers |
+| **MKS DLC32 MAX** | 4 | No — kit with TMC2209 available | ✅ ESP32 on board | ⚠️ Same DLC32 wiring caveat; not documented for this board | ~$31 kit |
+| **FYSETC E4** | **3 usable** (4 drivers) | ✅ **4 × TMC2209 soldered** | ✅ ESP32 on board (ESP3D) | ✅ DIAG on X/Y/Z; E axis has no DIAG. **With no mechanical switches, only 3 axes are usable** | **€36** |
+| **MKS TinyBee** | 5 axes / 6 motors | ✅ on-board TMC2209 | ✅ ESP32 on board | ❌ **No UART to the drivers**; DIP-switch microstepping only | €30–44 |
+| **PiBot V4.96 Pro** | 6 | No — StepStick sockets; TMC2130-SPI variant | ✅ ESP32 on board | ⚠️ Possible via TMC2130 SPI; verify DIAG routing | ~$80 |
+| **FluidNC “6-Pack”** | 6 external | No | ✅ ESP32 on board | ⚠️ Only if external-driver DIAG is wired in | $48–55 |
+
+### 11.2 3D-printer boards — native WiFi or WiFi add-on
+
+| Board | Axes | Drivers included? | WiFi | StallGuard | Approx. price |
+|-------|------|-------------------|------|------------|---------------|
+| **BTT Octopus V1.1 / Pro** | 8 | No | ⚠️ **Add-on ESP8266 module** (the board provides an ESP8266 interface; not included) | ✅ TMC2209/2226/5160; **DIAG0–DIAG7 exposed on J22/J23** (Pro V1.1 schematic) | €43–45 + ~€4/driver + €5–15 ESP8266 module |
+| **Duet 3 Mini 5+ WiFi** | 5 | ✅ **5 × TMC2209** | ✅ native | ✅ supported in RRF; check DIAG per axis | €116–160; FYSETC “Big Dipper” clone ~€94 |
+| **Duet 2 WiFi** (legacy) | 5 | Sockets | ✅ native | ✅ | ~€100+ used/legacy |
+| **BTT Manta M8P + CB1** | 8 | No | ✅ via CB1 compute module (Klipper host) | ✅ | ~€80–100 |
+
+### 11.3 System-level production comparison — 120 axes
+
+Costs below are boards only; add ~€1,200–1,400 for 120 motors, PSU and cabling, against the €4,000 BOM cap (`NFR-COST-001`).
+
+| Board | Usable axes/board | Boards | WiFi nodes | Per-axis DIAG | Boards cost | Production verdict |
+|-------|--------------|--------|------------|---------------|-------------|--------------------|
+| **FYSETC E4** | **3** (4 drivers) | **40** | **40** | 3 of 4 | **€1,440** | Cheapest per board, but 3 usable axes → 40 boards/nodes; classic ESP32 (no FTM) |
+| **Duet 3 Mini 5+ WiFi / Big Dipper** | 5 | 24 | 24 | 5 (verify) | **€2,256 clone / €2,784 genuine** | Most production-ready COTS: native WiFi, included drivers, RRF stall detection |
+| **Octopus + drivers, no WiFi module** | 8 | 15 | — (15 CAN) | **8/8 (J22/J23)** | **€1,125–1,155 (boards + drivers)** | Lowest Octopus hardware cost; requires wired CAN or an external WiFi bridge |
+| **Octopus + ESP8266 module** | 8 | 15 | 15 | **8/8 (J22/J23)** | **€1,335 (boards + drivers + WiFi module)** | Best WiFi axis count/cost: 15 nodes, 8/8 DIAG; WiFi is an add-on ESP8266 |
+| **Custom carrier, ESP32-S3 + 16 × TMC2209** | 16 | 8 | 8 | 16/16 (wired) | ~€450–560 + NRE | **Best fit/cost:** 16/16 DIAG, 8 nodes, no QFN; needs custom PCB + firmware |
+| **Custom carrier, Pico 2 + 12 × TMC2209** | 12 | 10 | 10 | 12/12 (wired) | ~€500–650 + NRE | 10 nodes; 200 kHz PIO on RISC-V; WiFi via Pico 2 W or ESP32 bridge |
+| **MKS DLC32 MAX** | **0** (no DIAG) | — | — | 0 free | — | **Unusable under the no-switch rule** without rework |
+| **MKS TinyBee** | **0** (no UART) | — | — | 0 | — | **Unusable under the no-switch rule** |
+| **PiBot V4.96 Pro** | 6 (verify) | 20 | 20 | TMC2130 SPI possible | ~$1,600 + drivers | Possible only if all 6 DIAG are routed/exposed |
+| **FluidNC 6-Pack** | 6 (verify) | 20 | 20 | wired externally | ~$1,000 + drivers | Possible if each external driver’s DIAG is wired; integration-heavy |
+
+### 11.4 Findings for production
+
+1. **COTS can be the product**, but the node count rises: 10–40 nodes instead of 8 with a 16-axis custom board. A dedicated router AP handles that; an ESP32 SoftAP (≈10 clients) does not.
+2. **DIAG is mandatory per axis; no switches are allowed.** An axis without stall detection is not usable under the project constraint. That changes the comparison: the E4 provides **3 usable axes per board**, so 120 axes require **40 boards/nodes**. The Duet is 5/5 (verify). The Octopus Pro V1.1 exposes all eight DIAG pins (J22/J23), so it qualifies with 8/8; confirm the exact board revision. TinyBee and DLC32 are unusable without rework.
+3. **Timebase:** classic ESP32 boards (E4, DLC32, TinyBee) and the Octopus ESP8266 module have **no FTM**. They use the numbered broadcast receive-time scheme (§9.2A); FTM is only an upgrade. Check the Duet WiFi module separately.
+4. **Firmware is still custom.** RRF/Marlin/FluidNC do not scale to a 120-axis global timeline. Buying a COTS board saves hardware integration, not the control software. This is the main remaining cost.
+5. **Serviceability is good:** each COTS board is a field-replaceable module, matching `NFR-MAINT-006`.
+6. **Cost:** FYSETC E4 is €1,440 in boards but needs 40 nodes, ~€2,600–2,800 all-in. Duet clone is ~€3,450–3,700 all-in; the genuine board is ~€4,000–4,200 and can exceed the cap. Octopus is ~€2,500–2,800 all-in with 8/8 DIAG and 15 WiFi nodes; the no-module CAN variant is ~€1,125–1,155 in boards + drivers before the CAN master and harness. The **ESP32-S3 module carrier** is ~€1,700–1,900 all-in with 8 nodes and 16/16 DIAG; the **Pico 2 carrier** is ~€1,800–2,000 with 10 nodes and 12/12 DIAG; a fully custom SMT board is ~€2,000–2,200.
+7. **The module-based carrier is the missing middle:** a custom PCB with an ESP32-S3 module, 16 TMC2209 StepSticks and a 74HC595 chain gives exact axis count, per-axis DIAG and 8 nodes without QFN soldering. It still requires a PCB design and the same custom firmware.
+8. **Stall detection is now the only reference**, so it must be validated on the real drum at 50 g. It needs a hard stop and motion; false negatives are a homing failure. Add a plausibility check (step count vs travel) and treat a missed home as a fault (`FR-MOT-010`).
+
+### 11.5 Production shortlist
+
+- **Best COTS integration:** **Duet 3 Mini 5+ WiFi** or the FYSETC Big Dipper clone — 5/5 DIAG (verify), native WiFi, 24 nodes.
+- **Best axis count / cost, WiFi:** **Octopus Pro + ESP8266 WiFi module** — 8/8 DIAG (J22/J23), 15 nodes, ~€1,335 for boards + drivers + module. The module is not included; the board provides an ESP8266 interface.
+- **Best Octopus hardware cost, wired:** **Octopus Pro without WiFi module** — 8/8 DIAG, 15 CAN nodes, ~€1,125–1,155 for boards + drivers; add CAN master and harness (§13).
+- **FYSETC E4:** €36, but only **3 usable axes** → 40 boards/nodes. Cheapest per board, not the lowest system cost. No FTM.
+- **Best fit / lowest system cost:** **custom ESP32-S3 carrier with 16 TMC2209 modules** — 8 nodes, 16/16 DIAG, ~€1,700–1,900 all-in; requires a PCB design.
+- **Pico 2 carrier:** 12/12 DIAG, 10 nodes, 200 kHz PIO; WiFi bridge or Pico 2 W, and the timebase must be validated.
+- **Unusable as-is under the no-switch rule:** MKS TinyBee (no UART), MKS DLC32 (no free DIAG).
+- **Custom 16-axis board:** still the lowest node count and cost, but no longer the only production path.
+
+If the project intends to buy rather than build, the **Duet** or **Octopus** paths are the production choices; the custom board is the optimization.
+
+### 11.6 Custom module-based carrier board
+
+The missing middle: a custom PCB that carries **modules**, not QFN chips. Only passives, connectors, the 74HC595 chain and power are soldered; the MCU and drivers plug in.
+
+**ESP32-S3 carrier, 16 axes**
+
+- ESP32-S3-WROOM-1 module (WiFi + FTM).
+- 16 × TMC2209 StepStick modules (UART + DIAG).
+- 4 × 74HC595 (32 mux outputs: 16 step + 16 direction).
+- 24 V → 5 V/3.3 V DC-DC, bulk capacitors, per-driver 100 µF, input fuse/TVS.
+- 16 motor connectors, power input, DIAG/endstop header.
+- No QFN soldering. JLCPCB/PCBWay can place the passives and connectors; the module headers are hand-soldered.
+
+| Item | Qty | Cost (est.) |
+|------|-----|-------------|
+| 4-layer PCB, 100 × 100 mm | 1 | $5 |
+| ESP32-S3-WROOM-1 module | 1 | $4 |
+| TMC2209 StepStick | 16 | $24 |
+| 74HC595 | 4 | $1 |
+| Headers/sockets | 17 | $2 |
+| 24 V → 5 V/3.3 V DC-DC | 1 | $2 |
+| 4:1 UART mux | 1 | $0.50 |
+| Capacitors, connectors, fuse, TVS | 1 set | $10 |
+| Assembly (passives/connectors) | 1 | $5–10 |
+| **Per board** | | **~$53–58** |
+| **8 boards** | | **~$424–464** |
+| **+ NRE (stencil, setup, review)** | | **~$50–100** |
+
+With motors, PSU and cabling (~€1,200–1,400), the system is ~€1,700–1,900 — the lowest-cost production path in this table.
+
+**Pico 2 carrier, 12 axes**
+
+- Pico 2 module compiled for **RISC-V**; FastAccelStepper gives **12 steppers** at 200 kHz.
+- 12 × TMC2209 StepSticks, 74HC595 for direction, 74HC165 for DIAG. The 165 chain reduces the 12 driver-side DIAG signals to **3 MCU pins** (clock/load/data); the CAN bus aggregates status across boards.
+- A Pico 2 board exposes ~26 GPIO: 12 step pins plus shift-register direction/DIAG and UART fits. A bare RP2350 QFN-80 (48 GPIO) allows direct wiring instead.
+- **10 boards / 10 nodes** for 120 axes, **12/12 DIAG**.
+- WiFi via a Pico 2 W module or an ESP32 bridge. The ESP32 bridge is preferred for the validated broadcast/FTM timebase; a Pico 2 W WiFi timebase must be measured.
+- BOM ~$46 per board; ~$460 for 10 boards plus NRE.
+- **MCU mounting choice:**
+  - **Pico 2 module:** 26 exposed GPIO; needs the 74HC595/74HC165 expansion; socketable and replaceable.
+  - **Bare RP2354B:** 48 GPIO and integrated 2 MB flash; 12 step + 12 DIR + 12 DIAG + UART fits directly, so no shift registers. Requires QFN-80 assembly and the usual crystal/USB/decoupling support.
+  - **Bare RP2350B:** same 48 GPIO, but needs external QSPI flash.
+
+**GPIO budget, bare RP2354B (48 GPIO), 12 axes:**
+
+| Function | Direct | With one 74HC165 for DIAG |
+|----------|-------:|--------------------------:|
+| 12 × STEP (PIO) | 12 | 12 |
+| 12 × DIR | 12 | 12 |
+| 12 × DIAG | 12 | 3 |
+| CAN-FD controller (MCP2518FD: SCK/MOSI/MISO/CS + INT) | 5 | 5 |
+| TMC UART (3 buses, bit-banged) | 3 | 3 |
+| Temperature sensor (I²C) | 2 | 2 |
+| Common enable | 1 | 1 |
+| Status/fault LED | 1 | 1 |
+| **Total** | **48 — exactly full** | **39 — 9 free** |
+
+The CAN-FD **5 pins are four SPI signals plus INT** — there is no enable pin. The transceiver STB is tied low, and the controller's crystal is local to the module. Polling instead of using INT drops it to 4 pins; add CLKIN only if the MCU supplies the controller clock instead of a local crystal.
+
+Boot/reset uses the dedicated RUN pin, and USB and the crystal are dedicated. The final GPIO drives a **status/fault LED**, so direct wiring is **exactly 48/48 with no spare**. That fits, but leaves zero margin: any future signal, per-driver enable, or second LED forces the 74HC165. With the 165 the total is 39, leaving 9 GPIO free.
+
+A single-wire WS2812 fits the same LED pin, so it does not change the count. It does need 5 V and a level shifter (3.3 V data is marginal against the 0.7 VDD threshold), and precise 800 kHz timing. Since all three PIO blocks are committed to the step streams, drive it from the second core with interrupts disabled for the ~30 µs frame, or use a plain LED.
+
+**UARTs:** a TMC2209 has 4 UART addresses per bus, so 12 drivers need **3 buses**. Each single-wire half-duplex bus needs one GPIO, i.e. **3 GPIO** total. The RP2354B has 2 hardware UARTs; remapping does not create a third peripheral, and all three PIO blocks are already used by the 12 step streams.
+
+That does not force a mux: **bit-bang the third bus (or all three) on the second core**. UART is only used for configuration and homing, and 115200 baud is trivial for a 150 MHz core. Bit-banging also gives exact control of the half-duplex turnaround: drive during TX, then switch the pin to input to release the line for the TMC reply. A 3:1 mux on one UART is the alternative, also 3 GPIO (data + 2 select).
+
+**Write-only option:** if every driver receives identical configuration, tie the three buses together and **broadcast from one TX pin**; no mux and no RX. This works because address 0–3 is repeated once per bus, so a write reaches all three drivers with that address. It removes readback, so you lose `SG_RESULT` tuning, `DRV_STATUS` fault/temperature flags, and configuration verification. Homing still works from the per-driver DIAG pins. Use this only after bench tuning, and keep a service header for readback; otherwise retain one bidirectional pin per bus (3 GPIO) or a mux.
+
+**Temperature:** TMC2209 reports over-temperature warning/shutdown flags in `DRV_STATUS`, but not necessarily an absolute temperature. If a numeric reading is required, add one I²C sensor per board near the driver array (2 GPIO); that is the 2-pin line above.
+
+**Pico 2 module limitation:** once CAN-FD, UART and a temperature sensor are added, the Pico 2 module's ~26 GPIO is too tight even with both shift registers: 12 STEP + 3 DIR + 3 DIAG + 5 CAN + 3 UART + 2 temp + 1 enable = 29. For a CAN node, use the **bare RP2354B** (48 GPIO); the Pico 2 module is better suited to the WiFi-only variant or to 8 axes.
+
+
+**Trade-offs**
+
+- Exact axis count and per-axis DIAG: **8 nodes** at 16 axes (ESP32-S3), **10 nodes** at 12 axes (Pico 2).
+- Low NRE, no QFN, and a failed driver is a module swap (good for `NFR-MAINT-006`).
+- Still a custom PCB and custom firmware; module sockets add height and connector risk (`RISK.md` #8).
+- TMC2209 UART is a **configuration/homing** channel, not a motion channel: one UART plus a 4:1 mux serves 16 drivers in groups of four. Add a ~$0.50 mux; no four-bus requirement.
+- TMC2209 at 0.25 A is ample for the 50 g balls; TMC5160 modules cost 5–10× more and are unnecessary electrically.
+
+Sources: FYSETC E4 wiki (`docs.fysetc.com`), MKS DLC32/TinyBee GitHub repositories, Diode Laser Wiki (DLC32 UART and sensorless homing), Duet3D stall-detection documentation, FluidNC Wiki.
+
+---
+
+## 12. Grouped WiFi Architecture — Baseline
+
+> **Status: baseline, to be validated on hardware.** `FR-SYNC-001` still requires ≤ 1 ms. FastAccelStepper refers to its ESP32 I2S driver (ESP-IDF ≥ 5.3).
+
+### 12.1 Concept
+
+- **Grouping is a design choice:** 16 steppers per custom ESP32-S3 board (8 nodes), 12 per Pico 2 board (10 nodes), or 4–8 per COTS board (15–40 nodes). Not 120 WiFi nodes.
+- **No data cabling.** Each board has WiFi; the only physical connections are 24 V and the motor harness.
+- The master broadcasts numbered beacons/command windows **20–100 ms ahead**. Commands reference the beacon timeline (`epoch k`, `Δ`); each board buffers them and starts its local S-curve at that epoch.
+- Local trajectories do the high-rate work. The network carries parameters, not position samples.
+
+### 12.2 Why grouping and buffering make WiFi sufficient
+
+The earlier analysis assumed **120 per-ball WiFi nodes and immediate commands**. Both assumptions are removed:
+
+| Property | Naive WiFi | Grouped, buffered baseline |
+|----------|------------|----------------------------|
+| WiFi nodes | 120 | 8 |
+| Command timing | Immediate | Scheduled at a beacon epoch, 20–100 ms ahead |
+| Effect of latency/jitter | Directly violates sync | Absorbed by the buffer |
+| Effect of packet loss | Lost command | Replaced by the next future window before the epoch |
+| Remaining sync limit | Network latency | **Clock offset and drift only** |
+
+This does not make packet delivery deterministic. It moves the problem to the timebase, where a common broadcast plus local clock fitting makes it measurable and bounded.
+
+### 12.3 What still has to hold
+
+| Item | Requirement / budget | Notes |
+|------|----------------------|-------|
+| **Clock offset** | ≤ 1 ms for `FR-SYNC-001` | Broadcast receive-time differences cancel common-mode propagation; the residual is per-node receive latency. Timestamp in the WiFi RX callback, calibrate fixed latency, and fit 10–100 beacons. If the residual is too high, use FTM (§9.2B). **Measure it.** |
+| **Clock drift** | 35 ppm = 1 ms per ~28 s | Use §10 correction (rest pause or slow trim) or re-anchor periodically; a 10-minute pattern drifts ~21 ms uncorrected. |
+| **Direction reversal** | 500 µs (DIR in I2S mux) / ~1 ms (DIR on GPIO) | Driver inserts the pause. At 1.2 m/s that is 0.6–1.2 mm of delayed motion; include it in the trajectory and in the sync budget. |
+| **Packet loss** | Buffer > 2 × update interval + worst latency | Repeat each future window; use sequence numbers and idempotent commands. A 100 ms buffer with a 10–20 ms refresh tolerates several losses. |
+| **E-stop** | Hardwired | A WiFi stop is operational only. Keep the red-button power removal of `FR-MOT-011`. |
+| **Interactive latency** | 20–30 ms vs 100 ms | 100 ms is fine for precomposed patterns, poor for live/audio-reactive control (`FR-PAT-005`). Make buffer depth tunable. |
+| **Radio** | 8–30 nodes, one AP / ESP-NOW peer | Antenna placement inside a steel structure and 2.4 GHz congestion still need a site check. |
+
+At 1.2 m/s, a 1 ms offset is 1.2 mm of position error; at 0.6 m/s it is 0.6 mm. That is what the 1 ms requirement protects.
+
+**Transport options:** UDP broadcast of one 120-stepper window is ~720 B at 6 B/stepper and fits an IP packet; it is unacknowledged and sent at a basic rate, but it doubles as the sync beacon, which is the point. With 8–30 nodes, unicast with ACK/retry is a reliable alternative for the command payload while a separate broadcast beacon carries sync. **ESP-NOW** is a lower-overhead broadcast option (16 × 6 B = 96 B, 32 × 6 B = 192 B, inside the 250 B payload). The choice does not affect the timebase argument.
+
+### 12.4 Stepper and driver budget
+
+| Property | Value |
+|----------|-------|
+| I2S mux frame | 4 µs (250 kHz, 32-bit) |
+| Max step rate | **40 kHz per stepper** (25 µs minimum period) |
+| Steppers per mux | **32** step-only; **16** step + dir; **10** step + dir + enable |
+| Synchronism | Inherent — all slots share one DMA buffer |
+| Demux | 74HC595 chain, or 74HC154 / 74HC138 cascade |
+| Driver validation | 74HC595 end-to-end still listed as open in the library docs; bring-up required |
+
+**For a custom board, 16 steppers is the sweet spot.** Step + direction both on the mux uses exactly 32 slots, leaves enable common, gives 8 boards for 120, and keeps 500 µs direction latency. The practical build is the module carrier of §11.6: ESP32-S3 module + 16 TMC2209 StepSticks + 74HC595, no QFN. COTS boards use their fixed 4–8 axes and 15–30 nodes. **32 steppers/board** requires 32 step slots plus direction via GPIO or a second shift-register chain, and moves direction latency to ~1 ms.
+
+**TMC2209 UART is a configuration and homing channel, not a motion channel.**
+
+- Step/dir runs autonomously; UART is needed only to set current, microstep and StallGuard threshold, and to read status during homing.
+- A TMC2209 has 4 UART addresses per bus. Use **one UART plus a 4:1 mux** (or a 16:1 mux) to select groups of four; configure and home them sequentially, then park the mux and run.
+- There is no need for four hardware UARTs or SPI. The extra part is a ~$0.50 analogue mux.
+- Timing: configuring 16 drivers takes tens of milliseconds; homing in groups of four stays well inside the 60 s of `FR-MOT-010`. Motion does not use UART.
+- Route all 16 DIAG lines to the MCU (or a 74HC165), even though only the active group is homed at a time.
+
+### 12.5 Current and thermal
+
+At the current this duty actually needs, not at driver maximum:
+
+| Configuration | Current @ 0.25 A | Power @ 24 V | Current @ 0.3 A | Power @ 24 V |
+|---------------|------------------|--------------|-----------------|--------------|
+| 16 steppers/board | 4.0 A | 96 W | 4.8 A | 115 W |
+| 32 steppers/board | 8.0 A | 192 W | 9.6 A | 230 W |
+| 120 motors holding | 30 A | 720 W | 36 A | 864 W |
+
+- 0.25–0.3 A RMS still gives roughly 2–4× the torque needed for a 50 g ball, depending on drum (about 0.02 Nm required at 40 mm with 2× margin; ~0.04 Nm available at 0.25 A from a NEMA-14/17 pancake). Do not run the drivers at their 1–2 A rating.
+- On 2 oz copper with wide pours, 8–10 A is not a copper problem (~2 mΩ over a 20 mm × 150 mm pour). **Connectors, harness and ground return are the limit**: 32 motors means 128 motor wires on one board; 16 halves that.
+- Driver dissipation at 0.25 A is ~0.1–0.3 W each, i.e. ~3–10 W per 32-driver board. Enclosure temperature (40 °C) and local airflow decide the heatsink.
+- The **continuous holding current** dominates the 1200 W supply budget, not the motion peaks. 30 A at 24 V is the number to check against PSU sizing and room heat.
+- The faster tier adds acceleration power of roughly `F × v ≈ 0.7 N × 1.2 m/s ≈ 0.8 W` per ball, i.e. ~100 W for 120 balls, and only during accelerations. It does not change the PSU sizing rule, which is set by holding current.
+
+### 12.6 Bench tests to confirm the baseline
+
+1. **I2S mux + 74HC595** at 16 steppers, 15 kHz, on a logic analyser; confirm the 40 kHz ceiling, pulse width and frame quantization.
+2. **WiFi + I2S coexistence**: 16 steppers at 15 kHz with WiFi traffic on the other core; check DMA underrun and step jitter.
+3. **Offset/drift**: two or three nodes with the beacon scheme; measure offset error and drift over 10 minutes. Is 1 ms real?
+4. **Direction reversal**: measure the 500 µs (mux DIR) and ~1 ms (GPIO DIR) pauses against the trajectory model.
+5. **Holding torque at 0.25 A** on the real drum with a 50 g ball; confirm the 3–4× margin and the power-off behaviour of `FR-MOT-011`.
+
+### 12.7 Decision rule
+
+- If tests 1–3 pass, the WiFi-only baseline is confirmed. The hardwired E-stop remains in all cases.
+- If broadcast receive-time cannot hold 1 ms, move to FTM. If FTM also fails, add a single sync wire or relax `FR-SYNC-001` with a visual justification (5 ms = 3 mm at 0.6 m/s and 6 mm at 1.2 m/s; compare the 50 µm criterion of `ASM-014` and the ~300 mm grid pitch).
+- This section changes no requirement. Adopting it requires review of `FR-SYNC-001`, `FR-COMM-004` and `IR-SOFT-003`.
+
+---
+
+## 13. Wired CAN Node — Octopus Pro H723
+
+> Alternative to the WiFi baseline. The H723 variant has an FDCAN controller and an MCP2542 transceiver, 8 drivers, 8 DIAG inputs and a 6P6C RJ11 CAN connector.
+
+### 13.1 CAN or CAN-FD in practice
+
+- The **hardware** is CAN-FD capable: STM32H723 FDCAN + MCP2542 (an FD transceiver).
+- The **COTS software stack is not**. Katapult's STM32H723 configuration uses **classic CAN at 1 Mbit/s**; Klipper also uses classic CAN. CAN-SW-Upgrade over CAN therefore works, but not with CAN-FD frames.
+- True CAN-FD would require a custom bootloader/firmware path; it is not available off the shelf for this board.
+- For this project, classic CAN at 1 Mbit/s is sufficient for both control and firmware upload. CAN-FD is optional future headroom, not a requirement.
+
+### 13.2 Physical node
+
+- 24 V power, 8 motor connectors, one 6P6C RJ11 CAN connector.
+- CAN is a **bus**, not a true daisy-chain: run a trunk with short stubs. Terminate with 120 Ω at the two physical ends only.
+- The schematic shows one CAN connector and a 120 Ω resistor. Check whether that resistor is fitted; if it is fitted on every board, remove it on all intermediate nodes or the bus will be over-terminated.
+- For in/out daisy-chaining, add a second RJ11 in parallel or use a passive splitter at each node.
+
+### 13.3 Firmware update
+
+- Katapult `flashtool.py` can request the bootloader and upload over CAN at 1 Mbit/s.
+- Budget ~10–30 s per board; 15 boards sequentially is roughly 3–8 minutes.
+- No WiFi module is needed, which removes the jamming/AP risk and saves ~€10–15 per board.
+
+**Cost (15 nodes):** ~€1,155 for boards + drivers (no WiFi), plus motors, PSU and CAN harness. That is below the WiFi-based Octopus path.
+
+### 13.4 Master / host options
+
+The Octopus nodes run classic CAN at 1 Mbit/s today, so an FD-capable master gives no speed benefit yet; it is future headroom. Choose the master for compute, storage and maintenance, not for FD.
+
+| Master | CAN-FD | Compute / storage | UI / pattern engine | Firmware update | Verdict |
+|--------|--------|-------------------|---------------------|-----------------|---------|
+| **PC + USB-CAN-FD adapter** | ✅ (adapter) | Best | Native | Katapult `flashtool.py` on the same host | Best for development and exhibition with a PC present |
+| **Raspberry Pi + CAN-FD HAT/adapter** | ✅ | Good | Good | Native | Best standalone Linux host; Klipper-compatible |
+| **ESP32-S3 + MCP2518FD** | ✅ via SPI | Good (dual core, PSRAM) | Limited; PC over WiFi for UI | Needs a CAN bootloader bridge or PC | Best embedded master if no PC |
+| **ESP32-C5** | ✅ on-chip | Modest (single core, 384 KB) | Limited | Same caveat | Cheapest on-chip FD master; least headroom |
+
+**Recommendation:** use a **PC or Raspberry Pi with a USB-CAN-FD adapter** as the master. It runs the pattern engine, logging, simulation and Katapult firmware updates in one place, and the adapter handles bus timing. If the installation must run without a PC, use an **ESP32-S3 + MCP2518FD** as the embedded master and keep the PC as an optional WiFi/Ethernet client.
+
+Configure the master for **classic CAN 1 Mbit/s** while the Octopus nodes are classic; switch to FD only when the node firmware/bootloader actually supports it.
+
+### 11.7 RP2350 CNC boards on the market
+
+RP2350 CNC boards do exist, but almost all are **breakout boards for external drivers**, not integrated multi-driver boards:
+
+| Board | MCU | Axes | Drivers | Connectivity | Approx. price |
+|-------|-----|------|---------|--------------|---------------|
+| **RP23CNC / RP23U5XBB** | RP2350B / RP2354B | 5 | external, screw terminals | USB + Ethernet, UART headers | ~$50 board |
+| **Bolang RP2350 GRBLHAL** | RP2350 | 3/4/5 | external | USB/UART | ~€17–40 |
+| **RP2354B GRBLHAL board** | RP2354B | 3/4/5 | external | USB/UART | ~€17 |
+
+Implications for this project:
+
+- **5 axes per board** means 24 boards / 24 nodes for 120 axes.
+- **No onboard drivers**: add 120 external drivers and their wiring. DIAG must be wired to a limit input; stall detection is not plug-and-play.
+- **No WiFi or CAN**: USB/Ethernet only. They are host-tethered boards, not nodes for a distributed bus.
+- They are useful as a **cheap 5-axis CNC controller for a single machine**, not as a 120-axis node.
+
+The **custom** Pico 2 module carrier (§11.6) remains the better RP2350 option here: 12 onboard TMC2209s, 12/12 DIAG, 10 nodes.
