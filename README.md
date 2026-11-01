@@ -23,52 +23,63 @@ A real-time kinetic art installation featuring **120 polished steel balls** (50 
 | **Balls** | 120 × 50 g polished steel (Ø ≈ 46 mm) |
 | **Grid** | 10 columns × 12 rows |
 | **Travel** | 1000 mm (1 m) |
-| **Max speed** | 4.5 m/s (upward) / 4.43 m/s (downward, free-fall) |
+| **Speed ceiling** | 4.5 m/s (free-fall over 1 m is 4.43 m/s; 4.5 m/s is the rounded ceiling) |
 | **Motor** | NEMA-17 stepper, 20–30 mm drum |
-| **Controller** | ESP32-S3 with CAN-FD @ 1 Mbit/s |
-| **Drivers** | TMC6300 (native CAN-FD) or TMC5160 |
+| **Controller** | ESP32-C5 (on-chip CAN-FD) or ESP32-S3 + MCP2518FD |
+| **Drivers** | TMC5160 (SPI, StallGuard2) or TMC2209 |
 | **Controllers** | 10 units (12 motors each, one per column) |
+| **Bus** | CAN 2.0B at ≥ 1 Mbit/s; CAN-FD optional |
 | **Thread** | Dyneema or Kevlar, 0.5 mm |
+
+> 4.5 m/s bounds the system; it is not a speed every move must reach. A free-fall drop with a short braked catch is a legitimate motion.
 
 ---
 
 ## Documentation
 
-Detailed technical documents are in the [`doc/`](doc/) directory:
+All technical Markdown lives in [`doc/`](doc/). Only this file and [`AGENTS.md`](AGENTS.md) sit at the repository root.
 
 | Document | Description |
 |----------|-------------|
-| [**Controller Analysis**](doc/controller_analysis.md) | ESP32-S3 vs. Pico 2 vs. ATmega328P — CAN, stepping resolution (1/16 µ-step vs. I2S mux), driver comparison |
-| [**System Requirements**](doc/system_requirements.md) | Formal functional & non-functional requirements, interfaces, constraints, traceability matrix |
-| [**Mechanical Analysis**](doc/mechanical_analysis.md) | Physics verification of 4.5 m/s claim, force/torque budgets, thread dynamics, inertia, drum design |
+| [**System Requirements**](doc/system_requirements.md) | Formal functional and non-functional requirements, interfaces, constraints, assumptions |
+| [**Mechanical Analysis**](doc/mechanical_analysis.md) | Speed ceiling, force/torque budgets, thread dynamics, inertia, drum and frame design |
+| [**Controller Analysis**](doc/controller_analysis.md) | Platform and driver selection, stepping resolution, bus budget, clock drift |
+| [**Risk Register**](doc/RISK.md) | Dynamic loads, noise, architecture risks, and mitigations |
+| [**AGENTS.md**](AGENTS.md) | Mission, system overview, and development-environment notes |
 
-## Project Files
+---
 
-| File | Description |
-|------|-------------|
-| [`AGENTS.md`](AGENTS.md) | Development guidelines, controller/motor selection, CAN protocol, firmware structure |
-| [`README.md`](README.md) | This file — project overview and entry point |
+## Repository Structure
+
+```
+Hanging_Balls/
+├── README.md                   # This file — project overview and entry point
+├── AGENTS.md                   # Mission, overview, development notes
+└── doc/
+    ├── system_requirements.md
+    ├── mechanical_analysis.md
+    ├── controller_analysis.md
+    └── RISK.md
+```
 
 ---
 
 ## Patterns
 
-Sine Wave · Standing Wave · Spiral · Random Cascade · Music Reactive · Breathing · Custom Choreography
+Sine Wave · Standing Wave · Spiral · Random Cascade · Music Reactive · Breathing · Diagonal Wave · Custom Choreography
 
 ---
 
-## Status & Roadmap
+## Status
 
-| Phase | Status |
-|-------|--------|
+| Area | Status |
+|------|--------|
 | **Concept & Documentation** | ✅ Complete |
 | **Mechanical Design** | 🔄 In Progress |
 | **Controller Hardware** | ⏳ Planned |
 | **Firmware** | ⏳ Planned |
 | **Simulation** | ⏳ Planned |
-| **Prototype (1 ball)** | ⏳ Planned |
-| **Alpha (12 balls)** | ⏳ Planned |
-| **Full Installation** | ⏳ Planned |
+| **Prototype** | ⏳ Planned |
 
 ---
 

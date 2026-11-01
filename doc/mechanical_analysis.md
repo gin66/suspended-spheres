@@ -20,63 +20,49 @@
 
 ---
 
-## 2. Verification of 4.5 m/s Claim
+## 2. The 4.5 m/s Figure — A Ceiling, Not a Target
 
-### 2.1 Downward Motion — Free-Fall Limit
+### 2.1 Free-Fall Ceiling
 
-When the ball descends, gravity is the driving force. The motor can only **brake** (apply upward force); it cannot pull the ball down faster than gravity.
-
-**Maximum downward speed (free-fall from rest over 1 m):**
+The 4.5 m/s figure is the **upper bound** on system speed, taken from free fall over the 1 m travel:
 
 ```
 v_free_fall = √(2gh) = √(2 × 9.81 × 1.0) = √19.62 = 4.43 m/s
 ```
 
-**Conclusion:** 4.5 m/s downward is **physically impossible** — the absolute limit is **4.43 m/s** (free-fall). The claim of 4.5 m/s must refer to **upward motion** (motor-driven), or is a slight rounding of the free-fall limit.
+This is the fastest a ball can move downward under gravity alone over 1 m; it is specified as 4.5 m/s. It bounds the system but is **not** a speed every move must reach.
 
-### 2.2 Upward Motion — Motor-Driven
+### 2.2 Upward Motion
 
-For upward motion at 4.5 m/s, the motor must overcome gravity AND accelerate the ball upward.
-
-**Scenario A: Full-stroke acceleration (accelerate over entire 1 m)**
+Upward motion is motor-driven. Reaching the ceiling over the full stroke would need:
 
 ```
-Using v² = 2as:
-  a = v² / (2h) = 4.5² / (2 × 1.0) = 20.25 / 2 = 10.125 m/s²
-
-Total acceleration (including gravity compensation):
-  a_total = a + g = 10.125 + 9.81 = 19.935 m/s²
-
-Force on thread:
-  F = m × a_total = 0.050 × 19.935 = 0.997 N ≈ 1.0 N
-
-Time to reach max speed:
-  t = v / a = 4.5 / 10.125 = 0.444 s
+a = v² / (2h) = 4.5² / (2 × 1.0) = 10.125 m/s²
+a_total = a + g = 10.125 + 9.81 = 19.935 m/s²
+F = m × a_total = 0.050 × 19.935 = 0.997 N ≈ 1.0 N
+t = v / a = 4.5 / 10.125 = 0.444 s
 ```
 
-**Scenario B: Trapezoidal profile (accelerate → cruise → decelerate)**
+A trapezoidal profile reaching 4.5 m/s with 0.4 m ramps needs a peak acceleration of 25.31 m/s² and a thread force of 1.756 N.
 
-For a profile where the ball reaches 4.5 m/s, cruises briefly, then decelerates:
+These are worst-case numbers, not a requirement to reach 4.5 m/s upward. Upward acceleration is a separate requirement (`FR-MOT-004`, ≥ 30 m/s²), and a design may choose a lower peak speed.
 
-```
-If accelerate over 0.4 m, cruise at 4.5 m/s, decelerate over 0.4 m:
-  Peak acceleration: a = v² / (2 × 0.4) = 4.5² / 0.8 = 25.31 m/s²
-  a_total = 25.31 + 9.81 = 35.12 m/s²
-  F = 0.050 × 35.12 = 1.756 N
-  Cruise distance: 0.2 m at 4.5 m/s = 0.044 s
-  Total cycle time: ~0.54 s
-```
+**Stopping constraint:** from 4.4 m/s at one g takes about `v² / 2g ≈ 1 m`. An upward move that actually reaches the ceiling cannot then be stopped inside the 1 m travel. While the thread is taut, gravity is the only downward force, so the thread cannot slow an upward ball faster than g.
 
-**Conclusion:** 4.5 m/s upward is **physically achievable** with moderate acceleration. The force on the thread (~1.0–1.8 N) is well within thread strength limits (see §5).
+### 2.3 Free-Fall Drop with a Braked Catch
 
-### 2.3 Free-Fall Downward Limit (Recap)
+A free-fall drop is an artistic motion, not a fault. The thread is allowed to go slack. The catch is a brake over the last few centimetres, down to the last few millimetres.
 
-| Direction | Limiting Factor | Max Speed |
-|-----------|----------------|-----------|
-| **Downward** | Free-fall (gravity) | **4.43 m/s** |
-| **Upward** | Motor torque / RPM | **4.5 m/s** (achievable) |
+A catch from full free-fall speed in only a few millimetres is a hard stop. Thread strength can take it. A stepper at a few thousand RPM usually cannot, because torque has already collapsed. The braked distance has to be checked against the torque-speed curve, not against holding torque. Homing is a separate, slow descent onto the same stop.
 
-> **Note:** The 4.5 m/s claim is valid for **upward motion** only. For downward motion, the hard limit is 4.43 m/s (free-fall over 1 m). The difference is negligible (< 2%) — 4.5 m/s is a reasonable system-wide specification.
+### 2.4 Speed Summary
+
+| Direction | Limiting factor | Speed |
+|-----------|----------------|-------|
+| **Downward** | Free fall over 1 m | **4.43 m/s** (specified as 4.5 m/s) |
+| **Upward** | Motor torque / RPM, bounded by the same ceiling | **≤ 4.5 m/s** |
+
+> The 4.5 m/s figure is the free-fall ceiling rounded up. It is an upper bound, not a target, and it is not specific to upward motion.
 
 ---
 
@@ -89,9 +75,11 @@ If accelerate over 0.4 m, cruise at 4.5 m/s, decelerate over 0.4 m:
 | **Static (hold)** | 0 m/s² | 0.491 N | 0.0049 Nm |
 | **Max upward (4.5 m/s, full stroke)** | 10.125 m/s² | 0.997 N | 0.00997 Nm |
 | **Max upward (trapezoidal, aggressive)** | 25.31 m/s² | 1.756 N | 0.01756 Nm |
-| **Deceleration (stop at top)** | −10.125 m/s² | −0.491 N (slack) | 0 Nm (slack) |
+| **Deceleration faster than g** | < −9.81 m/s² | 0 N (thread slack) | 0 Nm (slack) |
 | **Free fall (down)** | 9.81 m/s² | 0 N (slack) | 0 Nm (slack) |
 | **Braking descent** | −5 m/s² (braking) | 0.741 N | 0.00741 Nm |
+
+> The thread only pulls. When downward acceleration exceeds g, `m(g + a)` goes negative, which the thread cannot supply, so it goes slack. The earlier −0.491 N row was simply −mg, not `m(g + a)`.
 
 ### 3.2 Torque vs. Drum Diameter
 
@@ -136,24 +124,26 @@ RPM = v × 60 / (π × drum_Ø)
 
 ### 4.2 Motor RPM Ratings
 
-| Motor | Typical Max RPM | 10 mm Drum | 15 mm Drum | 20 mm Drum | 30 mm Drum |
-|-------|----------------|-----------|-----------|-----------|-----------|
-| 28BYJ-48 (geared) | ~1000 RPM (output) | ❌ 8.6× over | ❌ 5.7× over | ✅ OK | ✅ OK |
-| NEMA-11 (24×24) | 3000–6000 RPM | ❌ 1.4–2.9× over | ✅ within range | ✅ within range | ✅ within range |
-| **NEMA-17 (42×42)** | **2000–4000 RPM** | ❌ 2.1–4.3× over | ✅ 1.4–2.9× over | ✅ **0.9–2.1× over** | ✅ within range |
+| Motor | Typical Max Output RPM | 10 mm Drum | 15 mm Drum | 20 mm Drum | 25 mm Drum | 30 mm Drum |
+|-------|-----------------------|-----------|-----------|-----------|-----------|-----------|
+| 28BYJ-48 (geared) | ~15 RPM at the output shaft | ❌ | ❌ | ❌ | ❌ | ❌ |
+| NEMA-11 (24×24) | 3000–6000 RPM | ❌ 1.4–2.9× over | ✅ within range | ✅ within range | ✅ within range | ✅ within range |
+| **NEMA-17 (42×42)** | **2000–4000 RPM** | ❌ | ❌ 1.4–2.9× over | ⚠️ 4297 RPM, just over | ✅ 3438 RPM | ✅ 2865 RPM |
+
+> The 28BYJ-48's 1:64 gearbox puts the output shaft at roughly 15 RPM; it cannot track this travel at any drum size. Its earlier "~1000 RPM" and its acceptable verdicts at 20–30 mm were wrong.
 
 ### 4.3 Drum Diameter Recommendation
 
-| Criterion | 10 mm | 15 mm | **20 mm** | 30 mm |
-|-----------|-------|-------|-----------|-------|
-| RPM @ 4.5 m/s | 8600 | 5735 | **4297** | 2865 |
-| Torque @ 1 N | 0.005 Nm | 0.0074 Nm | **0.010 Nm** | 0.015 Nm |
-| NEMA-17 margin | 2–4× over | 1.4–2.9× over | **0.9–2.1× over** | within range |
-| Thread capacity (layers) | Low | Medium | **Good** | Excellent |
-| Size / weight | Smallest | Small | **Medium** | Large |
-| **Verdict** | ❌ Too fast | ⚠️ Borderline | ✅ **Sweet spot** | Acceptable |
+| Criterion | 10 mm | 15 mm | 20 mm | **25 mm** | 30 mm |
+|-----------|-------|-------|-------|-----------|-------|
+| RPM @ 4.5 m/s | 8602 | 5735 | 4297 | **3438** | 2865 |
+| Torque @ 1.76 N | 0.0088 Nm | 0.0132 Nm | 0.0176 Nm | **0.0220 Nm** | 0.0263 Nm |
+| NEMA-17 (2000–4000 RPM) | ❌ | ❌ | ⚠️ just over | ✅ **within range** | ✅ within range |
+| Thread winding | Tight | Workable | Workable | **Good (single layer)** | Good |
+| Size / weight | Smallest | Small | Medium | **Medium** | Large |
+| **Verdict** | ❌ Too fast | ⚠️ Borderline | ⚠️ Marginal | ✅ **Sweet spot** | ✅ Acceptable |
 
-> **Recommendation: 20 mm drum** (or 25 mm for extra margin). At 4.5 m/s, a 20 mm drum requires ~4300 RPM — within the NEMA-17 range with modest derating. Torque is minimal (~10 mNm), so even modest motors handle it easily.
+> **Recommendation: 25 mm drum.** At 4.5 m/s it requires ~3440 RPM, inside the NEMA-17 range with margin. A 20 mm drum needs ~4300 RPM, which is just over the top of that range. Torque is minimal (~22 mNm at 25 mm), so even modest motors handle it easily.
 
 ---
 
@@ -184,13 +174,13 @@ Where:
 
 **Dyneema (E ≈ 120 GPa), 0.5 mm Ø, 1.5 m length:**
 
-| Load | Force | Elongation |
-|------|-------|-----------|
-| Static (50 g ball) | 0.49 N | **0.059 mm** |
-| Max acceleration (trapezoidal) | 1.76 N | **0.21 mm** |
-| Max acceleration (full stroke) | 1.0 N | **0.12 mm** |
+| Load | Force | Elongation (k = 15.7 kN/m) |
+|------|-------|---------------------------|
+| Static (50 g ball) | 0.49 N | **0.031 mm** |
+| Max acceleration (trapezoidal) | 1.76 N | **0.11 mm** |
+| Max acceleration (full stroke) | 1.0 N | **0.064 mm** |
 
-**Conclusion:** Thread stretch is sub-millimeter — negligible for visual smoothness. Dynamic oscillations from rapid direction changes are the more significant concern (see §5.3).
+**Conclusion:** Thread stretch is sub-millimeter — negligible for visual smoothness. These are lower bounds: a braided rope stretches more than the solid-fibre modulus predicts. `ASM-002`'s < 100 µm is the governing limit and is tighter than this idealised calculation. Dynamic oscillations from rapid direction changes are the more significant concern (see §5.3).
 
 ### 5.3 Thread Dynamic Response (Spring-Mass System)
 
@@ -235,10 +225,10 @@ F_drag = 0.5 × ρ_air × C_d × A × v²
   A = π × (0.023)² = 0.00166 m²
   v = 4.5 m/s
 
-F_drag = 0.5 × 1.225 × 0.47 × 0.00166 × 4.5² = 0.00485 N ≈ 5 mN
+F_drag = 0.5 × 1.225 × 0.47 × 0.00166 × 4.5² = 0.0097 N ≈ 10 mN
 ```
 
-**Comparison to ball weight:** 5 mN / 491 mN = **1%** of ball weight.
+**Comparison to ball weight:** 10 mN / 491 mN = **2%** of ball weight.
 
 **Conclusion:** Air resistance is negligible at 4.5 m/s.
 
@@ -260,28 +250,30 @@ I_linear = I_rotational / r²
 ```
 m_drum = ρ × π × (r_o² - r_i²) × L
        = 2700 × π × (0.01² - 0.0075²) × 0.02
-       = 5.85 g
+       = 7.4 g
 I_drum = (1/2) × m × (r_o² + r_i²)
-       = (1/2) × 0.00585 × (0.01² + 0.0075²)
-       = 4.57 × 10⁻⁷ kg·m²
+       = (1/2) × 0.0074 × (0.01² + 0.0075²)
+       = 5.8 × 10⁻⁷ kg·m²
 ```
 
 **Total rotational inertia:**
 ```
-I_total = I_motor + I_drum = 10⁻⁵ + 4.57 × 10⁻⁷ = 1.046 × 10⁻⁵ kg·m²
+I_total = I_motor + I_drum = 10⁻⁵ + 5.8 × 10⁻⁷ = 1.058 × 10⁻⁵ kg·m²
 ```
 
 **Reflected to linear domain (20 mm drum, r = 10 mm):**
 ```
-I_linear = I_total / r² = 1.046 × 10⁻⁵ / 0.0001 = 0.1046 kg
+I_linear = I_total / r² = 1.058 × 10⁻⁵ / 0.0001 = 0.106 kg
 ```
 
 **Effective mass for acceleration:**
 ```
-m_effective = m_ball + I_linear = 0.050 + 0.1046 = 0.1546 kg
+m_effective = m_ball + I_linear = 0.050 + 0.106 = 0.156 kg
 ```
 
-> **Key insight:** The reflected motor inertia is **3× the ball mass**. The motor must accelerate 0.155 kg (not just 0.050 kg) for the same linear acceleration.
+> **Key insight:** The reflected inertia is about **2.1× the ball mass**. The motor must accelerate 0.156 kg (not just 0.050 kg) for the same linear acceleration.
+
+**Winding constraint:** keep the wind single-layer. One metre of thread on a 25 mm drum is about 13 turns — under 7 mm of drum width. A second layer changes the effective radius and therefore the millimetres per step, which corrupts the position scale.
 
 ### 6.2 Revised Force with Reflected Inertia
 
@@ -356,6 +348,8 @@ For a drum of length 20 mm and thread Ø 0.5 mm:
 
 > **Conclusion:** Even a single layer (40 turns) provides 0.6–1.3 m of thread — sufficient for 1 m travel plus suspension. Multiple layers provide generous margin.
 
+> **Keep the wind single-layer.** A second layer changes the effective drum radius and therefore the millimetres per step, which corrupts the position scale. One metre of thread on a 25 mm drum is about 13 turns — under 7 mm of drum width — so a single layer is practical.
+
 ### 8.3 Drum Material Options
 
 | Material | Density | Machinability | Cost | Recommendation |
@@ -401,444 +395,63 @@ For a drum of length 20 mm and thread Ø 0.5 mm:
 
 ---
 
-## 10. Pendulum Analysis — Ball Swing Due to Vertical Motion
+## 10. Lateral Motion — What Vertical Drive Can and Cannot Do
 
-When a ball hangs from a thread and the thread endpoint moves vertically, the ball naturally acts as a **pendulum**. The vertical motion of the thread excites pendulum modes, causing the ball to swing horizontally. This is one of the most significant visual and mechanical challenges in the system.
-
-### 10.1 Pendulum Physics — Why It Happens
-
-The ball–thread system is a **parametric pendulum**: the pivot point (thread attachment on the drum) moves vertically, which modulates the effective gravitational restoring force.
-
-**Simple pendulum frequency:**
-```
-f_pendulum = (1/2π) × √(g / L_thread)
-```
-
-For typical thread lengths (distance from drum to ball center):
-
-| Thread Length (L) | Pendulum Frequency | Period |
-|-------------------|-------------------|--------|
-| 1.0 m | 0.50 Hz | 2.0 s |
-| 1.5 m | 0.41 Hz | 2.4 s |
-| 2.0 m | 0.35 Hz | 2.8 s |
-| 2.5 m | 0.31 Hz | 3.2 s |
-
-**Key insight:** The pendulum period (2–3 seconds) is much slower than the ball's vertical motion (milliseconds to seconds). This means:
-
-1. **Rapid vertical accelerations** (up/down at 4.5 m/s) impart horizontal impulse to the ball — the ball "lags" behind the vertical motion because it has inertia.
-2. **Direction changes** are the worst offenders: when the ball reverses direction, the thread pivot point accelerates but the ball continues in its previous direction, creating maximum pendulum excitation.
-3. **Standing waves** (balls oscillating in place) are especially problematic — the ball swings more because it never "resets" at a fixed position.
-
-### 10.2 Pendulum Excitation Quantified
-
-**Horizontal displacement from vertical acceleration:**
-```
-x(t) ≈ -a_vertical(t) / ω_pendulum²
-```
-
-For a ball at L = 1.5 m (ω_pendulum = 2.56 rad/s):
-
-| Vertical Accel. | Horizontal Swing (peak) |
-|----------------|----------------------|
-| 10 m/s² (gentle) | **1.53 m** — huge! |
-| 15 m/s² (moderate) | **2.29 m** — catastrophic! |
-| 20 m/s² (aggressive) | **3.06 m** — completely unusable! |
-| 5 m/s² (slow) | **0.76 m** — still large |
-| 2 m/s² (very slow) | **0.31 m** — noticeable |
-| 0.5 m/s² (gentle) | **0.077 m** = 77 mm — acceptable |
-
-> **Critical finding:** At the accelerations needed for 4.5 m/s (10–25 m/s²), pendulum swing is **massive** — the ball would swing 1–3 meters horizontally, far exceeding the grid spacing (80–120 mm). **This is the single biggest mechanical challenge.**
-
-### 10.3 Pendulum Suppression Proposals (≥ 8 Ideas)
-
-Below are **8+ mechanical and control-based strategies** to suppress, mitigate, or exploit pendulum motion. They are listed from most practical to most exotic.
-
----
-
-#### Proposal 1: **Low-Acceleration Motion Profiles (Control-Based)**
-
-**Concept:** Limit acceleration so pendulum swing stays within acceptable bounds.
-
-**Analysis:**
-```
-Max acceleration for ≤ 10 mm horizontal swing at L = 1.5 m:
-  a_max = x_max × ω_pendulum² = 0.01 × 2.56² = 0.065 m/s²
-```
-
-This is **far too low** for meaningful vertical motion. Even 50 mm swing requires only 0.33 m/s².
-
-**Verdict:** ❌ **Not viable alone.** Pendulum swing scales linearly with acceleration, and the acceleration needed for 4.5 m/s over 1 m is ~10 m/s² — producing meter-scale swings. Must be combined with other methods.
-
----
-
-#### Proposal 2: **Passive Pendulum Damper (Mass-Damper on Thread)**
-
-**Concept:** Attach a small secondary mass (damping weight) to the thread between the drum and the ball. This mass provides viscous damping to the pendulum mode.
-
-**Design:**
-- A small ring (5–10 g) threaded onto the main thread, free to slide
-- Damping via friction or viscoelastic material
-- Positioned at ~1/3 of thread length (where pendulum amplitude is highest)
-
-**Effect:**
-- Converts underdamped pendulum (ζ ≈ 0.01) to critically damped (ζ ≈ 0.3–0.5)
-- Reduces pendulum settling time from ~0.35 s to ~0.05 s
-- Does NOT reduce peak swing, but reduces oscillation duration
-
-**Verdict:** ✅ **Good supplementary measure.** Reduces oscillation duration but not peak swing. Cheap, simple, effective for settling.
-
----
-
-#### Proposal 3: **Active Pendulum Compensation (Control-Based)**
-
-**Concept:** Use the **adjacent balls** (or the same ball's known pendulum mode) to cancel swing. The controller predicts pendulum response and applies counter-motion.
-
-**Approach A — Feedforward cancellation:**
-- Model the pendulum as a second-order system
-- When commanding a vertical move, pre-compute the pendulum response
-- Apply a compensating horizontal force (via asymmetric thread routing or a small horizontal actuator)
-
-**Approach B — Inverted pendulum control:**
-- Treat the ball as an inverted pendulum (unstable equilibrium)
-- Use the vertical motion to actively stabilize the pendulum angle
-- Requires IMU on each ball for angle feedback
-
-**Approach C — Coupled-ball cancellation:**
-- Neighboring balls (80–120 mm apart) are driven with phase offsets
-- Pendulum swings of adjacent balls destructively interfere
-- Requires precise coordination
-
-**Verdict:** ✅ **Most elegant solution for high-speed patterns.** Requires IMU on each ball (accelerometer + gyroscope, ~$2–5) and real-time pendulum state estimation. Feedforward is simpler; feedback is more robust.
-
----
-
-#### Proposal 4: **Rigid Rod instead of Thread**
-
-**Concept:** Replace the flexible thread with a lightweight rigid rod (carbon fiber tube, Ø 1–2 mm).
-
-**Effect on pendulum:**
-- A rigid rod **does not change the pendulum frequency** (same mass, same length)
-- BUT it provides **torsional stiffness** — the ball can no longer swing independently of the rod
-- The ball is forced to follow the rod's motion exactly
-- Pendulum mode is **eliminated** — the ball becomes a rigid extension of the drive
-
-**Trade-offs:**
-- Carbon fiber tube (Ø 2 mm, 1.5 m): ~1.5 g, bending stiffness sufficient to prevent visible swing
-- Rod must slide through a low-friction guide at the drum
-- Rod adds ~3 g per station (vs 0.5 g thread)
-- Rod cannot be wound on a drum — must use a different drive mechanism (rack-and-pinion, linear actuator, or cable reeving)
-
-**Drive modification:** Instead of winding thread on a drum, use a **linear actuator** (belt drive, rack, or push-pull rod).
-
-**Verdict:** ✅ **Excellent for eliminating pendulum.** Requires rethinking the drive mechanism (no more simple drum winding), but completely eliminates pendulum. Carbon fiber rod + belt drive is the way.
-
----
-
-#### Proposal 5: **Cable Reeving (Block-and-Tackle Pendulum Cancellation)**
-
-**Concept:** Use a reeving system where the thread goes from the drum, through a **pulley attached to the ball**, back up to a fixed point on the frame. The ball hangs from the pulley.
+A hanging ball has a pendulum mode:
 
 ```
-  Frame top (fixed point)
-    │
-    ├─ Thread segment 1 (fixed to frame)
-    │
-    └─ Pulley on ball
-         │
-         ├─ Thread segment 2 (to drum)
-         │
-         └─ Ball (hanging from pulley)
+f_p = (1 / 2π) × √(g / L)
 ```
 
-**Effect:**
-- The ball is suspended from a pulley — it **cannot swing** because the pulley constrains the ball's orientation
-- The thread length from drum to pulley determines vertical motion
-- Mechanical advantage: 2:1 (drum moves 2× the ball distance)
-- **Pendulum is mechanically eliminated** — the ball hangs from the pulley and follows the thread angle
+For a 1.0–1.5 m thread, `f_p ≈ 0.4–0.5 Hz` (period 2.0–2.4 s).
 
-**Trade-offs:**
-- Requires a small pulley on each ball (adds complexity)
-- 2:1 mechanical advantage means drum must move 2 m for 1 m ball travel
-- Double the thread usage
-- Pulley adds ~2 g per station
+### 10.1 Vertical Motion Does Not Throw the Ball Sideways
 
-**Verdict:** ✅ **Very effective.** Eliminates pendulum mechanically. The 2:1 advantage means the drum must handle 2 m of travel, but this is straightforward. Pulley on ball is the key innovation.
+The common formula `x ≈ −a / ω²` describes the lean of a pendulum whose **support accelerates horizontally**. A support that moves only vertically does not apply a horizontal force, so it does not throw a hanging ball sideways. Applying that formula to vertical drive produces the earlier meter-scale swing figures, which are wrong.
 
----
+### 10.2 What Can Excite Lateral Motion
 
-#### Proposal 6: **Gimbal Mount on Ball**
+1. **Parametric excitation.** Vertical acceleration modulates thread tension. This can pump energy into a swing that already exists, most strongly when the drive oscillates near **twice** the pendulum frequency. With `f_p ≈ 0.4–0.5 Hz`, resonance is around 0.8–1.0 Hz. Avoid sustained vertical oscillation near `2 f_p`, or damp the mode.
+2. **Slack catch.** In a free-fall drop the thread may go slack. If it is caught while the ball is off vertical, the ball swings. Keep the drop vertical and the catch centred.
+3. **Pre-existing swing or off-vertical lead-out.** Keep the drum-to-ball path vertical and the take-off point fixed.
 
-**Concept:** Attach the thread to a **gimbal** mounted on the ball. The gimbal allows the ball to rotate freely while the thread angle is controlled.
+### 10.3 Spacing Is the Practical Limit
 
-```
-  Thread
-    │
-    ├─ Gimbal ring (free rotation)
-    │   │
-    │   ├─ Ball (fixed to gimbal)
-    │   └─ Gimbal bearing (low friction)
-```
+At the minimum 80 mm pitch, the 46 mm ball leaves about **34 mm between neighbours**. Any residual swing, from any cause, has to stay well below that gap.
 
-**Effect:**
-- The thread angle determines the pendulum direction
-- The ball hangs vertically due to gravity (self-leveling)
-- **Pendulum swing is transferred to the thread angle, not the ball orientation**
-- Visually, the ball stays level — only the thread angle changes
+### 10.4 Mitigation
 
-**Trade-offs:**
-- Adds ~3 g per ball (gimbal mechanism)
-- Requires low-friction bearing (ceramic ball bearing, ~$0.50)
-- Thread still swings — ball stays vertical but thread angle changes
-- Does NOT eliminate pendulum, but **decouples** it from visual appearance
+- Keep the take-off point fixed and the thread path vertical.
+- Use damped or coated thread to shorten any oscillation that starts.
+- Avoid sustained vertical oscillation near `2 f_p`.
+- A guide tube or rigid rod mechanically constrains lateral motion if the design needs it, but the vertical-drive physics above does not require one.
 
-**Verdict:** ✅ **Good for visual quality.** The ball stays visually level even when the thread swings. Does not reduce pendulum amplitude but makes it less noticeable. Combine with Proposal 3 (active compensation) for best results.
+> The earlier ``x ≈ −a/ω²`` table, the "1.5 m swing at 10 m/s²" result, and the guide-tube / rod / per-ball-sensor proposals that followed from it were based on horizontal-support motion and have been removed.
 
----
+## 11. Summary of the 4.5 m/s Ceiling
 
-#### Proposal 7: **Damping via Magnetic Braking**
-
-**Concept:** Place a magnet above/below each ball's swing path. As the ball swings, eddy currents in a nearby conductive plate (copper or aluminum) damp the pendulum motion.
-
-**Design:**
-- Neodymium magnet attached to ball or thread
-- Copper plate positioned near swing path
-- Eddy current damping force: F_damp ∝ v_horizontal
-
-**Damping coefficient:**
-```
-ζ_magnetic ≈ (B² × A_plate × t_plate) / (2 × R × m × ω_pendulum × L²)
-```
-
-Typical values (small magnet, copper plate):
-- ζ ≈ 0.1–0.3 (moderate damping)
-- Settling time: 0.1–0.2 s (vs 0.35 s passive)
-
-**Trade-offs:**
-- Magnets add ~5 g per ball
-- Copper plates add ~10 g per station (frame-mounted)
-- No electrical connections needed (passive)
-- Damping strength depends on swing speed (nonlinear)
-
-**Verdict:** ✅ **Effective passive damping.** Simple, no electronics needed. Moderate damping — reduces settling time by 40–60%. Combine with other methods for best results.
-
----
-
-#### Proposal 8: **Viscoelastic Thread Coating**
-
-**Concept:** Use a thread with inherent viscoelastic damping — e.g., a coated Dyneema or a composite thread (Dyneema core + viscoelastic polymer sheath).
-
-**Effect:**
-- Polymer sheath provides internal friction during bending/stretching
-- Damping ratio increases from ζ ≈ 0.01 (bare Dyneema) to ζ ≈ 0.05–0.15
-- Settling time: 0.1–0.2 s (vs 0.35 s bare thread)
-
-**Trade-offs:**
-- Slightly thicker thread (0.6–0.8 mm vs 0.5 mm)
-- Higher cost per meter
-- May affect drum winding characteristics
-- Does NOT reduce peak swing, only oscillation duration
-
-**Verdict:** ✅ **Simple and effective supplementary measure.** Easy to implement — just buy different thread. Best combined with other methods.
-
----
-
-#### Proposal 9: **Dual-Thread Suspension (Cross-Braced)**
-
-**Concept:** Each ball is suspended by **two threads** crossing at an angle, forming a V-shape. The ball hangs at the vertex.
-
-```
-  Drum (left)       Drum (right)
-       \             /
-        \           /
-         \         /
-          \       /
-           \     /
-            \   /
-             \ /
-              ●  (ball)
-```
-
-**Effect:**
-- The V-angle constrains horizontal motion
-- For a V-angle of 30° (15° from vertical per thread):
-  - Horizontal displacement is resisted by both threads
-  - Effective horizontal spring constant: k_h = 2 × T × sin(θ) / L
-  - Pendulum frequency increases: f_new = f_pendulum / sin(θ)
-  - For 15°: f_new = 0.41 / sin(15°) = 1.58 Hz (period 0.63 s)
-  - **Pendulum frequency quadrupled** → swing is much smaller for same acceleration
-
-**Pendulum swing with dual-thread (15° angle, L = 1.5 m):**
-```
-x_max = a / ω_new² = a / (2π × 1.58)²
-For a = 10 m/s²: x_max = 10 / 98.5 = 0.10 m = 100 mm
-```
-vs. 1.53 m with single thread (same acceleration).
-
-**Trade-offs:**
-- Requires 2 drums per ball (or 2 thread paths per drum)
-- Doubles thread usage
-- More complex drum mechanism
-- V-angle must be carefully designed (too steep = high tension)
-
-**Verdict:** ✅ **Very effective at reducing swing amplitude.** 15° V-angle reduces swing by ~85%. Requires more complex drum but eliminates the need for active compensation.
-
----
-
-#### Proposal 10: **Ball Guide Tube (Linear Bearing)**
-
-**Concept:** Each ball hangs inside a **transparent vertical guide tube** (PVC or acrylic, Ø 60–80 mm). The thread passes through the tube. The ball is constrained to move only vertically.
-
-```
-  ┌─────────────┐
-  │  Guide Tube  │  ← transparent acrylic, Ø 70 mm
-  │             │
-  │      ●      │  ← ball hangs inside
-  │             │
-  └─────────────┘
-```
-
-**Effect:**
-- Ball is physically constrained to vertical motion
-- Pendulum swing is **eliminated** — the ball cannot swing outside the tube
-- Air damping inside tube provides additional damping
-- Tube acts as a visual element (can be colored/frosted)
-
-**Trade-offs:**
-- 120 guide tubes (one per ball) — significant BOM
-- Tube adds ~200 g per station (acrylic, 70 mm Ø, 1.5 m long)
-- Total additional weight: 120 × 0.2 kg = 24 kg
-- Tube must be transparent for visual effect
-- Air resistance inside tube may cause slight drag
-
-**Verdict:** ✅ **Most robust solution.** Completely eliminates pendulum. Adds ~24 kg total weight but provides clean, controlled motion. Visually, the ball appears to float inside the tube — could be an artistic feature.
-
----
-
-#### Proposal 11: **Counter-Swing Pattern Design**
-
-**Concept:** Design patterns where pendulum motion is **exploited** rather than suppressed. Adjacent balls are driven with phase offsets that cause pendulum swings to cancel.
-
-**Approach:**
-- Each ball's pendulum response is predictable (f_pendulum ≈ 0.41 Hz)
-- Drive adjacent balls with a phase offset such that their pendulum swings are 180° out of phase
-- Net horizontal displacement at any point is minimized
-
-**Example — Counter-swing wave:**
-```
-Ball 1: moves up → pendulum swings right
-Ball 2: moves up 2.4 s later → pendulum swings left (canceling Ball 1)
-Ball 3: moves up 2.4 s later → pendulum swings right (canceling Ball 2)
-```
-
-**Trade-offs:**
-- Pattern-specific — works for some patterns, not all
-- Requires precise timing (pendulum period ~2.4 s)
-- Does not eliminate swing, only redistributes it
-- Difficult to predict for complex patterns
-
-**Verdict:** ⚠️ **Interesting but limited.** Works well for slow, wave-like patterns. Not practical for fast, aggressive motion. Best as a pattern design tool rather than a mechanical solution.
-
----
-
-#### Proposal 12: **Active Pendulum Control via IMU Feedback**
-
-**Concept:** Each ball carries a small IMU (accelerometer + gyroscope). The controller measures pendulum angle in real-time and adjusts vertical motion to cancel swing.
-
-**System:**
-```
-  IMU on ball (accelerometer + gyroscope)
-    │
-    ├─ Measures pendulum angle θ(t)
-    ├─ Sends θ, θ_dot via CAN to controller
-    └─ Controller computes compensating vertical acceleration a_comp(t)
-    └─ Commands motor to apply a_comp(t) to cancel pendulum
-```
-
-**Control law (state feedback):**
-```
-a_comp(t) = -K_θ × θ(t) - K_θ_dot × θ_dot(t)
-```
-
-**Performance:**
-- Bandwidth: limited by CAN latency (~5 ms) and motor response
-- Can reduce pendulum swing by 80–95% for slow patterns
-- Real-time estimation of pendulum state (angle, angular velocity)
-- Kalman filter fuses accelerometer (angle from gravity) + gyroscope (angle rate)
-
-**IMU specs:**
-- MPU-6050 (6-axis, I2C): ~$2, ±250–2000°/s gyro, ±2–16 g accelerometer
-- BMI160 (6-axis, SPI): ~$3, better performance
-- Size: 2.5 × 3.0 × 0.9 mm (bare die)
-- Power: ~300 µA (sleep), ~3 mA (active)
-
-**Trade-offs:**
-- Adds ~3 g per ball (IMU + tiny PCB)
-- Requires wireless communication from each ball (Bluetooth LE, or conductive slip ring)
-- Power for IMU (3 mA × 120 = 360 mA total — manageable)
-- Complexity: real-time control loop at 100+ Hz
-
-**Verdict:** ✅ **Most sophisticated solution.** High complexity but highest performance. Best for high-end installations where visual perfection is critical. The wireless communication from each ball is the main challenge.
-
----
-
-### 10.4 Pendulum Suppression — Recommended Approach
-
-**For a production system, a combination of methods is recommended:**
-
-| Method | Role | Complexity | Cost |
-|--------|------|-----------|------|
-| **Proposal 4: Rigid rod** | Eliminates pendulum mechanically | Medium | $$ |
-| **Proposal 5: Cable reeving** | Alternative: eliminates pendulum mechanically | Medium | $$ |
-| **Proposal 10: Guide tube** | Most robust: eliminates pendulum mechanically | High | $$$ |
-| **Proposal 9: Dual-thread** | Reduces swing by 85% | Medium | $$ |
-| **Proposal 3: Active compensation** | Reduces swing by 80–95% | High | $$ |
-| **Proposal 7: Magnetic damping** | Reduces settling time 40–60% | Low | $ |
-| **Proposal 8: Damped thread** | Reduces settling time 40–60% | Low | $ |
-| **Proposal 2: Passive damper** | Reduces settling time 85% | Low | ¢ |
-
-**Recommended combination for production:**
-
-| Priority | Combination | Result |
-|----------|------------|--------|
-| **Best visual quality** | Proposal 4 (rigid rod) + Proposal 3 (IMU feedback) | Pendulum eliminated, residual < 1 mm |
-| **Best cost/performance** | Proposal 10 (guide tube) | Pendulum eliminated, simple, robust |
-| **Best simplicity** | Proposal 9 (dual-thread, 15°) + Proposal 7 (magnetic damping) | Swing reduced 85%, settling < 0.1 s |
-| **Prototype / low budget** | Proposal 8 (damped thread) + Proposal 2 (passive damper) | Settling time ~0.15 s, acceptable for slow patterns |
-
-### 10.5 Recommendation Summary
-
-**For a high-quality installation where visual perfection is paramount:**
-→ **Proposal 10 (Guide Tube)** — completely eliminates pendulum, adds ~24 kg total weight, provides clean visual presentation.
-
-**For a balance of cost and performance:**
-→ **Proposal 9 (Dual-Thread, 15° V-angle) + Proposal 7 (Magnetic Damping)** — reduces swing by 85%, settling time < 0.1 s, moderate mechanical complexity.
-
-**For the most elegant (but complex) solution:**
-→ **Proposal 4 (Rigid Carbon Fiber Rod) + Proposal 3 (IMU-based Active Control)** — eliminates pendulum mechanically and compensates residual errors electronically.
-
----
-
-## 11. Summary of 4.5 m/s Verification
-
-| Aspect | Claim | Verified | Notes |
-|--------|-------|----------|-------|
-| **Downward max** | 4.5 m/s | **4.43 m/s** | Free-fall limit (9.81 m/s² over 1 m) |
-| **Upward max** | 4.5 m/s | ✅ **Achievable** | Motor torque sufficient, RPM within range |
-| **Thread strength** | — | ✅ **588 N breaking** | Max operating force ~2.7 N (218× safety factor) |
-| **Thread stretch** | — | **0.21 mm max** | Negligible for visual smoothness |
-| **Thread oscillation** | — | **89 Hz natural freq** | Low damping → ~0.35 s settling after direction change |
-| **Air resistance** | — | **5 mN @ 4.5 m/s** | 1% of ball weight, negligible |
-| **Motor torque** | — | **30 N @ 20 mm drum** | 11× margin over required 2.72 N (with inertia) |
-| **Motor RPM** | — | **4297 RPM @ 20 mm drum** | Within NEMA-17 range (2000–4000 RPM) |
+| Aspect | Result | Notes |
+|--------|--------|-------|
+| **Downward ceiling** | **4.43 m/s** | Free-fall limit over 1 m; specified as 4.5 m/s |
+| **Upward ceiling** | **≤ 4.5 m/s** | Motor-driven, bounded by the same figure |
+| **Upward acceleration** | Requirement ≥ 30 m/s² | Speed is a ceiling; acceleration is the separate requirement |
+| **Thread strength** | ✅ **588 N breaking** | Max operating force ~2.7 N (218× safety factor) |
+| **Thread stretch** | **0.11 mm max** | Idealised lower bound; `ASM-002` governs at < 100 µm |
+| **Thread axial oscillation** | **89 Hz natural frequency** | Low damping → ~0.35 s settling after direction change |
+| **Pendulum mode** | **0.4–0.5 Hz** | Excited parametrically near `2 f_p` or by an off-vertical slack catch |
+| **Air resistance** | **10 mN @ 4.5 m/s** | 2% of ball weight, negligible |
+| **Motor torque** | **30 N @ 20 mm drum** | 11× margin over required 2.72 N (with inertia) |
+| **Motor RPM** | **3438 RPM @ 25 mm drum** | Within the NEMA-17 range (2000–4000 RPM) |
 
 ### Final Verdict
 
-**The 4.5 m/s claim is VALID for upward motion and essentially VALID for downward motion** (4.43 m/s free-fall limit).
+**4.5 m/s is the free-fall ceiling over the 1 m travel, rounded up from 4.43 m/s.** It bounds the system; it is not a speed every move must reach, and the design does not need to size the motor as if it must hit the ceiling upward.
 
 **Practical limiting factors (in order of significance):**
 1. **Thread oscillation** (low damping, ~0.35 s settling) — limits rapid direction changes
-2. **Motor RPM** — 4000 RPM limit at 20 mm drum (4297 RPM needed for 4.5 m/s) → use 25 mm drum for margin
-3. **Acceleration / jerk** — high acceleration amplifies thread oscillation
-4. **Thread elasticity** — sub-millimeter stretch, negligible
+2. **Motor RPM** — 4000 RPM limit; use a 25 mm drum to keep the 4.5 m/s ceiling inside the NEMA-17 range
+3. **Stopping distance** — from the ceiling, stopping at one g takes about 1 m, so a move that reaches the ceiling cannot also stop inside the travel while the thread is taut
+4. **Catch from free fall** — must be checked against the torque-speed curve, not holding torque
+5. **Thread elasticity** — sub-millimeter, negligible
 
-**Recommendation:** Use a **25 mm drum** to keep motor RPM at ~3440 RPM (within NEMA-17 range with margin), and limit acceleration to ~15 m/s² to minimize thread oscillation while still achieving 4.5 m/s over the full stroke.
+**Recommendation:** Use a **25 mm drum** (~3440 RPM at the ceiling) and keep the wind single-layer. Treat 4.5 m/s as the ceiling; choose acceleration from `FR-MOT-004` and the catch design, not from the ceiling.

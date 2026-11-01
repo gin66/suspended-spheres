@@ -12,32 +12,33 @@ Before evaluating controllers, we define the hard requirements:
 |-------------|-------|
 | Motors per controller | 12 (one column) |
 | Communication | CAN 2.0B or CAN-FD @ 1 Mbit/s |
-| Max per-ball speed | 4.5 m/s |
-| Max per-ball acceleration | ~50 m/s² (est.) |
+| Speed ceiling | 4.5 m/s (free fall over 1 m; a bound, not a target) |
+| Per-ball acceleration | ≥ 30 m/s² (`FR-MOT-004`) |
 | Synchronization precision | < 1 ms across all 120 balls |
-| Endstop detection | StallGuard / current monitoring |
+| Endstop detection | Stall current or a switch at the lower stop |
 | Real-time motion control | Yes — deterministic timing |
 
 ---
 
 ## 2. Candidate Platforms
 
-### 2.1 ESP32-S3 (Recommended)
+### 2.1 ESP32-S3 (classic CAN; CAN-FD needs an external controller)
 
 | Specification | Value |
 |--------------|-------|
 | **CPU** | Dual-core Xtensa LX7, 240 MHz |
-| **Flash** | 8 MB+ (QSPI) |
+| **Flash** | 8 MB+ (QSPI module) |
 | **SRAM** | 512 KB (internal) + up to 16 MB PSRAM |
-| **CAN** | Native CAN 2.0B + **CAN-FD** (built-in) |
-| **GPIO** | 40+ usable pins |
-| **PWM** | 8 LEDC channels (up to 80 MHz) |
-| **I2S** | 2 I2S peripherals (up to 80 MHz) |
+| **CAN** | TWAI controller: **classic CAN 2.0B only, no CAN-FD**; no on-chip transceiver |
+| **GPIO** | ~45 usable pins |
+| **PWM** | 8 LEDC channels |
+| **I2S** | 2 I2S peripherals |
 | **SPI** | 2 SPI peripherals |
 | **I2C** | 2 I2C peripherals |
-| **ADC** | 2× 12-bit SAR ADC (18 channels) |
+| **ADC** | 2× 12-bit SAR ADC |
 | **Connectivity** | WiFi 4, Bluetooth 5 (LE) |
-| **Package** | QFN-104 (20×20 mm) or QFN-64 |
+| **Logic level** | 3.3 V |
+| **Package** | QFN-56 (usually supplied as a module) |
 | **Cost** | ~$3–5 per module |
 
 #### Stepper Control Architecture
@@ -45,47 +46,50 @@ Before evaluating controllers, we define the hard requirements:
 **Direct PWM approach (6–8 channels):**
 - Use LEDC PWM to generate step pulses for 6–8 steppers directly
 - Each channel handles one stepper's STEP signal
-- DIR lines controlled via GPIO
+- DIR and ENABLE lines are GPIO
 
-**I2S multiplexing approach (up to 32 channels):**
-- I2S peripheral outputs a serial stream of stepper commands
-- Demux on the driver side distributes to individual stepper drivers
-- Each I2S peripheral can handle 4 stepper channels
-- 2 I2S peripherals → 8 channels per I2S → 16 total
-- With two ESP32-S3 chips per controller → 32 channels
-
-```
-  ESP32-S3 I2S Stream
-    │
-    ├─ Step Pulse 1 ──► TMC Driver 1
-    ├─ Step Pulse 2 ──► TMC Driver 2
-    ├─ Step Pulse 3 ──► TMC Driver 3
-    ├─ Step Pulse 4 ──► TMC Driver 4
-    └─ (demux on driver PCB)
-```
+**I2S shift-register approach:**
+- I2S outputs a serial frame that a shift register on the driver board demuxes into per-driver step/dir/enable bits
+- The timing study in §8 sizes one such frame; it does not imply a four-channel-per-I2S limit
 
 #### CAN Bus
 
-- Native CAN-FD controller in silicon
-- Supports classic CAN (up to 1 Mbit/s) and CAN-FD (up to 8 Mbit/s data phase)
-- Full-duplex communication
-- Hardware error handling and retransmission
+- The ESP32-S3 TWAI controller speaks **classic CAN 2.0B**, up to 1 Mbit/s. It is not a CAN-FD controller; CAN-FD frames are bus errors.
+- There is no on-chip transceiver: an external CAN transceiver is required.
+- CAN is **half-duplex**.
+- For CAN-FD on an S3, add an **MCP2518FD** (SPI) plus a transceiver. That pair, not the S3 itself, provides FD.
 
 #### Pros
-- ✅ Native CAN-FD (critical for 120-motor real-time coordination)
-- ✅ High CPU headroom for motion planning and pattern generation
-- ✅ I2S PWM multiplexing enables 12+ stepper channels
-- ✅ WiFi + Bluetooth for remote monitoring/control
-- ✅ Large community, extensive libraries (ESP-IDF, Arduino)
-- ✅ PSRAM support for large trajectory buffers
+- ✅ High CPU headroom for local motion planning and pattern generation
+- ✅ Plenty of GPIO, PSRAM for trajectory buffers, WiFi/BT for configuration and monitoring
+- ✅ Large community and ecosystem
+- ✅ Classic CAN is sufficient with local trajectories (§9.5.8)
 
 #### Cons
-- ⚠️ No hardware step pulse generator (uses PWM, slightly less precise than PIO)
+- ⚠️ No CAN-FD without an external MCP2518FD
+- ⚠️ No on-chip CAN transceiver
 - ⚠️ Higher power consumption (~200–500 mA active)
-- ⚠️ 5 V logic (requires level shifting for some components)
 - ⚠️ Heat generation at sustained high CPU load
 
-#### Verdict: **STRONGLY RECOMMENDED** — best overall fit.
+#### Verdict: **Strong choice** for a classic-CAN column controller. Add an MCP2518FD only if CAN-FD is actually wanted.
+
+---
+
+### 2.1a ESP32-C5 (on-chip CAN-FD)
+
+| Specification | Value |
+|--------------|-------|
+| **CPU** | Single HP RISC-V core, up to 240 MHz |
+| **SRAM** | 384 KB HP SRAM |
+| **CAN** | **Two TWAI controllers, classic CAN and CAN-FD (ISO 11898-1)** |
+| **GPIO** | 29 |
+| **Connectivity** | WiFi 6 (2.4 and 5 GHz) |
+| **Logic level** | 3.3 V |
+| **Transceiver** | Still external |
+
+The C5 is the on-chip CAN-FD option. It removes the MCP2518FD, not the transceiver. Its single core and smaller GPIO count are the trade-off against the S3.
+
+#### Verdict: **Preferred when CAN-FD must be on-chip.** For classic CAN, the ESP32-S3 is the more flexible part.
 
 ---
 
@@ -95,35 +99,31 @@ Before evaluating controllers, we define the hard requirements:
 |--------------|-------|
 | **CPU** | Dual ARM Cortex-M33, 150 MHz |
 | **Flash** | 2 MB (QSPI, on-board) |
-| **SRAM** | 264 KB (tightly coupled) + 8 KB SRAM0/1 + 4 KB SRAM2/3 |
-| **CAN** | ❌ **No native CAN** — requires external transceiver |
-| **GPIO** | 30 usable pins |
-| **PIO** | 2 state machines per core (4 total), each 4 instructions deep |
-| **USB** | USB 1.1 Device/Host/SSEG |
-| **SPI** | 2× SPI controllers (4 channels total) |
-| **I2C** | 2× I2C controllers (4 channels total) |
-| **ADC** | 1× 16-bit SAR ADC (4 channels) |
-| **Temperature** | 1× temperature sensor |
-| **Package** | QFN-56 (7×7 mm) or QFN-48 |
+| **SRAM** | **520 KB** |
+| **CAN** | ❌ **No native CAN controller** — needs an external controller **and** a transceiver |
+| **GPIO** | 30 (QFN-60) or 48 (QFN-80) |
+| **PIO** | **3 PIO blocks × 4 state machines = 12**; each block has 32 instructions, shared |
+| **USB** | USB 1.1 full-speed Device/Host |
+| **SPI** | 2× SPI controllers |
+| **I2C** | 2× I2C controllers |
+| **ADC** | 12-bit, 4 channels (QFN-60) or 8 (QFN-80) |
+| **Package** | QFN-60 (30 GPIO) or QFN-80 (48 GPIO) |
 | **Cost** | ~$3–4 per chip |
 
 #### Stepper Control via PIO
 
-The PIO (Programmable I/O) is the Pico 2's killer feature for stepper control:
-
-- Each state machine can generate precise step pulses independently
-- 4 state machines → 4 steppers directly from PIO
-- For 12 steppers: 3 PIO state machines per stepper (step, dir, enable)
-- Or use 12 GPIO pins with direct register manipulation
+- **One PIO state machine can produce the step stream for one motor.** DIR and ENABLE are ordinary GPIO.
+- With 12 state machines, 12 step streams fit directly; no three-machines-per-stepper scheme is needed.
+- Each PIO block shares 32 instructions across its four state machines, so plan the program footprint.
 
 ```
   RP2350 PIO State Machines
     │
-    ├─ SM0: Step pulse gen ──► Stepper 1
-    ├─ SM1: Step pulse gen ──► Stepper 2
-    ├─ SM2: Step pulse gen ──► Stepper 3
-    ├─ SM3: Step pulse gen ──► Stepper 4
-    └─ GPIO bit-bang: Steppers 5–12
+    ├─ SM0: Step stream ──► Stepper 1
+    ├─ SM1: Step stream ──► Stepper 2
+    ├─ ...
+    └─ SM11: Step stream ──► Stepper 12
+       (DIR / ENABLE on GPIO)
 ```
 
 #### CAN Bus — The Problem
@@ -132,10 +132,13 @@ The RP2350 has **no built-in CAN controller**. Options:
 
 | Option | Description | Cost/Complexity |
 |--------|-------------|-----------------|
-| **MCP2517FD** | SPI-connected CAN-FD controller | ~$2, adds SPI bus |
-| **MCP2515** | SPI-connected CAN 2.0B (no FD) | ~$1, no FD support |
-| **SJA1000** | Parallel interface CAN controller | ~$3, more pins |
+| **MCP2518FD** | SPI CAN-FD **controller** (currently preferred) | ~$2, plus SPI |
+| **MCP2517FD** | Older SPI CAN-FD controller | ~$2 |
+| **MCP2515** | SPI classic CAN 2.0B controller (no FD) | ~$1 |
+| **SJA1000** | Parallel-interface CAN **controller**, not a transceiver | ~$3, more pins |
 | **I2C ring bus** | Alternative to CAN entirely | Novel, unproven at scale |
+
+Each choice still needs an external CAN **transceiver**.
 
 #### I2C Ring Bus Alternative
 
@@ -160,18 +163,17 @@ If CAN is unacceptable, an I2C ring bus could work:
 #### Pros
 - ✅ PIO allows deterministic, hardware-level step pulse generation
 - ✅ Low power consumption (~50–100 mA active)
-- ✅ Small form factor (7×7 mm)
-- ✅ Good for precise timing-critical applications
-- ✅ Dual cores allow separation of CAN and motion control
+- ✅ 12 state machines cover 12 motors directly
+- ✅ Dual cores allow separation of communication and motion control
 
 #### Cons
-- ❌ **No native CAN** — requires external transceiver (adds cost, PCB area, latency)
-- ❌ No CAN-FD support (without external chip)
-- ❌ Limited SRAM (264 KB) — tight for trajectory buffers
+- ❌ **No native CAN controller** — needs a controller plus a transceiver
+- ❌ No CAN-FD without an external controller
 - ❌ Lower CPU (150 MHz vs 240 MHz)
+- ❌ No WiFi/Bluetooth
 - ❌ I2C ring bus alternative is unproven at 120-motor scale
 
-#### Verdict: **Viable alternative** if CAN transceiver cost is acceptable. PIO is superior for step pulse precision, but the CAN gap is significant.
+#### Verdict: **Viable alternative** if an external CAN controller and transceiver are acceptable. PIO is the best step-pulse tool; the CAN gap is a controller plus a transceiver, not a missing crystal.
 
 ---
 
@@ -224,62 +226,58 @@ If CAN is unacceptable, an I2C ring bus could work:
 
 ## 3. Comparative Summary
 
-| Feature | ESP32-S3 | Pico 2 (RP2350) | ATmega328P + MCP2515 |
-|---------|----------|-----------------|---------------------|
-| **CPU** | 240 MHz dual-core | 150 MHz dual-core | 20 MHz single-core |
-| **CAN** | ✅ Native CAN-FD | ❌ External only | ❌ External only (no FD) |
-| **Stepper ch.** | 6–8 direct, 32 w/ I2S mux | 4 PIO + 8 GPIO | 2–4 bit-banged |
-| **Step precision** | Good (PWM) | **Excellent (PIO)** | Poor (bit-bang) |
-| **SRAM** | 512 KB + PSRAM | 264 KB | 2 KB |
-| **Real-time** | Good | **Best (PIO)** | Poor |
-| **Power** | ~300 mA | ~75 mA | ~30 mA |
-| **Connectivity** | WiFi + BT | USB only | None |
-| **Cost per controller** | ~$5–8 | ~$5–8 + $2 CAN | ~$3–4 |
-| **Suitability for 12 balls** | ✅ Excellent | ✅ Good | ❌ Poor |
-| **Suitability for 120 balls** | ✅ Excellent | ✅ Good (w/ CAN) | ❌ Not viable |
+| Feature | ESP32-S3 | ESP32-C5 | Pico 2 (RP2350) | ATmega328P + MCP2515 |
+|---------|----------|----------|-----------------|---------------------|
+| **CPU** | 240 MHz dual-core | 240 MHz single-core | 150 MHz dual-core | 20 MHz single-core |
+| **CAN** | Classic CAN 2.0B on-chip; FD only via MCP2518FD | ✅ **On-chip CAN-FD** | ❌ External controller + transceiver | ❌ External controller (no FD) |
+| **Stepper ch.** | 6–8 direct PWM; shift-register fan-out | GPIO/PWM | **12 PIO state machines** | 2–4 bit-banged |
+| **Step precision** | Good (PWM) | Good (PWM) | **Excellent (PIO)** | Poor (bit-bang) |
+| **SRAM** | 512 KB + PSRAM | 384 KB | **520 KB** | 2 KB |
+| **Real-time** | Good | Good | **Best (PIO)** | Poor |
+| **Power** | ~300 mA | ~200 mA | ~75 mA | ~30 mA |
+| **Connectivity** | WiFi + BT | WiFi 6 | USB only | None |
+| **Cost per controller** | ~$5–8 (+ FD controller if used) | ~$5–8 | ~$5–8 + controller + transceiver | ~$3–4 |
+| **Suitability for 12 balls** | ✅ Excellent | ✅ Excellent | ✅ Good | ❌ Poor |
+| **Suitability for 120 balls** | ✅ Excellent | ✅ Excellent | ✅ Good (w/ CAN) | ❌ Not viable |
 
 ---
 
 ## 4. Recommendation Matrix
 
-### If CAN-FD is required (recommended):
+### If CAN-FD is required:
 | Priority | Choice |
 |----------|--------|
-| **Best overall** | **ESP32-S3** (native CAN-FD, I2S mux, WiFi) |
-| Best step precision | Pico 2 + MCP2517FD (PIO + CAN-FD) |
+| **On-chip CAN-FD** | **ESP32-C5** (still needs a transceiver) |
+| **S3 ecosystem with CAN-FD** | ESP32-S3 + **MCP2518FD** + transceiver |
+| Best step precision | Pico 2 + MCP2518FD + transceiver |
 
-### If cost is the primary concern:
+### If classic CAN is sufficient:
 | Priority | Choice |
 |----------|--------|
-| **Cheapest viable** | **ESP32-S3** (still cheaper than Pico 2 + CAN transceiver) |
+| **Best overall** | **ESP32-S3** (TWAI classic CAN, I2S/shift-register fan-out, WiFi) |
+| Lowest power | Pico 2 |
 | Cheapest PoC | ATmega328P + MCP2515 (single ball only) |
 
-### If power consumption matters:
-| Priority | Choice |
-|----------|--------|
-| **Lowest power** | Pico 2 (~75 mA) |
-| Acceptable power | ESP32-S3 (~300 mA) |
-
-### Final Recommendation: **ESP32-S3**
+### Final Recommendation: **ESP32-S3 for classic CAN; ESP32-C5 if CAN-FD must be on-chip**
 
 **Rationale:**
-1. Native CAN-FD is critical — 120 motors on a single bus require high throughput
-2. I2S PWM multiplexing solves the 12-channel stepper problem elegantly
-3. WiFi/Bluetooth enables remote monitoring and pattern upload
-4. PSRAM allows large trajectory buffers for complex patterns
-5. Total cost per controller (~$5–8) is competitive even with the Pico 2 + CAN transceiver option
-6. Large community and ecosystem reduce development risk
+1. With local trajectories on the column controllers (§9.5.8), classic CAN at 1 Mbit/s is sufficient. CAN-FD is optional headroom.
+2. The ESP32-S3's TWAI is classic CAN only. Do not put an S3 TWAI node on a bus that carries FD frames.
+3. If CAN-FD is wanted, use the ESP32-C5 (on-chip FD) or an ESP32-S3 plus MCP2518FD. Either way, add a transceiver.
+4. WiFi/Bluetooth remains the operator path for configuration, monitoring, and pattern upload.
+5. PSRAM allows large trajectory buffers for complex patterns.
 
-**Per-controller BOM (ESP32-S3):**
+**Per-controller BOM (ESP32-S3, classic CAN):**
 
 | Item | Qty | Cost (est.) |
 |------|-----|-------------|
 | ESP32-S3 module | 1 | $4.00 |
+| CAN transceiver | 1 | $1.00 |
 | TMC5160 driver | 12 | $60.00 |
 | Decoupling caps, resistors | 1 set | $2.00 |
 | Connector board | 1 | $3.00 |
-| **Total per controller** | | **~$69** |
-| **Total for 10 controllers** | | **~$690** |
+| **Total per controller** | | **~$70** |
+| **Total for 10 controllers** | | **~$700** |
 
 ---
 
@@ -303,18 +301,49 @@ For completeness, brushless DC motors with Field-Oriented Control (FOC) were con
 
 ## 6. Driver IC Comparison
 
-| Driver | CAN | CAN-FD | StallGuard2 | Steppers | Notes |
-|--------|-----|--------|-------------|----------|-------|
-| **TMC6300** | ✅ Native | ✅ | ✅ | 1 | **Best choice** — native CAN-FD, StallGuard2, high current (up to 5.7 A RMS) |
-| **TMC5160** | SPI | ❌ | ✅ | 1 | Mature, well-documented, no native CAN |
-| **TMC5130** | SPI | ❌ | ✅ | 1 | Lower current, no ramp generator |
-| **TMC2209** | UART | ❌ | ✅ | 1 | Cheapest, no CAN, quiet operation |
-| **TMC6200** | SPI | ❌ | ❌ | 1 | No StallGuard, no CAN |
-| **BTS7971B** | ❌ | ❌ | ❌ | 1 (BLDC) | For BLDC FOC, not stepper |
+The drivers sit on the column board and are not CAN bus nodes. Only the ESP32 (or an external controller such as the MCP2518FD) is a bus node.
 
-**Recommendation:** **TMC6300** for production. Native CAN-FD eliminates external transceivers, reducing BOM and failure points. StallGuard2 provides endstop detection.
+| Driver | Interface | CAN | StallGuard2 | Ramp generator | Notes |
+|--------|-----------|-----|-------------|----------------|-------|
+| **TMC5160** | SPI + step/dir | ❌ | ✅ | ✅ | **Recommended** — mature, on-driver ramp, high current |
+| **TMC2209** | UART or step/dir | ❌ | ✅ | Basic | Cheap, quiet (StealthChop); step/dir path must be verified at the catch step rate |
+| **TMC5130** | SPI + step/dir | ❌ | ✅ | ✅ | Lower current; **has a ramp generator** |
+| **TMC6200** | SPI | ❌ | ❌ | — | Gate driver, no StallGuard |
+| **TMC6300** | 6× PWM | ❌ | ❌ | — | **3-phase BLDC gate driver**, 2–11 V, ~2 A peak. Not a stepper driver and not a bus node |
+| **BTS7971B** | — | ❌ | ❌ | — | BLDC, not a stepper |
+
+**Recommendation:** **TMC5160** for production. It provides StallGuard2, an on-driver ramp, and generates the step edges locally. TMC2209 is the cheaper quiet alternative where its step/dir rate is adequate. No driver in this table provides CAN or eliminates the CAN transceiver.
+
+> The earlier recommendation of a "TMC6300 with native CAN-FD" was wrong: the TMC6300 is a low-voltage 3-phase BLDC gate driver with no CAN, no StallGuard2, and no NEMA-17 capability.
 
 ---
+
+## 7. Per-Controller Block Diagram (ESP32-S3, classic CAN)
+
+```
+  ┌─────────────────────────────────────────────────────┐
+  │                  ESP32-S3 Controller                 │
+  │                                                     │
+  │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐  │
+  │  │  TWAI    │  │  I2S     │  │  SPI + GPIO      │  │
+  │  │ (classic │  │ (step/   │  │  (TMC5160 config │  │
+  │  │  CAN)    │  │  dir mux)│  │   DIR/ENABLE)    │  │
+  │  └────┬─────┘  └────┬─────┘  └────────┬─────────┘  │
+  │       │             │                  │            │
+  │       ▼             ▼                  ▼            │
+  │  ┌──────────┐  ┌────────────────────────────────┐  │
+  │  │ CAN      │  │  12 × TMC5160                  │  │
+  │  │transceiver│ │  (SPI daisy chain + step/dir)  │  │
+  │  └────┬─────┘  └───────────────┬────────────────┘  │
+  │       │                        │                    │
+  │       ▼                        ▼                    │
+  │   CAN bus                12 × NEMA-17               │
+  │                                                     │
+  │  24 V Power ──► DC-DC ──► Motor + Logic Supplies    │
+  └─────────────────────────────────────────────────────┘
+```
+
+For CAN-FD, replace the transceiver/ESP32-S3 pair with an ESP32-C5 + transceiver, or add an MCP2518FD between the S3 and a CAN-FD transceiver.
 
 ---
 
@@ -458,7 +487,7 @@ Practical max (with overhead): ~5–10 MHz
 | **I2S mux @ 4.5 m/s** | ✅ 2.7× margin | ❌ 0.74× margin (fails) |
 | **PIO @ 4.5 m/s** | ✅ 33× margin | ✅ 16× margin |
 | **CPU load** | Lower | ~2× higher |
-| **Data throughput (CAN)** | Lower | ~2× higher |
+| **Bus load** | No difference | No difference (steps are local, not on CAN) |
 
 ### 8.9 Final Recommendation
 
@@ -467,46 +496,18 @@ Practical max (with overhead): ~5–10 MHz
 1. **Visually indistinguishable** from finer stepping — ball motion appears perfectly smooth
 2. **Fits within I2S mux timing** with 2.7× margin at max speed (4.5 m/s)
 3. **Sufficient holding torque** for 50 g ball + acceleration forces
-4. **Lower CAN bus load** — 1/16 steps generate half the data of 1/32
+4. **No CAN-bus penalty** — step generation is local; microstepping does not change CAN traffic
 5. **Acceptable resonance** — stepper motors at 1/16 have manageable resonance peaks
 
-**Use 1/32 microstepping only with direct GPIO/PIO control** (not I2S mux), where the margin is large enough to justify the extra data throughput.
+**Use 1/32 microstepping only with direct GPIO/PIO control** (not I2S mux), where the step-rate margin is large enough.
 
-For the **Pico 2 with PIO**, 1/32 microstepping is feasible and provides slightly smoother low-speed motion, but the visual benefit is marginal. **1/16 remains the recommended default** for both platforms to minimize CAN bus load.
-
----
-
-## 7. Per-Controller Block Diagram (ESP32-S3)
-
-```
-  ┌─────────────────────────────────────────────────────┐
-  │                  ESP32-S3 Controller                 │
-  │                                                     │
-  │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐  │
-  │  │  CAN-FD  │  │  I2S PWM │  │  GPIO / SPI      │  │
-  │  │  Module  │  │  (8 ch)  │  │  (DIR/ENABLE)    │  │
-  │  └────┬─────┘  └────┬─────┘  └────────┬─────────┘  │
-  │       │             │                  │            │
-  │       ▼             ▼                  ▼            │
-  │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐  │
-  │  │ TMC6300  │  │ TMC6300  │  │ TMC6300 (x12)    │  │
-  │  │ (ch 1)   │  │ (ch 8)   │  │ (ch 9-12 via SPI)│  │
-  │  └────┬─────┘  └────┬─────┘  └────────┬─────────┘  │
-  │       │             │                  │            │
-  │       ▼             ▼                  ▼            │
-  │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐  │
-  │  │Motor 1  │  │Motor 8  │  │Motors 9-12       │  │
-  │  └──────────┘  └──────────┘  └──────────────────┘  │
-  │                                                     │
-  │  24 V Power ──► DC-DC ──► Motor + Logic Supplies    │
-  └─────────────────────────────────────────────────────┘
-```
+For the **Pico 2 with PIO**, 1/32 microstepping is feasible and provides slightly smoother low-speed motion, but the visual benefit is marginal. **1/16 remains the recommended default** for both platforms; once the ramp is local, microstepping does not load the CAN bus.
 
 ---
 
 ## 9. CAN vs WiFi — Is CAN Needed When Using ESP32 with WiFi?
 
-This is a critical architectural question. The ESP32-S3 has **both** WiFi and CAN-FD. Since WiFi is available, **can we skip CAN entirely** and use WiFi (or Ethernet) for controller-to-master communication?
+This is a critical architectural question. The ESP32-S3 has WiFi and classic CAN (CAN-FD needs an external controller). Since WiFi is available, **can we skip CAN entirely** and use WiFi (or Ethernet) for controller-to-master communication?
 
 ### 9.1 The Short Answer
 
@@ -578,20 +579,20 @@ The system requires < 1 ms synchronization across all 120 balls.
 - 2.4 GHz is **crowded** (WiFi, Bluetooth, microwaves, Zigbee)
 - Line-of-sight not required but **multipath fading** causes signal drops
 - **Interference from motors** (EMI) can disrupt WiFi packets
-- **Density problem:** 120 ESP32-S3 devices on one 2.4 GHz channel = severe congestion
+- **Density problem:** 10 controllers plus 10 operator devices on one 2.4 GHz channel; if every ball carried WiFi it would be 120 nodes and severe congestion
 - **AP/single-point failure:** If the access point fails, the entire system is dead
 - **Range limitations:** 1200–1800 mm tall sculpture may have dead zones
 - **Regulatory:** 2.4 GHz power limits vary by region
 
 #### 9.2.4 Power Consumption
 
-| Mode | CAN (MCP2517/TMC6300) | WiFi (ESP32-S3) | Ethernet (LAN8720) |
+| Mode | CAN (transceiver) | WiFi (ESP32-S3) | Ethernet (LAN8720) |
 |------|----------------------|-----------------|-------------------|
 | Idle | ~5 mA | ~80 mA (beaconing) | ~15 mA |
 | Active tx/rx | ~30 mA | ~200 mA (tx burst) | ~30 mA |
-| Per 120 controllers | **3.6 W** | **24 W** | **3.6 W** |
+| Per 10 controllers | **0.3 W** | **2 W** | **0.3 W** |
 
-> WiFi consumes **6–8× more power** than CAN for the same communication load. For a 120-controller system, this is 20+ watts of extra heat and power draw.
+> WiFi consumes **6–8× more power** than CAN for the same communication load. The machine has **10 controllers**, not 120; the power figures here are per 10 controllers.
 
 #### 9.2.5 System Architecture Comparison
 
@@ -601,8 +602,8 @@ The system requires < 1 ms synchronization across all 120 balls.
       │
       └─ CAN bus (twisted pair, 120 Ω termination)
           │
-          ├─ Controller 1 (ESP32-S3 + CAN-FD)
-          ├─ Controller 2 (ESP32-S3 + CAN-FD)
+          ├─ Controller 1 (ESP32-S3 + transceiver)
+          ├─ Controller 2 (ESP32-S3 + transceiver)
           └─ ... Controller 10
 ```
 - Simple twisted pair wiring
@@ -660,19 +661,19 @@ WiFi is **NOT acceptable** for:
   │  ┌───────────────────────────────────────────┐  │
   │  │  Controller (ESP32-S3)                    │  │
   │  │  ┌───────────┐  ┌───────────────────────┐ │  │
-  │  │  │ CAN-FD    │  │  WiFi (AP/Station)    │ │  │
+  │  │  │ CAN       │  │  WiFi (AP/Station)    │ │  │
   │  │  │ (real-    │  │  (config / monitoring)│ │  │
   │  │  │  time)    │  │                       │ │  │
   │  │  └────┬──────┘  └───────────────────────┘ │  │
   │  │       ▼                                   │  │
-  │  │  12 × TMC6300 → 12 × NEMA-17 motors       │  │
+  │  │  12 × TMC5160 → 12 × NEMA-17 motors       │  │
   │  └───────────────────────────────────────────┘  │
   └─────────────────────────────────────────────────┘
 ```
 
 | Channel | Purpose | Protocol | Latency Requirement |
 |---------|---------|----------|-------------------|
-| **CAN bus** | Real-time motion commands, status, sync, E-stop | CAN-FD @ 1 Mbit/s | < 1 ms |
+| **CAN bus** | Real-time motion commands, status, sync, E-stop | CAN 2.0B @ 1 Mbit/s (FD optional) | < 1 ms |
 | **WiFi** | Pattern upload, parameter adjustment, diagnostics, logging | TCP/UDP | < 100 ms |
 
 ### 9.5 CAN Bus Traffic Analysis — Corrected
@@ -734,7 +735,7 @@ CAN-FD frames with 64-byte payload: ~300 bits (including arbitration at 1 Mbit/s
 
 #### 9.5.4 Corrected Recommendation: Batch Messages Required
 
-**Per-controller batch messages (one message per controller, containing all 12 motor positions) are REQUIRED for real-time control at 1 kHz.**
+**If full positions are streamed, per-controller batch messages (one message per controller, containing all 12 motor positions) are REQUIRED for real-time control at 1 kHz.** Local trajectory generation (§9.5.8) removes this requirement.
 
 | Configuration | Classic CAN @ 1 Mbit/s | CAN-FD @ 1/8 Mbit/s |
 |--------------|----------------------|---------------------|
@@ -802,14 +803,14 @@ If controllers with different motor counts (4, 8, 12) are mixed on the same bus:
 |-----------|-------|
 | Controller grouping | **12 motors per controller** (10 controllers total) |
 | Control rate | **500 Hz** (sufficient for 4.5 m/s motion) |
-| Bus protocol | **CAN-FD**, 1 Mbit/s base / 8 Mbit/s data phase |
+| Bus protocol | **CAN-FD** if streaming positions (1 Mbit/s base / 8 Mbit/s data phase); **classic CAN 2.0B** if trajectories are local (§9.5.8) |
 | Messages per cycle | 20 (2 frames × 10 controllers) |
 | Bus utilization @ 500 Hz | **37.5%** (comfortable margin) |
 | Messages per cycle (status, 10 Hz) | 10 (1 frame × 10 controllers) |
 | Status bus utilization | **< 1%** (negligible) |
 | Total bus utilization (500 Hz + 10 Hz) | **~38%** |
 
-> **Conclusion:** CAN-FD is necessary for this application. Classic CAN at 1 Mbit/s cannot handle 1 kHz per-motor updates even with batch messages. CAN-FD with 8 Mbit/s data phase handles 500 Hz with 37.5% utilization — a comfortable margin. The system MUST use 12-motor controllers (not 4-motor) to keep bus load manageable.
+> **Conclusion:** If the master streams full positions, CAN-FD with an 8 Mbit/s data phase is needed, and 12-motor controllers (not 4-motor) keep the load manageable. If the controllers run local trajectories (§9.5.8), bus use falls below ~12 % and classic CAN is sufficient; CAN-FD becomes optional headroom. The architecture choice, not the bus, is what makes the traffic close.
 
 #### 9.5.8 Bandwidth Reduction via On-Controller Ramp Generation
 
@@ -902,13 +903,15 @@ Bus utilization: 600,000 / 8,000,000 = 7.5% (data phase)
 | **Can WiFi replace CAN for real-time control?** | ❌ No — non-deterministic latency makes it unsuitable |
 | **Can WiFi replace CAN for monitoring/config?** | ✅ Yes — WiFi is excellent for this |
 | **Should CAN be kept when using ESP32 with WiFi?** | ✅ **Yes — CAN for real-time, WiFi for config** |
-| **What is the minimum viable communication?** | CAN-FD at 1 Mbit/s base / 1 Mbit/s data phase is sufficient |
-| **Is CAN-FD necessary?** | Yes — for burst handling and status feedback. Classic CAN at 250 kbit/s is barely sufficient for status-only. |
+| **What is the minimum viable communication?** | Classic CAN 2.0B at 1 Mbit/s with local trajectories |
+| **Is CAN-FD necessary?** | ❌ No. With local trajectories, bus use stays under about 12 %; classic CAN at 250 kbit/s would do for most patterns. CAN-FD is optional headroom. |
 | **Must controllers have motion planners?** | **YES — this is critical.** Without on-controller ramp generation, CAN traffic is 37.5% (batch) or 450% (per-motor) at 1 kHz — impossible. With ramp generation, utilization drops to < 12%. |
 
-**Recommendation: Keep CAN-FD as the primary real-time bus. Use WiFi exclusively for configuration, monitoring, and pattern upload. Each controller MUST have its own motion planner (ramp / S-curve generator) to minimize CAN traffic. This hybrid approach gives the best of both worlds: deterministic real-time control + convenient wireless configuration.**
+**Recommendation: Use classic CAN 2.0B as the primary real-time bus at 1 Mbit/s (CAN-FD is optional headroom). Use WiFi exclusively for configuration, monitoring, and pattern upload. Each controller MUST have its own motion planner (ramp / S-curve generator) to minimize CAN traffic. This hybrid approach gives the best of both worlds: deterministic real-time control + convenient wireless configuration.**
 
 **Critical design rule:** The master sends motion **parameters** (target position + profile type), not position samples. The controller's internal motion planner generates the trajectory at ≥ 1 kHz locally. This reduces CAN traffic by 2 orders of magnitude and makes the system feasible.
+
+> The earlier claim that CAN-FD is "necessary" contradicted §9.5.8. The architecture that makes the traffic tables close is local trajectory generation; with it, classic CAN is sufficient and CAN-FD is headroom. Also note the step rate: at 1/16 microstep and a 25 mm drum the ceiling is about 180 000 steps/s per motor, and on the order of two million per column if the column drops together. A TMC5160 generates those edges itself. Step/dir from the MCU (TMC2209, or the I2S stream in §8) has to be shown to sustain that rate before it is the catch path.
 
 ---
 
@@ -948,7 +951,9 @@ Drift_rate = 2 × max_frequency_error (one fast, one slow)
 | 8 hours | 20 s | 144 ms |
 | 24 hours | 60 s | 432 ms |
 
-> **Key finding:** With consumer-grade quartz (35 ppm), two controllers can drift **25 ms apart after just 5 minutes** and **2 seconds apart after 1 hour**. For synchronized wave patterns requiring sub-millisecond alignment, this is **unacceptable without correction**.
+> **Key finding:** With consumer-grade quartz (35 ppm), two controllers can drift **21 ms apart after just 5 minutes** and **2.5 seconds apart after 1 hour**. For synchronized wave patterns requiring sub-millisecond alignment, this is **unacceptable without correction**.
+>
+> The 70 ppm figure is the worst case: one fast and one slow crystal at 35 ppm each. Two crystals drifting the same way need less. Design for the worst case.
 
 ### 10.3 Impact on Synchronized Patterns
 
@@ -957,14 +962,14 @@ Drift_rate = 2 × max_frequency_error (one fast, one slow)
 Position error from timing drift: Δx = v × Δt
 ```
 
-| Pattern Speed | Drift @ 5 min (25 ms) | Drift @ 1 hour (2.5 s) |
+| Pattern Speed | Drift @ 5 min (21 ms) | Drift @ 1 hour (2.5 s) |
 |--------------|----------------------|------------------------|
 | Static (v = 0) | 0 mm | 0 mm |
-| Slow breathing (v = 0.5 m/s) | 12.5 mm | 1.25 m |
-| Medium wave (v = 2 m/s) | 50 mm | 5 m (off grid!) |
-| Fast wave (v = 4.5 m/s) | 112 mm | 11.2 m (way off grid!) |
+| Slow breathing (v = 0.5 m/s) | 10.5 mm | 1.25 m |
+| Medium wave (v = 2 m/s) | 42 mm | 5 m (off grid!) |
+| Fast wave (v = 4.5 m/s) | 94 mm | 11.2 m (way off grid!) |
 
-> **Critical finding:** At 4.5 m/s, controllers drift **112 mm out of sync after only 5 minutes** — exceeding grid spacing (80–120 mm). After 1 hour, balls are **11 meters apart** — completely unsynchronized.
+> **Critical finding:** At 4.5 m/s, controllers drift **94 mm out of sync after only 5 minutes** — exceeding grid spacing (80–120 mm). After 1 hour, balls are **11 meters apart** — completely unsynchronized.
 
 ### 10.4 Correction Strategy: Pause-Based Clock Alignment
 
@@ -1025,7 +1030,7 @@ while (ball is at rest):
 | 5 ppm (TCXO) | 1 s | 5 µs | 5 µs |
 | 5 ppm (TCXO) | 1 min | 300 µs | 300 µs |
 
-> **Key finding:** With consumer quartz (35 ppm), corrections of **2–5 ms** during rest periods are sufficient to maintain synchronization for several minutes. With TCXO (5 ppm), corrections are sub-millisecond and rarely needed.
+> **Key finding:** Drift accumulates at 35 µs/s — 2.1 ms per minute. A single SYNC cycle corrects only the drift since the last SYNC (3.5 µs at 100 ms). The earlier "2–5 ms pause" mixed one to two minutes of accumulation into a single cycle and did not match the 3.5 µs per 100 ms figure.
 
 ### 10.6 Rest Period Frequency in Artistic Patterns
 
@@ -1081,7 +1086,7 @@ Insert 1–10 µs pauses between motion loop iterations:
 CAN-FD SYNC message (from master to all controllers):
 ┌─────────────────────────────────────────────┐
 │ ID: 0x7FF (global broadcast)                │
-│ DLC: 8 bytes                                │
+│ DLC: 32 bytes (CAN-FD)                      │
 │ Data:                                       │
 │   Global timestamp (64-bit, µs precision)   │
 │   Master's estimated drift per controller   │
@@ -1103,7 +1108,7 @@ Drift per SYNC: 35 ppm × 0.1 s = 3.5 µs
 Correction per SYNC: 3.5 µs pause
 Rest per cycle: 0.05–0.1 s (at wave peaks)
 Available correction time: 50–100 ms per cycle
-Correction needed: 3.5 µs per 100 ms = 3.5%
+Correction needed: 3.5 µs per 100 ms = 0.0035%
 ```
 
 **Feasibility:** 3.5 µs pause during 50–100 ms rest = **easily achievable** (0.007–0.002% of rest time).
@@ -1113,7 +1118,8 @@ Correction needed: 3.5 µs per 100 ms = 3.5%
 No rest periods → no pause-based correction
 Drift accumulates: 35 µs/s
 After 30 s: 1.05 ms drift → 4.7 mm position error at 4.5 m/s
-After 5 min: 10.5 s drift → 47 m (off grid!)
+After 5 min: 10.5 ms drift → 47 mm position error at 4.5 m/s
+(At the 70 ppm worst case: 21 ms → about 95 mm.)
 ```
 
 **Solution for continuous-motion patterns:** Use a **TCXO (temperature-compensated crystal oscillator)** with ± 5 ppm drift. Corrections needed only every 15–30 minutes, and even then, only ~300 µs per correction.
@@ -1130,9 +1136,11 @@ After 5 min: 10.5 s drift → 47 m (off grid!)
 | **Recommendation** | ✅ For most patterns | ✅ For continuous-motion patterns |
 
 **Final recommendation:**
-1. **Use built-in quartz** (consumer grade, 35 ppm) for all controllers — sufficient for most artistic patterns that include rest periods.
-2. **Send SYNC messages every 100 ms** during rest periods to correct drift.
-3. **Insert pauses of 1–5 ms** during rest to correct accumulated drift.
-4. **Use TCXO (± 5 ppm)** for controllers in patterns that require continuous motion without rest (rapid cascades).
+1. **The requirement is alignment, not a method.** `FR-SYNC-001` asks for ≤ 1 ms between controllers; the choices below are one way to meet it.
+2. **Use built-in quartz** (consumer grade, 35 ppm) — sufficient for most artistic patterns that include rest periods.
+3. **Send SYNC messages periodically** during rest and correct the measured drift; 100 ms is a reasonable starting interval, not a mandate.
+4. **Extending a hold does not move a ball.** A pattern with no hold needs a **slow clock trim** (rate adjustment) rather than a pause. A TCXO (± 5 ppm) is one option for continuous-motion patterns, not a requirement.
 5. **Target synchronization accuracy:** < 1 ms between any two controllers at all times.
-6. **Rest periods are sufficient:** Most artistic patterns naturally include rest at motion peaks — use these for clock correction.
+6. **Rest periods are sufficient:** Most artistic patterns naturally include rest at motion peaks — use these for clock correction when they exist.
+
+> Do not freeze the 100 Hz SYNC rate, the 5 ms pause, or a TCXO into the requirement set. Those are implementation choices; the requirement is the ≤ 1 ms alignment.
