@@ -192,10 +192,12 @@ The RP2350 has **no WiFi**. Add an ESP32 (or ESP32-C3) as a bridge over UART/SPI
 | Decoupling caps, resistors | 1 set | $2.00 |
 | Connector board / terminals | 1 | $4.00 |
 | Antenna / connector | 1 | $0.50 |
-| **Total per controller** | | **~$92** |
-| **Total for 8 controllers (120 axes)** | | **~$735** |
+| 4-layer PCB | 1 | $5.00 |
+| Assembly (SMT/passives) | 1 | $8.00 |
+| **Total per controller** | | **~$105** |
+| **Total for 8 controllers (120 axes)** | | **~$840** |
 
-> With TMC2209 instead of TMC5160 the driver cost drops to ~$25–35 per board; see §12.5. Torque at 50 g does not require TMC5160.
+> With TMC2209 the driver cost depends on the package: bare ICs drop it to ~$25–35 per board (soldered), whereas plug-in TMC2209 StepSticks cost ~$4 each (~$64 for 16). See §11.3 and §11.6. Torque at 50 g does not require TMC5160.
 
 ---
 
@@ -784,34 +786,33 @@ After 5 min: 10.5 ms drift → 12.6 mm position error at 1.2 m/s
 | **MKS DLC32 MAX** | 4 | No — kit with TMC2209 available | ✅ ESP32 on board | ⚠️ Same DLC32 wiring caveat; not documented for this board | ~$31 kit |
 | **FYSETC E4** | **3 usable** (4 drivers) | ✅ **4 × TMC2209 soldered** | ✅ ESP32 on board (ESP3D) | ✅ DIAG on X/Y/Z; E axis has no DIAG. **With no mechanical switches, only 3 axes are usable** | **€36** |
 | **MKS TinyBee** | 5 axes / 6 motors | ✅ on-board TMC2209 | ✅ ESP32 on board | ❌ **No UART to the drivers**; DIP-switch microstepping only | €30–44 |
-| **PiBot V4.96 Pro** | 6 | No — StepStick sockets; TMC2130-SPI variant | ✅ ESP32 on board | ⚠️ Possible via TMC2130 SPI; verify DIAG routing | ~$80 |
-| **FluidNC “6-Pack”** | 6 external | No | ✅ ESP32 on board | ⚠️ Only if external-driver DIAG is wired in | $48–55 |
+| **PiBot V4.96 Pro** (runs FluidNC / GrblHAL) | 6 | No — StepStick sockets; TMC2130-SPI variant | ✅ ESP32 on board | ⚠️ Possible via TMC2130 SPI; verify DIAG routing | ~€80 |
 
 ### 11.2 3D-printer boards — native WiFi or WiFi add-on
 
 | Board | Axes | Drivers included? | WiFi | StallGuard | Approx. price |
 |-------|------|-------------------|------|------------|---------------|
 | **BTT Octopus V1.1 / Pro** | 8 | No | ⚠️ **Add-on ESP8266 module** (the board provides an ESP8266 interface; not included) | ✅ TMC2209/2226/5160; **DIAG0–DIAG7 exposed on J22/J23** (Pro V1.1 schematic) | €43–45 + ~€4/driver + €5–15 ESP8266 module |
+| **BTT Octopus Pro H723** (CAN) | 8 | No | ✅ **FDCAN + MCP2542** (RJ11); no WiFi | ✅ TMC2209/2226/5160; **DIAG0–DIAG7 exposed** | **€67** + ~€4/driver |
 | **Duet 3 Mini 5+ WiFi** | 5 | ✅ **5 × TMC2209** | ✅ native | ✅ supported in RRF; check DIAG per axis | €116–160; FYSETC “Big Dipper” clone ~€94 |
 | **Duet 2 WiFi** (legacy) | 5 | Sockets | ✅ native | ✅ | ~€100+ used/legacy |
 | **BTT Manta M8P + CB1** | 8 | No | ✅ via CB1 compute module (Klipper host) | ✅ | ~€80–100 |
 
 ### 11.3 System-level production comparison — 120 axes
 
-Costs below are boards only; add ~€1,200–1,400 for 120 motors, PSU and cabling, against the €4,000 BOM cap (`NFR-COST-001`).
+Costs below are **boards only, no TMC drivers**. Add ~€1,200–1,400 for 120 motors, PSU and cabling, against the €4,000 BOM cap (`NFR-COST-001`). Driver costs are listed separately.
 
-| Board | Usable axes/board | Boards | WiFi nodes | Per-axis DIAG | Boards cost | Production verdict |
-|-------|--------------|--------|------------|---------------|-------------|--------------------|
-| **FYSETC E4** | **3** (4 drivers) | **40** | **40** | 3 of 4 | **€1,440** | Cheapest per board, but 3 usable axes → 40 boards/nodes; classic ESP32 (no FTM) |
-| **Duet 3 Mini 5+ WiFi / Big Dipper** | 5 | 24 | 24 | 5 (verify) | **€2,256 clone / €2,784 genuine** | Most production-ready COTS: native WiFi, included drivers, RRF stall detection |
-| **Octopus + drivers, no WiFi module** | 8 | 15 | — (15 CAN) | **8/8 (J22/J23)** | **€1,125–1,155 (boards + drivers)** | Lowest Octopus hardware cost; requires wired CAN or an external WiFi bridge |
-| **Octopus + ESP8266 module** | 8 | 15 | 15 | **8/8 (J22/J23)** | **€1,335 (boards + drivers + WiFi module)** | Best WiFi axis count/cost: 15 nodes, 8/8 DIAG; WiFi is an add-on ESP8266 |
-| **Custom carrier, ESP32-S3 + 16 × TMC2209** | 16 | 8 | 8 | 16/16 (wired) | ~€450–560 + NRE | **Best fit/cost:** 16/16 DIAG, 8 nodes, no QFN; needs custom PCB + firmware |
-| **Custom carrier, Pico 2 + 12 × TMC2209** | 12 | 10 | 10 | 12/12 (wired) | ~€500–650 + NRE | 10 nodes; 200 kHz PIO on RISC-V; WiFi via Pico 2 W or ESP32 bridge |
-| **MKS DLC32 MAX** | **0** (no DIAG) | — | — | 0 free | — | **Unusable under the no-switch rule** without rework |
-| **MKS TinyBee** | **0** (no UART) | — | — | 0 | — | **Unusable under the no-switch rule** |
-| **PiBot V4.96 Pro** | 6 (verify) | 20 | 20 | TMC2130 SPI possible | ~$1,600 + drivers | Possible only if all 6 DIAG are routed/exposed |
-| **FluidNC 6-Pack** | 6 (verify) | 20 | 20 | wired externally | ~$1,000 + drivers | Possible if each external driver’s DIAG is wired; integration-heavy |
+| Board | Usable axes/board | Boards | WiFi nodes | Per-axis DIAG | Boards cost | Drivers (per board) | Drivers (120 axes) | Production verdict |
+|-------|--------------|--------|------------|---------------|-------------|-------------------|------------------|--------------------|
+| **FYSETC E4** | **3** (4 drivers) | **40** | **40** | 3 of 4 | **€1,440** | 4 × TMC2209 included | — | Cheapest per board, but 3 usable axes → 40 boards/nodes; classic ESP32 (no FTM) |
+| **Duet 3 Mini 5+ WiFi / Big Dipper** | 5 | 24 | 24 | 5 (verify) | **€2,256 clone / €2,784 genuine** | 5 × TMC2209 included | — | Most production-ready COTS: native WiFi, included drivers, RRF stall detection |
+| **Octopus Pro H723, no WiFi** | 8 | 15 | — (15 CAN) | **8/8 (J22/J23)** | **€1,005** | 8 × TMC2209 | ~€480 | Lowest Octopus hardware cost; requires wired CAN or external WiFi bridge |
+| **Octopus Pro H723 + ESP8266 module** | 8 | 15 | 15 | **8/8 (J22/J23)** | **€1,080** | 8 × TMC2209 | ~€480 | Best WiFi axis count/cost: 15 nodes, 8/8 DIAG; WiFi is an add-on ESP8266 |
+| **Custom carrier, ESP32-S3** | 16 | 8 | 8 | 16/16 (wired) | **~€260–300** | 16 × TMC2209 | ~€480 | **Best fit/cost:** 16/16 DIAG, 8 nodes, no QFN; needs custom PCB + firmware |
+| **Custom carrier, Pico 2 (RP2354B)** | 12 | 10 | 10 | 12/12 (wired) | **~€300–350** | 12 × TMC2209 | ~€480 | 10 nodes; 200 kHz PIO on RISC-V; WiFi handled separately |
+| **MKS DLC32 MAX** | **0** (no DIAG) | — | — | 0 free | — | — | — | **Unusable under the no-switch rule** without rework |
+| **MKS TinyBee** | **0** (no UART) | — | — | 0 | — | — | — | **Unusable under the no-switch rule** |
+| **PiBot V4.96 Pro** (runs FluidNC / GrblHAL) | 6 (verify) | 20 | 20 | **TMC2130 + StallGuard2 (SPI)** | **~€1,600** | 6 × TMC2130 | ~€960 | StallGuard2 provides sensorless homing; verify DIAG routing per axis |
 
 ### 11.4 Findings for production
 
@@ -820,20 +821,20 @@ Costs below are boards only; add ~€1,200–1,400 for 120 motors, PSU and cabli
 3. **Timebase:** classic ESP32 boards (E4, DLC32, TinyBee) and the Octopus ESP8266 module have **no FTM**. They use the numbered broadcast receive-time scheme (§9.2A); FTM is only an upgrade. Check the Duet WiFi module separately.
 4. **Firmware is still custom.** RRF/Marlin/FluidNC do not scale to a 120-axis global timeline. Buying a COTS board saves hardware integration, not the control software. This is the main remaining cost.
 5. **Serviceability is good:** each COTS board is a field-replaceable module, matching `NFR-MAINT-006`.
-6. **Cost:** FYSETC E4 is €1,440 in boards but needs 40 nodes, ~€2,600–2,800 all-in. Duet clone is ~€3,450–3,700 all-in; the genuine board is ~€4,000–4,200 and can exceed the cap. Octopus is ~€2,500–2,800 all-in with 8/8 DIAG and 15 WiFi nodes; the no-module CAN variant is ~€1,125–1,155 in boards + drivers before the CAN master and harness. The **ESP32-S3 module carrier** is ~€1,700–1,900 all-in with 8 nodes and 16/16 DIAG; the **Pico 2 carrier** is ~€1,800–2,000 with 10 nodes and 12/12 DIAG; a fully custom SMT board is ~€2,000–2,200.
-7. **The module-based carrier is the missing middle:** a custom PCB with an ESP32-S3 module, 16 TMC2209 StepSticks and a 74HC595 chain gives exact axis count, per-axis DIAG and 8 nodes without QFN soldering. It still requires a PCB design and the same custom firmware.
+6. **Cost:** FYSETC E4 is €1,440 in boards but needs 40 nodes, ~€2,640–2,840 all-in. Duet clone is ~€3,460–3,660 all-in; the genuine board is ~€3,980–4,180 and can exceed the cap. Octopus is ~€2,760–2,960 all-in with 8/8 DIAG and 15 WiFi nodes; the no-module CAN variant is ~€1,005 (boards) + ~€480 (120 TMC2209) + motors, PSU and cabling (~€1,200–1,400) = ~€2,685–2,885. The Octopus variant + ESP8266 module is ~€1,080 (boards) + ~€480 (120 TMC2209) + motors, PSU and cabling = ~€2,760–2,960. The **ESP32-S3 carrier** is ~€260–300 (pure carrier, no TMC) + ~€480 (120 TMC2209) + motors, PSU and cabling (~€1,200–1,400) = ~€1,940–2,180 with 8 nodes and 16/16 DIAG; the **Pico 2 carrier** is ~€300–350 (pure carrier, no TMC) + ~€480 (120 TMC2209) + motors, PSU and cabling = ~€1,980–2,230 with 10 nodes and 12/12 DIAG; a fully custom SMT board is ~€2,300–2,500.
+7. **The module-based carrier is the missing middle:** a custom PCB carrying an ESP32-S3 module, 16 TMC2209 StepSticks (plugged into sockets) and a 74HC595 chain gives exact axis count, per-axis DIAG and 8 nodes without QFN soldering. It still requires a PCB design and the same custom firmware.
 8. **Stall detection is now the only reference**, so it must be validated on the real drum at 50 g. It needs a hard stop and motion; false negatives are a homing failure. Add a plausibility check (step count vs travel) and treat a missed home as a fault (`FR-MOT-010`).
 
 ### 11.5 Production shortlist
 
 - **Best COTS integration:** **Duet 3 Mini 5+ WiFi** or the FYSETC Big Dipper clone — 5/5 DIAG (verify), native WiFi, 24 nodes.
-- **Best axis count / cost, WiFi:** **Octopus Pro + ESP8266 WiFi module** — 8/8 DIAG (J22/J23), 15 nodes, ~€1,335 for boards + drivers + module. The module is not included; the board provides an ESP8266 interface.
-- **Best Octopus hardware cost, wired:** **Octopus Pro without WiFi module** — 8/8 DIAG, 15 CAN nodes, ~€1,125–1,155 for boards + drivers; add CAN master and harness (§13).
+- **Best axis count / cost, WiFi:** **Octopus Pro H723 + ESP8266 WiFi module** — 8/8 DIAG (J22/J23), 15 nodes, ~€1,565–1,575 for boards + drivers + module. The module is not included; the board provides an ESP8266 interface.
+- **Best Octopus hardware cost, wired:** **Octopus Pro H723 without WiFi module** — 8/8 DIAG, 15 CAN nodes, ~€1,485 for boards + drivers; add CAN master and harness (§13).
 - **FYSETC E4:** €36, but only **3 usable axes** → 40 boards/nodes. Cheapest per board, not the lowest system cost. No FTM.
-- **Best fit / lowest system cost:** **custom ESP32-S3 carrier with 16 TMC2209 modules** — 8 nodes, 16/16 DIAG, ~€1,700–1,900 all-in; requires a PCB design.
-- **Pico 2 carrier:** 12/12 DIAG, 10 nodes, 200 kHz PIO; WiFi bridge or Pico 2 W, and the timebase must be validated.
+- **Best fit / near-lowest system cost:** **custom Pico 2 carrier (bare RP2354B) + 12 TMC2209** — 10 nodes, 12/12 DIAG, ~€300–350 pure carrier + ~€480 drivers (120 axes), ~€1,980–2,230 all-in; requires custom PCB + firmware.
+- **Pico 2 carrier:** 12/12 DIAG, 10 nodes, 200 kHz PIO; pure carrier ~€300–350 (no TMC, no WiFi); WiFi handled separately.
 - **Unusable as-is under the no-switch rule:** MKS TinyBee (no UART), MKS DLC32 (no free DIAG).
-- **Custom 16-axis board:** still the lowest node count and cost, but no longer the only production path.
+- **Custom 16-axis board:** lowest node count, but the module carrier is now cheaper at ~€1,940–2,180.
 
 If the project intends to buy rather than build, the **Duet** or **Octopus** paths are the production choices; the custom board is the optimization.
 
@@ -844,7 +845,7 @@ The missing middle: a custom PCB that carries **modules**, not QFN chips. Only p
 **ESP32-S3 carrier, 16 axes**
 
 - ESP32-S3-WROOM-1 module (WiFi + FTM).
-- 16 × TMC2209 StepStick modules (UART + DIAG).
+- 16 × TMC2209 StepSticks plug into sockets on the carrier — **not included in carrier BOM**.
 - 4 × 74HC595 (32 mux outputs: 16 step + 16 direction).
 - 24 V → 5 V/3.3 V DC-DC, bulk capacitors, per-driver 100 µF, input fuse/TVS.
 - 16 motor connectors, power input, DIAG/endstop header.
@@ -852,47 +853,62 @@ The missing middle: a custom PCB that carries **modules**, not QFN chips. Only p
 
 | Item | Qty | Cost (est.) |
 |------|-----|-------------|
-| 4-layer PCB, 100 × 100 mm | 1 | $5 |
-| ESP32-S3-WROOM-1 module | 1 | $4 |
-| TMC2209 StepStick | 16 | $24 |
-| 74HC595 | 4 | $1 |
-| Headers/sockets | 17 | $2 |
-| 24 V → 5 V/3.3 V DC-DC | 1 | $2 |
-| 4:1 UART mux | 1 | $0.50 |
-| Capacitors, connectors, fuse, TVS | 1 set | $10 |
-| Assembly (passives/connectors) | 1 | $5–10 |
-| **Per board** | | **~$53–58** |
-| **8 boards** | | **~$424–464** |
-| **+ NRE (stencil, setup, review)** | | **~$50–100** |
+| 4-layer PCB, 100 × 100 mm | 1 | €5 |
+| ESP32-S3-WROOM-1 module | 1 | €4 |
+| 74HC595 | 4 | €1 |
+| Headers/sockets | 17 | €2 |
+| 24 V → 5 V/3.3 V DC-DC | 1 | €2 |
+| 4:1 UART mux | 1 | €0.50 |
+| Capacitors, connectors, fuse, TVS | 1 set | €10 |
+| 16 × TMC2209 StepStick sockets | 16 | €1.60 |
+| Assembly (passives/connectors) | 1 | €5–10 |
+| **Pure carrier (no TMC)** | | **~€32–37** |
+| **8 pure carriers** | | **~€256–296** |
+| **+ NRE (stencil, setup, review)** | | **~€50–100** |
 
-With motors, PSU and cabling (~€1,200–1,400), the system is ~€1,700–1,900 — the lowest-cost production path in this table.
+With motors, PSU and cabling (~€1,200–1,400), the system is ~€1,940–2,180 (excluding NRE) — the lowest-cost production path in this table.
 
-**Pico 2 carrier, 12 axes**
+**Pico 2 carrier, 12 axes — bare RP2354B**
 
-- Pico 2 module compiled for **RISC-V**; FastAccelStepper gives **12 steppers** at 200 kHz.
-- 12 × TMC2209 StepSticks, 74HC595 for direction, 74HC165 for DIAG. The 165 chain reduces the 12 driver-side DIAG signals to **3 MCU pins** (clock/load/data); the CAN bus aggregates status across boards.
-- A Pico 2 board exposes ~26 GPIO: 12 step pins plus shift-register direction/DIAG and UART fits. A bare RP2350 QFN-80 (48 GPIO) allows direct wiring instead.
+- **Bare RP2354B** (QFN-80, 48 GPIO) on a custom 4-layer carrier board.
+- FastAccelStepper on RISC-V gives **12 steppers** at 200 kHz.
+- 12 × TMC2209 StepSticks plug into sockets on the carrier — **not included in carrier BOM** (same model as Octopus).
+- 12 step + 12 direction + 12 DIAG + CAN-FD (MCP2518FD) + 3× TMC UART (bit-banged) + 1× I²C temperature sensor + common enable + status LED = **48 GPIO, exactly full**.
+- 2 MB integrated QSPI flash; 24 V → 5 V/3.3 V DC-DC; USB-C for programming/debug.
 - **10 boards / 10 nodes** for 120 axes, **12/12 DIAG**.
-- WiFi via a Pico 2 W module or an ESP32 bridge. The ESP32 bridge is preferred for the validated broadcast/FTM timebase; a Pico 2 W WiFi timebase must be measured.
-- BOM ~$46 per board; ~$460 for 10 boards plus NRE.
-- **MCU mounting choice:**
-  - **Pico 2 module:** 26 exposed GPIO; needs the 74HC595/74HC165 expansion; socketable and replaceable.
-  - **Bare RP2354B:** 48 GPIO and integrated 2 MB flash; 12 step + 12 DIR + 12 DIAG + UART fits directly, so no shift registers. Requires QFN-80 assembly and the usual crystal/USB/decoupling support.
-  - **Bare RP2350B:** same 48 GPIO, but needs external QSPI flash.
+- WiFi handled separately (Octopus Pro H723 CAN node, or a standalone ESP32-S3 AP). The carrier itself has no WiFi.
+
+| Item | Qty | Cost (est.) |
+|------|-----|-------------|
+| 4-layer PCB, 100 × 100 mm | 1 | €5 |
+| RP2354B (QFN-80) | 1 | €4 |
+| CAN transceiver (TJA1050) | 1 | €1 |
+| 24 V → 5 V/3.3 V DC-DC | 1 | €2 |
+| Capacitors, connectors, fuse, TVS | 1 set | €10 |
+| 12 × motor connectors (mating with motor cable) | 12 | €1.50 |
+| 12 × TMC2209 StepStick sockets | 12 | €1.20 |
+| USB-C connector (programming/debug) | 1 | €0.30 |
+| Status LED + resistor | 1 | €0.10 |
+| Assembly (QFN/passives/connectors) | 1 | €5–10 |
+| **Pure carrier (no TMC, no WiFi)** | | **~€30–35** |
+| **10 pure carriers** | | **~€300–350** |
+| **+ NRE (stencil, setup, review)** | | **~€50–100** |
+
+With 12 × TMC2209 StepSticks (~€4 each = €48/board) plus motors, PSU and cabling (~€1,200–1,400), the full system is ~€1,980–2,230 — within ~€50 of the ESP32-S3 carrier and below the Octopus CAN path.
 
 **GPIO budget, bare RP2354B (48 GPIO), 12 axes:**
 
-| Function | Direct | With one 74HC165 for DIAG |
-|----------|-------:|--------------------------:|
+| Function | Qty | GPIO |
+|----------|-----|------|
 | 12 × STEP (PIO) | 12 | 12 |
 | 12 × DIR | 12 | 12 |
-| 12 × DIAG | 12 | 3 |
+| 12 × DIAG | 12 | 12 |
 | CAN-FD controller (MCP2518FD: SCK/MOSI/MISO/CS + INT) | 5 | 5 |
 | TMC UART (3 buses, bit-banged) | 3 | 3 |
 | Temperature sensor (I²C) | 2 | 2 |
 | Common enable | 1 | 1 |
 | Status/fault LED | 1 | 1 |
-| **Total** | **48 — exactly full** | **39 — 9 free** |
+| **Total** | **48** | **48 — exactly full** |
 
 The CAN-FD **5 pins are four SPI signals plus INT** — there is no enable pin. The transceiver STB is tied low, and the controller's crystal is local to the module. Polling instead of using INT drops it to 4 pins; add CLKIN only if the MCU supplies the controller clock instead of a local crystal.
 
@@ -1041,7 +1057,7 @@ At the current this duty actually needs, not at driver maximum:
 - Budget ~10–30 s per board; 15 boards sequentially is roughly 3–8 minutes.
 - No WiFi module is needed, which removes the jamming/AP risk and saves ~€10–15 per board.
 
-**Cost (15 nodes):** ~€1,155 for boards + drivers (no WiFi), plus motors, PSU and CAN harness. That is below the WiFi-based Octopus path.
+**Cost (15 nodes):** ~€1,005 for 15 boards at €67 (Octopus Pro H723) + drivers, plus motors, PSU and CAN harness. That is below the WiFi-based Octopus path.
 
 ### 13.4 Master / host options
 
