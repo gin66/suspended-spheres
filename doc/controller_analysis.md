@@ -356,8 +356,8 @@ This section answers a critical design question: **is 1/16 microstepping suffici
 | Approach | Timing Resolution | Max µ-Stepping | Linear Resolution (20 mm drum) | Max Step Rate @ 4.5 m/s |
 |----------|------------------|----------------|-------------------------------|------------------------|
 | **I2S mux** | ~4 µs | 1/16 (practical) | 19.6 µm | 229 kHz |
-| **PIO (Pico 2)** | ~6.7 ns | 1/32+ | 9.8 µm | 229 kHz |
-| **Direct GPIO (ESP32)** | ~50–100 ns | 1/32+ | 9.8 µm | 229 kHz |
+| **PIO (Pico 2)** | ~6.7 ns | 1/32+ | 9.8 µm | 458 kHz |
+| **Direct GPIO (ESP32)** | ~50–100 ns | 1/32+ | 9.8 µm | 458 kHz |
 
 ### 8.2 Linear Resolution by Drum Diameter and Microstepping
 
@@ -374,23 +374,23 @@ Linear resolution = (π × drum_Ø) / steps_per_rev
 | 20 mm | 0.314 mm | 78.5 µm | 39.3 µm | **19.6 µm** | 9.8 µm |
 | 30 mm | 0.471 mm | 117.8 µm | 58.9 µm | **29.5 µm** | 14.7 µm |
 
-**Key finding:** At 1/16 microstepping with a 20 mm drum, linear resolution is **19.6 µm** — well within visual acceptability.
+**Key finding:** At 1/16 microstepping with a 20 mm drum, linear resolution is **19.6 µm** — well within the 50 µm limit of `ASM-014`. At 1/8 microstepping the same drum gives 39.3 µm, which still meets the requirement; 1/16 is chosen for margin.
 
 ### 8.3 Is 19.6 µm Good Enough? (Visual Perception Analysis)
 
-The ball is ~46 mm in diameter. A 19.6 µm step displacement is:
+The ball is ~23 mm in diameter. A 19.6 µm step displacement is:
 
 ```
-19.6 µm / 46,000 µm = 0.043% of ball diameter
+19.6 µm / 23,000 µm = 0.085% of ball diameter
 ```
 
-**Human visual acuity** at 1 meter viewing distance is ~0.17 mm (1 arcminute). At 0.5 m distance, ~0.085 mm.
+`ASM-014` sets the perceptual limit at 50 µm (below the ~85 µm acuity limit at 0.5 m).
 
 ```
-19.6 µm << 85 µm (visual threshold at 0.5 m)
+19.6 µm < 50 µm
 ```
 
-**Conclusion:** 1/16 microstepping resolution is **visually imperceptible** — the step transitions appear perfectly smooth to the human eye. Finer microstepping (1/32, 1/256) provides no visual benefit at this scale.
+**Conclusion:** 1/16 microstepping resolution is **visually imperceptible** — the step transitions appear perfectly smooth. 1/8 (39.3 µm) also meets `ASM-014`; finer microstepping (1/32, 1/256) provides no visual benefit at this scale.
 
 ### 8.4 Timing Analysis at Maximum Speed (4.5 m/s)
 
@@ -401,16 +401,15 @@ Steps/sec = velocity / linear_resolution_per_step
 
 | Microstepping | 10 mm Drum | 20 mm Drum | 30 mm Drum |
 |--------------|-----------|-----------|-----------|
-| Full Step | 14,324 Hz | 9,549 Hz | 6,366 Hz |
-| 1/4 µ-Step | 57,296 Hz | 38,197 Hz | 25,465 Hz |
-| 1/8 µ-Step | 114,592 Hz | 76,394 Hz | 50,929 Hz |
-| **1/16 µ-Step** | **229,183 Hz** | **152,788 Hz** | **101,855 Hz** |
-| 1/32 µ-Step | 458,366 Hz | 305,577 Hz | 203,715 Hz |
+| Full Step | 28,648 Hz | 14,324 Hz | 9,549 Hz |
+| 1/4 µ-Step | 114,592 Hz | 57,296 Hz | 38,197 Hz |
+| 1/8 µ-Step | 229,183 Hz | 114,592 Hz | 76,394 Hz |
+| **1/16 µ-Step** | **458,366 Hz** | **229,183 Hz** | **152,788 Hz** |
+| 1/32 µ-Step | 916,732 Hz | 458,366 Hz | 305,577 Hz |
 
 **At 1/16 µ-Step with 20 mm drum @ 4.5 m/s:**
-- Step frequency: **152,788 steps/sec**
-- Time per step: **6.54 µs**
-- Time per 1/16 step at 4.5 m/s: **6.54 µs**
+- Step frequency: **229,183 steps/sec**
+- Time per step: **4.36 µs**
 
 ### 8.5 I2S Mux Timing Budget
 
@@ -442,19 +441,19 @@ Frame time = 192 bits / 80 MHz = 2.4 µs
 This means the I2S mux can update all 12 steppers every **~2.4 µs**, which translates to a **maximum step pulse frequency of ~416 kHz per motor** (if every frame contains a step pulse).
 
 **At 1/16 µ-Step, 20 mm drum, 4.5 m/s:**
-- Required: 152,788 Hz (6.54 µs per step)
+- Required: 229,183 Hz (4.36 µs per step)
 - I2S mux capability: ~416,000 Hz (2.4 µs per frame)
-- **Margin: 2.7×** — ✅ comfortable margin
+- **Margin: 1.8×** — ✅ adequate margin
 
 ### 8.6 What About 1/32 Microstepping via I2S Mux?
 
 ```
-Required step rate (1/32, 20 mm drum, 4.5 m/s): 305,577 Hz
-Time per step: 3.27 µs
+Required step rate (1/32, 20 mm drum, 4.5 m/s): 458,366 Hz
+Time per step: 2.18 µs
 I2S mux frame time: 2.4 µs
 ```
 
-**Margin: 0.74×** — ❌ **I2S mux cannot sustain 1/32 µ-Step at 4.5 m/s**.
+**Margin: 0.91×** — ❌ **I2S mux cannot sustain 1/32 µ-Step at 4.5 m/s**.
 
 The I2S mux would need to run faster or use a wider frame, but this would consume more CPU bandwidth and introduce jitter.
 
@@ -473,9 +472,9 @@ Practical max (with overhead): ~5–10 MHz
 ```
 
 **At 1/32 µ-Step, 20 mm drum, 4.5 m/s:**
-- Required: 305,577 Hz (3.27 µs per step)
+- Required: 458,366 Hz (2.18 µs per step)
 - PIO capability: ~5,000,000 Hz (conservative)
-- **Margin: 16×** — ✅ more than sufficient
+- **Margin: ~11×** — ✅ more than sufficient
 
 ### 8.8 Summary: Resolution Recommendation
 
@@ -484,8 +483,8 @@ Practical max (with overhead): ~5–10 MHz
 | **Visual smoothness** | ✅ Imperceptible steps | ✅ (no visible improvement) |
 | **Holding torque** | Good | ~2× better (lower ripple) |
 | **Resonance damping** | Acceptable | Better (finer control) |
-| **I2S mux @ 4.5 m/s** | ✅ 2.7× margin | ❌ 0.74× margin (fails) |
-| **PIO @ 4.5 m/s** | ✅ 33× margin | ✅ 16× margin |
+| **I2S mux @ 4.5 m/s** | ✅ 1.8× margin | ❌ 0.91× margin (fails) |
+| **PIO @ 4.5 m/s** | ✅ 22× margin | ✅ 11× margin |
 | **CPU load** | Lower | ~2× higher |
 | **Bus load** | No difference | No difference (steps are local, not on CAN) |
 
@@ -494,7 +493,7 @@ Practical max (with overhead): ~5–10 MHz
 **1/16 microstepping is the optimal choice for the I2S multiplexing approach:**
 
 1. **Visually indistinguishable** from finer stepping — ball motion appears perfectly smooth
-2. **Fits within I2S mux timing** with 2.7× margin at max speed (4.5 m/s)
+2. **Fits within I2S mux timing** with 1.8× margin at max speed (4.5 m/s)
 3. **Sufficient holding torque** for 50 g ball + acceleration forces
 4. **No CAN-bus penalty** — step generation is local; microstepping does not change CAN traffic
 5. **Acceptable resonance** — stepper motors at 1/16 have manageable resonance peaks

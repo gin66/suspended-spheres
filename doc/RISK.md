@@ -10,7 +10,8 @@
 
 When all 120 balls (50 g each) move simultaneously, the system generates significant dynamic loads on the structural frame:
 
-- **Peak force:** ~120 N static weight from 120 objects at 50 g each, higher under simultaneous acceleration
+- **Static weight:** 120 × 50 g = 6 kg ≈ 59 N
+- **Worst-case dynamic load:** all 120 balls catching a free-fall drop together ≈ 120 × 49 N ≈ 5.9 kN — about 100× the static load
 - **Torsional stress:** Uneven movement across columns induces significant torsional loading on the frame
 - **Implication:** The structural design is critically important to handle these combined forces safely and reliably
 
@@ -84,7 +85,7 @@ Each column controller runs on its own quartz oscillator. A consumer crystal is 
 | 1 minute | 4.2 ms | ~19 mm |
 | 5 minutes | 21 ms | ~94 mm |
 
-At the 21 ms figure the error is comparable to the 80 mm grid pitch, so wave and interference patterns visibly break up. The drift is certain, not intermittent; without correction it is a synchronisation failure rather than a nuisance.
+At the 21 ms figure the error is comparable to the 100 mm proposed grid pitch, so wave and interference patterns visibly break up. The drift is certain, not intermittent; without correction it is a synchronisation failure rather than a nuisance.
 
 **Mitigation — not a different oscillator:**
 
@@ -99,7 +100,7 @@ At the 21 ms figure the error is comparable to the 80 mm grid pitch, so wave and
 
 | # | Risk | Severity | Likelihood | Mitigation |
 |---|------|----------|------------|------------|
-| 1 | **Structural failure under asymmetric dynamic load** | Critical | Medium | Validate frame under worst-case asymmetric loading; factor of safety ≥ 3 |
+| 1 | **Structural failure under asymmetric dynamic load** | Critical | Medium | Validate frame under worst-case asymmetric loading; factor of safety ≥ 2 (see `NFR-SAFE-006`) |
 | 2 | **Cumulative stepper noise floor** | High | High | Acoustic/structural decoupling; fallback to BLDC/PMSM + SimpleFOC |
 | 3 | **NEMA-11 max RPM unspecified** | Medium | High | Empirical stress test in PoC phase |
 | 4 | **PC real-time limitation** | High | Certain | Offload all step generation to edge controllers; PC handles pattern scheduling only |
@@ -110,6 +111,10 @@ At the 21 ms figure the error is comparable to the 80 mm grid pitch, so wave and
 | 9 | **ESP32 long-term stability (WiFi + CAN + stepper control)** | Medium | Medium | Watchdog management; task isolation; stress-test continuous operation |
 | 10 | **X/Y pendulum swing from guide imperfections** | Low-Medium | Medium | Precision overhead guide design; transient swing modeling |
 | 11 | **Loss of inter-controller synchronization from quartz drift** | High | High | Global timebase with periodic SYNC; measure and correct drift (rest pause or clock trim); optional TCXO; verify ≤ 1 ms before each pattern |
+| 12 | **Grounding / EMI: ground loops and common-mode noise between motor power returns, controller ground, and bus reference** | High | Medium | Separate power and signal returns; single-point bonding; shielded or isolated bus; validate EMC; see `IR-ELEC-004` |
+| 13 | **Fire from an electrical fault or overheated driver array** | High | Medium | Overcurrent/short-circuit protection, thermal design, fire-retardant enclosure/cable/decorative materials; see `NFR-SAFE-010` |
+| 14 | **Position-scale error from multi-layer winding** | High | Medium | Level-wind single layer, or calibrate radius vs turns; second layer adds ≈4 % scale error (≈40 mm over travel) vs the 50 µm/pitch limit (`NFR-PHYS-007`) |
+| 15 | **Free-fall catch overloads thread/motor** | High | Medium | ≈49 N (≈153 N with inertia) per catch; provide a brake/energy absorber, verify thread ≥150 N (`IR-MECH-002`) and frame at ≈5.9 kN (`NFR-SAFE-006`) |
 
 ---
 

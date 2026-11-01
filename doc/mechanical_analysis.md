@@ -10,7 +10,7 @@
 | Parameter | Symbol | Value |
 |-----------|--------|-------|
 | Ball mass | m | 50 g = 0.050 kg |
-| Ball diameter | D_ball | ~46 mm (50 g steel sphere) |
+| Ball diameter | D_ball | ~23 mm (50 g steel sphere) |
 | Vertical travel | h | 1000 mm = 1.0 m |
 | Gravity | g | 9.81 m/s² |
 | Claimed max speed | v_max | 4.5 m/s |
@@ -43,15 +43,15 @@ F = m × a_total = 0.050 × 19.935 = 0.997 N ≈ 1.0 N
 t = v / a = 4.5 / 10.125 = 0.444 s
 ```
 
-A trapezoidal profile reaching 4.5 m/s with 0.4 m ramps needs a peak acceleration of 25.31 m/s² and a thread force of 1.756 N.
+These are worst-case numbers for a motor-driven move to the ceiling; they are not a requirement to reach 4.5 m/s upward. A 4.5 m/s trapezoid does not exist: the envelope `v(s) = √(2 g s)` is concave, so the ceiling is reached only at the bottom of the travel.
 
-These are worst-case numbers, not a requirement to reach 4.5 m/s upward. Upward acceleration is a separate requirement (`FR-MOT-004`, ≥ 30 m/s²), and a design may choose a lower peak speed.
+The binding acceleration requirement is the braked catch (`FR-MOT-004`): arresting a full free-fall drop within 1 cm needs `a = v²/(2 × 0.01) ≈ 981 m/s²` (≈49 N, or ≈153 N with reflected inertia, ≈1.5 Nm at a 25 mm drum). That exceeds practical motor torque, so a brake or energy absorber must provide it.
 
 **Stopping constraint:** from 4.4 m/s at one g takes about `v² / 2g ≈ 1 m`. An upward move that actually reaches the ceiling cannot then be stopped inside the 1 m travel. While the thread is taut, gravity is the only downward force, so the thread cannot slow an upward ball faster than g.
 
 ### 2.3 Free-Fall Drop with a Braked Catch
 
-A free-fall drop is an artistic motion, not a fault. The thread is allowed to go slack. The catch is a brake over the last few centimetres, down to the last few millimetres.
+A free-fall drop is an artistic motion, not a fault. The thread is allowed to go slack. The catch distance is 1 cm as proposed (`ASM-008`); note that the thread itself stretches ≈3 mm under the ≈49 N catch force, so the mechanism must arrest within the remainder.
 
 A catch from full free-fall speed in only a few millimetres is a hard stop. Thread strength can take it. A stepper at a few thousand RPM usually cannot, because torque has already collapsed. The braked distance has to be checked against the torque-speed curve, not against holding torque. Homing is a separate, slow descent onto the same stop.
 
@@ -74,7 +74,7 @@ A catch from full free-fall speed in only a few millimetres is a hard stop. Thre
 |-------|-------------|-------------|---------------------|
 | **Static (hold)** | 0 m/s² | 0.491 N | 0.0049 Nm |
 | **Max upward (4.5 m/s, full stroke)** | 10.125 m/s² | 0.997 N | 0.00997 Nm |
-| **Max upward (trapezoidal, aggressive)** | 25.31 m/s² | 1.756 N | 0.01756 Nm |
+| **Catch (free fall within 1 cm)** | 981 m/s² (down) | 49.05 N | 0.4905 Nm (20 mm) |
 | **Deceleration faster than g** | < −9.81 m/s² | 0 N (thread slack) | 0 Nm (slack) |
 | **Free fall (down)** | 9.81 m/s² | 0 N (slack) | 0 Nm (slack) |
 | **Braking descent** | −5 m/s² (braking) | 0.741 N | 0.00741 Nm |
@@ -177,10 +177,10 @@ Where:
 | Load | Force | Elongation (k = 15.7 kN/m) |
 |------|-------|---------------------------|
 | Static (50 g ball) | 0.49 N | **0.031 mm** |
-| Max acceleration (trapezoidal) | 1.76 N | **0.11 mm** |
 | Max acceleration (full stroke) | 1.0 N | **0.064 mm** |
+| Catch (free fall, 1 cm) | 49 N | **3.1 mm** |
 
-**Conclusion:** Thread stretch is sub-millimeter — negligible for visual smoothness. These are lower bounds: a braided rope stretches more than the solid-fibre modulus predicts. `ASM-002`'s < 100 µm is the governing limit and is tighter than this idealised calculation. Dynamic oscillations from rapid direction changes are the more significant concern (see §5.3).
+**Conclusion:** At the maximum static and motor-driven loads the stretch stays below 0.1 mm, consistent with `IR-MECH-002`. The catch load stretches the thread ≈3 mm transiently, which must be included in the catch distance. These are lower bounds: a braided rope stretches more than the solid-fibre modulus predicts. Dynamic oscillations from rapid direction changes are the more significant concern (see §5.3).
 
 ### 5.3 Thread Dynamic Response (Spring-Mass System)
 
@@ -216,19 +216,19 @@ For ζ = 0.02: t_settle ≈ 4 / (0.02 × 560) = 0.357 s
 
 ### 5.4 Air Resistance
 
-Drag force on a 46 mm sphere at 4.5 m/s:
+Drag force on a 23 mm sphere at 4.5 m/s:
 
 ```
 F_drag = 0.5 × ρ_air × C_d × A × v²
   ρ_air = 1.225 kg/m³ (sea level, 20°C)
   C_d = 0.47 (sphere)
-  A = π × (0.023)² = 0.00166 m²
+  A = π × (0.0115)² = 4.155 × 10⁻⁴ m²
   v = 4.5 m/s
 
-F_drag = 0.5 × 1.225 × 0.47 × 0.00166 × 4.5² = 0.0097 N ≈ 10 mN
+F_drag = 0.5 × 1.225 × 0.47 × 4.155 × 10⁻⁴ × 4.5² = 0.0024 N ≈ 2.4 mN
 ```
 
-**Comparison to ball weight:** 10 mN / 491 mN = **2%** of ball weight.
+**Comparison to ball weight:** 2.4 mN / 491 mN = **0.5%** of ball weight.
 
 **Conclusion:** Air resistance is negligible at 4.5 m/s.
 
@@ -273,7 +273,7 @@ m_effective = m_ball + I_linear = 0.050 + 0.106 = 0.156 kg
 
 > **Key insight:** The reflected inertia is about **2.1× the ball mass**. The motor must accelerate 0.156 kg (not just 0.050 kg) for the same linear acceleration.
 
-**Winding constraint:** keep the wind single-layer. One metre of thread on a 25 mm drum is about 13 turns — under 7 mm of drum width. A second layer changes the effective radius and therefore the millimetres per step, which corrupts the position scale.
+**Winding constraint:** position-scale variation must stay within 50 µm per grid pitch (`NFR-PHYS-007`). A second layer adds one thread diameter to the effective radius — about 4 % on a 25 mm drum, or ≈40 mm over the 1 m travel — far outside that limit. Keep a single layer with a level-wind, or calibrate/compensate the radius against turns. One metre of thread on a 25 mm drum is about 13 turns — under 7 mm of drum width with a traverse — so single-layer winding is practical.
 
 ### 6.2 Revised Force with Reflected Inertia
 
@@ -281,10 +281,10 @@ m_effective = m_ball + I_linear = 0.050 + 0.106 = 0.156 kg
 |-------|-------------------|---------------------|---------------------|
 | Static (hold) | 0.491 N | 0.491 N | 0.0049 Nm |
 | Max upward (full stroke) | 0.997 N | **1.543 N** | 0.0154 Nm |
-| Max upward (trapezoidal) | 1.756 N | **2.718 N** | 0.0272 Nm |
+| Catch (free fall within 1 cm) | 49.05 N | **153 N** | 1.53 Nm (20 mm) |
 | Braking descent | 0.741 N | 1.147 N | 0.0115 Nm |
 
-Even with reflected inertia, torque requirements remain well within NEMA-17 capability (~0.6 Nm holding, ~0.3 Nm continuous at speed).
+For motor-driven motion, torque requirements remain within NEMA-17 capability (~0.6 Nm holding, ~0.3 Nm continuous at speed). The catch torque (≈1.5 Nm) is not motor-sized and requires a separate brake or absorber.
 
 ---
 
@@ -298,7 +298,7 @@ Even with reflected inertia, torque requirements remain well within NEMA-17 capa
 | NEMA-11 (0.3 Nm) | 0.3 Nm | ~0.15 Nm | 15 N | 20 N |
 | **NEMA-17 (0.6 Nm)** | **0.6 Nm** | **~0.3 Nm** | **30 N** | **40 N** |
 
-Required force (with inertia): max **2.72 N** (aggressive trapezoidal).
+Required force (with inertia): **1.54 N** for a full-stroke move. The catch (≈153 N) is handled by the brake/absorber, not the motor.
 
 All three motors exceed this, but:
 - **28BYJ-48:** Marginal at high speed (RPM limit), geared motor has backlash
@@ -327,13 +327,13 @@ All three motors exceed this, but:
 
 ### 8.1 Diameter Trade-offs
 
-| Drum Ø | RPM @ 4.5 m/s | Torque @ 2.72 N | Thread Capacity | NEMA-17 Fit |
+| Drum Ø | RPM @ 4.5 m/s | Torque @ 1.54 N | Thread Capacity | NEMA-17 Fit |
 |--------|--------------|-----------------|----------------|-------------|
-| 10 mm | 8600 | 0.0136 Nm | Low (few layers) | ❌ RPM too high |
-| 15 mm | 5735 | 0.0204 Nm | Medium | ⚠️ Borderline |
-| **20 mm** | **4297** | **0.0272 Nm** | **Good** | ✅ **Optimal** |
-| 25 mm | 3438 | 0.0340 Nm | Very good | ✅ Excellent |
-| 30 mm | 2865 | 0.0408 Nm | Excellent | ✅ Excellent |
+| 10 mm | 8600 | 0.0077 Nm | Low (few layers) | ❌ RPM too high |
+| 15 mm | 5735 | 0.0116 Nm | Medium | ⚠️ Borderline |
+| **20 mm** | **4297** | **0.0154 Nm** | **Good** | ✅ **Optimal** |
+| 25 mm | 3438 | 0.0193 Nm | Very good | ✅ Excellent |
+| 30 mm | 2865 | 0.0231 Nm | Excellent | ✅ Excellent |
 
 ### 8.2 Thread Capacity
 
@@ -417,7 +417,7 @@ The common formula `x ≈ −a / ω²` describes the lean of a pendulum whose **
 
 ### 10.3 Spacing Is the Practical Limit
 
-At the minimum 80 mm pitch, the 46 mm ball leaves about **34 mm between neighbours**. Any residual swing, from any cause, has to stay well below that gap.
+At the proposed 100 mm pitch, the 23 mm ball leaves about **77 mm between neighbours**. Any residual swing, from any cause, has to stay well below that gap.
 
 ### 10.4 Mitigation
 
@@ -434,13 +434,13 @@ At the minimum 80 mm pitch, the 46 mm ball leaves about **34 mm between neighbou
 |--------|--------|-------|
 | **Downward ceiling** | **4.43 m/s** | Free-fall limit over 1 m; specified as 4.5 m/s |
 | **Upward ceiling** | **≤ 4.5 m/s** | Motor-driven, bounded by the same figure |
-| **Upward acceleration** | Requirement ≥ 30 m/s² | Speed is a ceiling; acceleration is the separate requirement |
+| **Catch deceleration** | ≈981 m/s², ≈49 N (≈153 N with inertia) | 1 cm catch (`FR-MOT-004`); brake/absorber, not motor |
 | **Thread strength** | ✅ **588 N breaking** | Max operating force ~2.7 N (218× safety factor) |
-| **Thread stretch** | **0.11 mm max** | Idealised lower bound; `ASM-002` governs at < 100 µm |
+| **Thread stretch** | **0.031 mm static** | ≤100 µm at static load (`IR-MECH-002`); ≈3 mm transient during catch |
 | **Thread axial oscillation** | **89 Hz natural frequency** | Low damping → ~0.35 s settling after direction change |
 | **Pendulum mode** | **0.4–0.5 Hz** | Excited parametrically near `2 f_p` or by an off-vertical slack catch |
-| **Air resistance** | **10 mN @ 4.5 m/s** | 2% of ball weight, negligible |
-| **Motor torque** | **30 N @ 20 mm drum** | 11× margin over required 2.72 N (with inertia) |
+| **Air resistance** | **2.4 mN @ 4.5 m/s** | 0.5% of ball weight, negligible |
+| **Motor torque** | **30 N @ 20 mm drum** | ≈19× margin over the 1.54 N full-stroke requirement; catch handled separately |
 | **Motor RPM** | **3438 RPM @ 25 mm drum** | Within the NEMA-17 range (2000–4000 RPM) |
 
 ### Final Verdict
@@ -452,6 +452,6 @@ At the minimum 80 mm pitch, the 46 mm ball leaves about **34 mm between neighbou
 2. **Motor RPM** — 4000 RPM limit; use a 25 mm drum to keep the 4.5 m/s ceiling inside the NEMA-17 range
 3. **Stopping distance** — from the ceiling, stopping at one g takes about 1 m, so a move that reaches the ceiling cannot also stop inside the travel while the thread is taut
 4. **Catch from free fall** — must be checked against the torque-speed curve, not holding torque
-5. **Thread elasticity** — sub-millimeter, negligible
+5. **Thread elasticity** — below 0.1 mm statically; ≈3 mm transient during the catch
 
-**Recommendation:** Use a **25 mm drum** (~3440 RPM at the ceiling) and keep the wind single-layer. Treat 4.5 m/s as the ceiling; choose acceleration from `FR-MOT-004` and the catch design, not from the ceiling.
+**Recommendation:** Use a **25 mm drum** (~3440 RPM at the ceiling) with a level-wind single layer or radius compensation. Treat 4.5 m/s as the ceiling. Size the motor for the motion loads; provide a separate brake or energy absorber for the catch (`FR-MOT-004`, `ASM-008`).

@@ -6,9 +6,13 @@
 
 ## 1. System Scope
 
-A real-time kinetic art installation comprising 120 individually-controlled steel balls suspended in a 10 × 12 grid. Each ball is driven by an independent stepper motor via thread wound on a motor-driven spool. The system produces synchronized wave patterns, interference effects, and choreographed visual displays.
+A real-time kinetic art installation comprising 120 individually-controlled steel balls suspended in a grid. Each ball is driven independently by a motor via thread wound on a motor-driven spool. The system produces synchronized wave patterns, interference effects, and choreographed visual displays.
+
+The system comprises two parts: (a) a PC-side pattern development and 3D simulation environment, and (b) the physical motor installation. These may be delivered as separate tools; patterns are authored on the PC and uploaded to the installation.
 
 This document states **behaviour and constraints**. Specific design choices — controller part numbers, microstep ratio, sync interval, oscillator grade, endstop sensor, enclosure material, bus variant — are made in the analysis documents and are not requirements here.
+
+**Top-level safety requirement:** the installation shall be inherently safe — no ball motion, drop, or component failure shall be able to injure a person. Safety shall be achieved by the physical design (containment, masses, speeds, guards), not by relying on a safety-rated stop system.
 
 ---
 
@@ -20,7 +24,7 @@ This document states **behaviour and constraints**. Specific design choices — 
 | **Systems Engineer** | Reliability, maintainability, safety |
 | **Mechanical Engineer** | Structural integrity, vibration, wear |
 | **Electrical Engineer** | Power distribution, signal integrity, EMI |
-| **Software Engineer** | Real-time control, pattern generation, CAN protocol |
+| **Software Consultant** | Review of LLM-generated firmware; real-time control, pattern generation, communication protocol |
 | **Facility Manager** | Safety, maintenance, power consumption |
 | **Viewers/Visitors** | Visual experience, interactivity |
 
@@ -33,150 +37,136 @@ This document states **behaviour and constraints**. Specific design choices — 
 | ID | Requirement | Priority |
 |----|-------------|----------|
 | FR-MOT-001 | The system shall independently control the vertical position of all 120 balls simultaneously. | MUST |
-| FR-MOT-002 | Nominal per-ball position resolution shall be ≤ 20 µm linear at the drum under 1/16 microstepping on a 20 mm drum. Actual accuracy is limited by missed steps; visible smoothness is governed by CON-010 and NFR-PERF-004. | SHOULD |
-| FR-MOT-003 | The system shall support vertical speeds up to the free-fall ceiling of 4.5 m/s over the 1 m travel. 4.5 m/s is an upper bound, not a speed every move must reach. | MUST |
-| FR-MOT-004 | Each ball shall achieve an upward acceleration of ≥ 30 m/s². | MUST |
+| FR-MOT-002 | Position quantization at the drum shall be ≤ 50 µm linear (ASM-014), so individual steps are not perceptible at any commanded speed. | SHOULD |
+| FR-MOT-003 | The system shall be able to follow the free-fall speed envelope v(s) = √(2 g s) on descent when a pattern calls for it. The envelope is concave, so ~4.4 m/s is reached only near the lower stop (s ≈ 1 m); a sustained 4.5 m/s segment does not exist. | MUST |
+| FR-MOT-004 | The drive shall cover the worst-case vertical load envelope: (a) hold at rest with a = g, so the holding force is F ≥ mg; and (b) arrest a full free-fall descent (4.43 m/s) within the last 1 cm, requiring a_catch = v²/(2·0.01) ≈ 981 m/s² and F ≈ 49 N (≈ 153 N including reflected inertia, ≈ 1.9 Nm at a 25 mm drum). The catch is the sizing case; the requirement is on system capability, not on which element provides it. | MUST |
 | FR-MOT-005 | Each ball shall operate within a vertical travel range of 1000 mm (1 m). | MUST |
 | FR-MOT-006 | The system shall support S-curve (jerk-limited) motion profiles. | SHOULD |
-| FR-MOT-007 | The system shall support trapezoidal motion profiles. | SHOULD |
-| FR-MOT-008 | The system shall hold ball position against gravity without slipping (static holding torque ≥ 0.01 Nm at the drum, 20 mm Ø). | MUST |
-| FR-MOT-009 | The system shall detect the mechanical lower endstop, by motor stall current or a switch at the stop. | MUST |
-| FR-MOT-010 | The system shall perform an automatic homing sequence on power-up: move to the lower stop, record the home position, return to a safe offset. | MUST |
-| FR-MOT-011 | On emergency stop, all balls shall enter a controlled stop or held state within 10 ms of the E-stop signal. The stop shall not rely on de-energising the motors. | MUST |
-| FR-MOT-012 | The system shall keep the thread taut during ordinary motion. Payout faster than g is permitted only as the intentional free-fall drop. | MUST |
-| FR-MOT-013 | The system shall support an intentional free-fall descent with a braked catch over the last few centimetres. | SHOULD |
-| FR-MOT-014 | Downward acceleration beyond g shall only occur during the intentional free-fall drop. | MUST |
+| FR-MOT-008 | The system shall hold ball position against gravity without slipping. At standstill the equivalent acceleration is g, so the required holding force is F ≥ mg; this corresponds to a static holding torque of ≥ 0.01 Nm at the drum with margin. | MUST |
+| FR-MOT-009 | The system shall provide exactly one position-reference endstop. Its location (upper or lower) and detection method are design choices; it shall be detected on every homing attempt and shall not false-trigger during commanded motion. | MUST |
+| FR-MOT-010 | The system shall perform an automatic homing sequence on power-up: move to the reference endstop, record the home position, return to a safe offset. Homing shall complete within 60 s; if the stop is not detected within travel + margin, the system shall stop and report a fault. The offset shall keep all balls clear of the stop and of the lower extreme of travel. | MUST |
+| FR-MOT-011 | The red stop button shall remove power from the drives. After power removal the balls shall either be held by the drives' de-energised detent torque or descend to the lower limit of travel; no powered action is required. This is an operational stop, not a safety-rated function. | MUST |
+| FR-MOT-012 | During ordinary motion the thread shall remain in tension and shall not go slack, including through control transients. The downward-acceleration limit intended to achieve this is 0.9 g (ASM-010), to be confirmed by a visual test. | MUST |
+| FR-MOT-013 | The system shall support an intentional free-fall descent with a braked catch within the last 1 cm (catch distance per ASM-008). | SHOULD |
+| FR-MOT-015 | A digital/PC stop command shall halt all motion at the next control opportunity, decelerating within the configured limits, and shall retain each ball's position so that no re-homing is required. | MUST |
 
 ### 3.2 Pattern Generation
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| FR-PAT-001 | The system shall generate traveling sine waves across the grid. | MUST |
-| FR-PAT-002 | The system shall generate standing wave patterns. | MUST |
-| FR-PAT-003 | The system shall generate spiral patterns (rotating through the grid). | SHOULD |
-| FR-PAT-004 | The system shall generate random cascade patterns. | SHOULD |
-| FR-PAT-005 | The system shall support music-reactive mode (FFT-driven from audio input). | SHOULD |
-| FR-PAT-006 | The system shall support user-defined choreography (keyframe sequences). | SHOULD |
-| FR-PAT-007 | The system shall support at least 8 distinct pattern types. | MUST |
-| FR-PAT-008 | Pattern transitions shall be smooth (no discontinuous position jumps). | MUST |
+| FR-PAT-001 | The system shall reproduce arbitrary user-defined position-vs-time waveforms for all balls, within the speed envelope (CON-003) and the drive's acceleration capability, synchronised across the grid (FR-SYNC-001). Waveform types (sine, standing, spiral, cascade, keyframe choreography, etc.) are not separately specified. | MUST |
+| FR-PAT-005 | The system shall support real-time control of motion from a PC (waveforms/parameters streamed in real time). Audio-reactive behaviour, if required, is implemented on the PC side. | SHOULD |
+| FR-PAT-008 | Pattern transitions shall be smooth (no discontinuous position jumps), blended over ~1 s (ASM-012). | MUST |
 | FR-PAT-009 | The system shall allow runtime pattern switching without stopping motion. | SHOULD |
 
 ### 3.3 Synchronization
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| FR-SYNC-001 | All 120 balls shall be synchronized to a global timebase with ≤ 1 ms precision. | MUST |
+| FR-SYNC-001 | All 120 balls shall be synchronized to the global timeline such that, at any instant, every ball's executed position corresponds to the same global time within 1 ms. | MUST |
 | FR-SYNC-002 | The system shall support buffered motion commands executed on the synced timeline. | MUST |
-| FR-SYNC-003 | The system shall provide a global timebase mechanism sufficient to maintain FR-SYNC-001. | MUST |
-| FR-SYNC-004 | Inter-controller communication latency shall be ≤ 5 ms (worst case, 10 controllers). | MUST |
-| FR-SYNC-005 | Each controller shall track its local oscillator drift relative to the master timebase. | MUST |
-| FR-SYNC-006 | The system shall correct oscillator drift by any suitable method — timing pause, clock trim, or a better oscillator — so that alignment stays within FR-SYNC-001. | MUST |
-| FR-SYNC-007 | Clock correction shall not cause a visible position discontinuity. | MUST |
+| FR-SYNC-004 | Inter-controller communication latency shall be ≤ 5 ms (worst case) at the system's chosen node count. | MUST |
+| FR-SYNC-005 | The system shall compensate clock drift between controllers so that FR-SYNC-001 holds, without causing a visible position discontinuity. | MUST |
 
 ### 3.4 Communication
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| FR-COMM-001 | The system shall use a CAN 2.0B bus at ≥ 1 Mbit/s for controller-to-master communication. | MUST |
-| FR-COMM-002 | The system may support CAN-FD (bitrate switching) for higher data throughput. | SHOULD |
-| FR-COMM-003 | The CAN bus shall be a linear bus, terminated at both ends, with short stubs only. | MUST |
-| FR-COMM-004 | The system shall define message types for: move commands, status reports, homing, emergency stop, pattern commands, global sync. | MUST |
-| FR-COMM-005 | The system shall support at least 10 controller nodes on a single CAN bus. | MUST |
-| FR-COMM-006 | The system shall provide a master controller interface (USB/Ethernet/WiFi) for pattern upload and monitoring. | SHOULD |
+| FR-COMM-004 | The system shall define message types for: move commands, status reports, homing, stop, pattern commands, global sync, error/diagnostic reports, and alive/heartbeat. | MUST |
+| FR-COMM-005 | The control architecture shall be modular: the number of controller nodes, the balls per node, and the bus segmentation are design choices determined by the implementation. | MUST |
+| FR-COMM-006 | The system shall provide a host interface for pattern upload and monitoring. The transport is a design choice. | SHOULD |
+| FR-COMM-007 | Each controller shall have a unique, persistent identity that maps it to its grid position and to the balls it controls. The mapping shall survive power cycles and form part of the persistent configuration (IR-SOFT-003). | MUST |
 
 ### 3.5 Local Trajectories
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| FR-ARCH-001 | Each column controller shall execute its own trajectory at ≥ 1 kHz. The master shall send motion parameters, not position samples. | MUST |
+| FR-ARCH-001 | Each controller shall execute its trajectory locally at a rate sufficient to satisfy FR-SYNC-001 and FR-MOT-002. The master shall distribute motion parameters rather than per-ball position samples; controller grouping is modular. | MUST |
 
 ### 3.6 Monitoring & Diagnostics
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| FR-MON-001 | The system shall report per-ball position, velocity, and error status to the master. | MUST |
-| FR-MON-002 | The system shall report motor temperature per controller. | SHOULD |
-| FR-MON-003 | The system shall log error events (overcurrent, stall, communication loss) with timestamps. | MUST |
-| FR-MON-004 | The system shall provide a web-based or GUI monitoring interface. | SHOULD |
-| FR-MON-005 | The system shall indicate controller health via status LEDs (green = OK, red = fault). | MUST |
+| FR-MON-001 | The system shall report per-ball position, velocity, and error status on request or on failure (e.g. carried in the alive/heartbeat message), not continuously. | MUST |
+| FR-MON-003 | The system shall log error events (overcurrent, stall, communication loss) with timestamps on the global timeline. | MUST |
+| FR-MON-004 | The system shall provide a monitoring interface for the operator. | SHOULD |
+| FR-MON-005 | The system shall indicate controller health locally with a visible OK/fault indication. | MUST |
 
 ### 3.7 User Interface
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| FR-UI-001 | The system shall provide a pattern selection interface (web UI or physical controls). | SHOULD |
+| FR-UI-001 | The system shall provide a PC-based pattern development environment: authoring, preview through the simulation, and upload to the installation. | MUST |
 | FR-UI-002 | The system shall allow runtime adjustment of pattern parameters (speed, amplitude, frequency). | SHOULD |
-| FR-UI-003 | The system shall provide a prominent hardware emergency stop button. | MUST |
+| FR-UI-003 | The system shall provide a prominent hardware power-off stop button. | MUST |
 | FR-UI-004 | The system shall support scheduled operation (start/stop times, pattern rotation). | OPTIONAL |
+
+### 3.8 Simulation
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-SIM-001 | The system shall provide a PC-based 3D simulation of the installation, in addition to the physical piece, that reproduces the ball motion from the same pattern/motion data for preview and development without the hardware. Simulated and real motion shall match within the visual limits. | SHOULD |
 
 ---
 
 ## 4. Non-Functional Requirements
 
-### 4.1 Performance
-
-| ID | Requirement | Priority |
-|----|-------------|----------|
-| NFR-PERF-001 | Speed ceiling: 4.5 m/s per ball (free-fall limit over 1 m). This is an upper bound. | MUST |
-| NFR-PERF-002 | Maximum per-ball upward acceleration: ≥ 30 m/s². | MUST |
-| NFR-PERF-003 | Maximum per-ball jerk: ≤ 500 m/s³ (for visual smoothness). | SHOULD |
-| NFR-PERF-004 | System-wide pattern update rate: ≥ 60 Hz (all 120 balls). | MUST |
-| NFR-PERF-005 | CAN bus message latency (controller → master): ≤ 5 ms. | MUST |
-| NFR-PERF-006 | Pattern generation to motion execution delay: ≤ 10 ms. | SHOULD |
-
-### 4.2 Reliability
+### 4.1 Reliability
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
 | NFR-REL-001 | Mean time between failures (MTBF): ≥ 1000 hours. | SHOULD |
-| NFR-REL-002 | The system shall continue partial operation if 1–2 controllers fail (degraded mode). | SHOULD |
+| NFR-REL-002 | The remaining balls shall continue operating if a controller fails (degraded mode). | SHOULD |
 | NFR-REL-003 | Single controller failure shall not affect operation of other controllers. | MUST |
-| NFR-REL-004 | Thread failure (breakage) on one ball shall not cause cascading failures. | MUST |
-| NFR-REL-005 | Power loss recovery: the system shall re-home all balls on power restoration. | MUST |
+| NFR-REL-004 | Thread failure (breakage) on one ball shall not cause cascading failures. Detection of the breakage is not required. | MUST |
+| NFR-REL-005 | Power loss recovery: the system shall re-home all balls on power restoration (per FR-MOT-010). | MUST |
 
-### 4.3 Safety
+### 4.2 Safety
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| NFR-SAFE-001 | A ball that falls shall remain inside the piece. Secondary cables, an enclosure, or another means may be used; the requirement is containment, not a particular device. | MUST |
-| NFR-SAFE-002 | The enclosure or guard shall contain a detached ball and its hardware. | MUST |
-| NFR-SAFE-003 | Emergency stop shall end in a hold or a braked descent within 100 ms. It shall not rely on cutting motor current alone, because motor current is what holds a ball. | MUST |
-| NFR-SAFE-004 | Per-motor overcurrent protection (electronic or fuse) shall be provided. | MUST |
-| NFR-SAFE-005 | The system shall include warning signage and safety interlocks on the enclosure. | MUST |
-| NFR-SAFE-006 | Total suspended weight (120 balls + threads + hardware) shall not exceed the structural capacity of the frame. | MUST |
+| NFR-SAFE-009 | The installation shall be inherently safe: no ball motion, drop, or component failure shall be able to injure a person. This is the top-level safety requirement and takes precedence over the operational stop functions. | MUST |
+| NFR-SAFE-001 | The system shall contain any detached ball and its hardware within the piece, by secondary cables, an enclosure, or another means. The requirement is containment, not a particular device. | MUST |
+| NFR-SAFE-004 | Per-motor overcurrent protection shall be provided. | MUST |
+| NFR-SAFE-005 | The system shall include warning signage, and access interlocks that stop motion when an enclosure is opened. | MUST |
+| NFR-SAFE-006 | The frame shall withstand the worst-case load — all 120 balls catching simultaneously (≈5.9 kN) plus static weight — with a safety factor of ≥ 2. | MUST |
 | NFR-SAFE-007 | The system shall be grounded/earthed for electrical safety. | MUST |
-| NFR-SAFE-008 | The 24 V bus shall absorb energy regenerated during lowering and braking (clamp or brake resistor). | MUST |
+| NFR-SAFE-010 | The system shall be designed against fire: the supply shall have overcurrent and short-circuit protection, and enclosure, cable, and decorative materials shall be fire-retardant where practical. Unattended operation shall only be permitted with these protections in place. | MUST |
 
-### 4.4 Environmental
+### 4.3 Environmental
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
 | NFR-ENV-001 | Operating temperature: 10 °C – 40 °C. | SHOULD |
 | NFR-ENV-002 | Operating humidity: 20 % – 80 % RH (non-condensing). | SHOULD |
-| NFR-ENV-003 | The system shall be suitable for indoor operation. | MUST |
 | NFR-ENV-004 | Noise level: ≤ 45 dB(A) at 1 m. | SHOULD |
 
-### 4.5 Maintainability
+### 4.4 Maintainability
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
 | NFR-MAINT-001 | Individual ball/station replacement shall be possible without removing other balls. | SHOULD |
-| NFR-MAINT-002 | Controller modules shall be hot-swappable (replaced without system shutdown). | SHOULD |
 | NFR-MAINT-003 | Diagnostic mode shall allow individual ball testing. | SHOULD |
-| NFR-MAINT-004 | The master and all column controllers shall support field firmware update over CAN or WiFi without removing boards. | MUST |
+| NFR-MAINT-004 | Software update shall be possible in the installed position, without removing boards. A USB (or equivalent bootloader) path shall be available for bring-up. Updates shall have integrity verification and rollback on failure. | MUST |
 | NFR-MAINT-005 | The spare-parts list shall be documented and commercially available. | MUST |
+| NFR-MAINT-006 | A failed controller/station module shall be exchangeable within 10 minutes. | MUST |
 
-### 4.6 Physical
+### 4.5 Physical
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| NFR-PHYS-001 | Grid dimensions: 10 columns × 12 rows, ball spacing ≥ 80 mm (adjustable). | MUST |
+| NFR-PHYS-001 | Grid: 120 balls (count fixed). Arrangement and pitch are proposals pending designer confirmation — see NFR-PHYS-008 and ASM-009. | MUST |
 | NFR-PHYS-002 | Total system height: ≥ 1200 mm (1 m travel + suspension + frame). | MUST |
-| NFR-PHYS-003 | Ball diameter: ~46 mm (50 g polished steel sphere). | MUST |
-| NFR-PHYS-004 | Total ball weight: 120 × 50 g = 6 kg. | MUST |
-| NFR-PHYS-005 | Frame material: aluminum extrusion (2020 profile or equivalent) or steel. | MUST |
-| NFR-PHYS-006 | Total system weight (frame + motors + electronics): ≤ 150 kg. | SHOULD |
-| NFR-PHYS-007 | The thread shall be wound in a single layer on a constant-radius drum, so that the position scale does not change with height. | MUST |
+| NFR-PHYS-003 | Ball diameter: ~23 mm (50 g solid polished steel sphere; Ø from V = m/ρ_steel). | MUST |
+| NFR-PHYS-004 | Total weight of all balls: 120 × 50 g = 6 kg. | MUST |
+| NFR-PHYS-007 | Position-scale variation over travel shall not exceed 50 µm per grid pitch (ASM-014), so height does not visibly distort the pattern. Single-layer winding or calibrated compensation are both acceptable means. | MUST |
+| NFR-PHYS-008 | Ball pitch: 100 mm nominal in both axes (field ≈ 0.9 × 1.1 m centre-to-centre). This is an engineering proposal pending designer approval (ASM-009). | SHOULD |
+
+### 4.6 Cost
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| NFR-COST-001 | Total parts/BOM cost for the installation and its PC tooling shall be ≤ 4,000 €, excluding labour and installation. | MUST |
 
 ---
 
@@ -186,37 +176,22 @@ This document states **behaviour and constraints**. Specific design choices — 
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| IR-MECH-001 | Drum Ø: 20–30 mm (designer selectable). | MUST |
-| IR-MECH-002 | Thread type: Dyneema or Kevlar, Ø 0.5 mm. | MUST |
-| IR-MECH-003 | Motor mounting: standard NEMA-17 (42 × 42 mm) footprint. | MUST |
-| IR-MECH-004 | Frame construction: 2020 aluminum extrusion or equivalent. | MUST |
+| IR-MECH-002 | Suspension thread: breaking strength ≥ 3× the peak catch load (≥ 150 N), and elongation ≤ 100 µm at the maximum static load (≈ 0.5 N) over the suspension length. Material and diameter are design choices. | MUST |
 
 ### 5.2 Electrical Interfaces
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| IR-ELEC-001 | Motor supply voltage: 24 V DC nominal. | MUST |
-| IR-ELEC-002 | Average system power consumption shall fit the available supply (design budget ≤ 1200 W). | SHOULD |
-| IR-ELEC-003 | Logic supply: 3.3 V or 5 V (controller-dependent). | MUST |
-| IR-ELEC-004 | Power distribution: centralized 24 V bus with per-motor current regulation. | MUST |
+| IR-ELEC-001 | Motor supply voltage: 24 V DC nominal (preliminary, depends on motor selection; see ASM-007). | SHOULD |
+| IR-ELEC-002 | Average system power consumption shall fit the available supply (design budget ≤ 1200 W; preliminary, depends on motor selection). | SHOULD |
+| IR-ELEC-004 | The grounding and bonding scheme shall prevent ground loops and common-mode noise between motor power returns, controller logic ground, and the field-bus reference. Motor power and signal grounds shall be separated as the drive requires. | MUST |
 
-### 5.3 Communication Interfaces
-
-| ID | Requirement | Priority |
-|----|-------------|----------|
-| IR-COMM-001 | Bus: CAN 2.0B at ≥ 1 Mbit/s; CAN-FD optional. | MUST |
-| IR-COMM-002 | Bus topology: linear, with 120 Ω termination at both ends and short stubs only. | MUST |
-| IR-COMM-003 | Master interface: USB, Ethernet, or WiFi (at least one). | MUST |
-| IR-COMM-004 | Message frame: CAN 2.0B (8 bytes) or CAN-FD (up to 64 bytes). | MUST |
-
-### 5.4 Software Interfaces
+### 5.3 Software Interfaces
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| IR-SOFT-001 | Pattern API: RESTful or WebSocket interface for pattern upload. | SHOULD |
-| IR-SOFT-002 | Status API: real-time position/velocity reporting via CAN or network. | SHOULD |
 | IR-SOFT-003 | Configuration: persistent storage of grid layout and calibration data. | MUST |
-| IR-SOFT-004 | Logging: event log accessible via the network interface. | SHOULD |
+| IR-SOFT-004 | Logging: event log accessible to the operator. | SHOULD |
 
 ---
 
@@ -224,14 +199,11 @@ This document states **behaviour and constraints**. Specific design choices — 
 
 | ID | Constraint | Priority |
 |----|-----------|----------|
-| CON-001 | 120 balls, 10 × 12 grid, 1 m vertical travel — fixed. | MUST |
+| CON-001 | 120 balls and 1 m usable vertical travel are fixed; grid arrangement and pitch are proposals (ASM-009). | MUST |
 | CON-002 | Ball mass: 50 g each — fixed. | MUST |
-| CON-003 | Speed shall not exceed 4.5 m/s — the free-fall ceiling over 1 m. | MUST |
-| CON-004 | Motor type: stepper motor (NEMA-11 or NEMA-17) or BLDC with FOC. | MUST |
-| CON-005 | Communication: CAN 2.0B, with CAN-FD optional. | MUST |
-| CON-006 | Lower stop: mechanical. Detection by stall current or a switch; the stop is the reference. | MUST |
-| CON-007 | Drum diameter: 10–30 mm, constant radius, single-layer wind. | MUST |
-| CON-008 | Controller grouping and count are design choices; the bus shall support the chosen node count (at least 10). | MUST |
+| CON-003 | Speed envelope: v(s) = √(2 a s), where s is the height above the lower extreme of travel. On free-fall descent a = g, giving v = 4.43 m/s at s = 1 m (stated as 4.5 m/s); for motor-driven motion a is the commanded acceleration. Commanded speed shall stay inside this envelope, and upward speed shall always allow braking within the remaining travel. | MUST |
+| CON-006 | Exactly one position-reference endstop; its location (upper or lower) and implementation are design choices. The stop is the position reference. | MUST |
+| CON-008 | The control architecture shall be modular; controller grouping, node count, and bus segmentation are design choices. | MUST |
 | CON-009 | Indoor installation — no weatherproofing required. | MUST |
 | CON-010 | Visual quality: motion must appear smooth to the human eye (no visible stepping). | MUST |
 
@@ -242,29 +214,40 @@ This document states **behaviour and constraints**. Specific design choices — 
 | ID | Assumption |
 |----|-----------|
 | ASM-001 | Balls are suspended from a rigid overhead frame. |
-| ASM-002 | Thread elasticity is negligible for motion accuracy (< 100 µm stretch at maximum load). |
-| ASM-003 | Air resistance is negligible at 4.5 m/s for a 46 mm sphere (drag coefficient ~0.47, drag force ~0.01 N, about 2 % of ball weight). |
+| ASM-003 | Air resistance is negligible at 4.5 m/s for a 23 mm sphere (drag force ≈2.4 mN, about 0.5 % of ball weight). |
 | ASM-004 | Thermal effects on thread strength are within material limits at operating temperatures. |
 | ASM-005 | The installation environment is stable (no significant vibration or air currents). |
 | ASM-006 | Viewers are at 0.5–3 m distance from the sculpture. |
 | ASM-007 | Power is available: 24 V DC, ~1200 W continuous. |
+| ASM-008 | Braked catch distance for an intentional free-fall drop is 1 cm — an engineering proposal pending designer approval. |
+| ASM-009 | Grid form and pitch are not yet fixed by the designer; a rectangular 10 × 12 layout at 100 mm pitch is an engineering proposal pending designer approval. |
+| ASM-010 | Limiting downward acceleration to 0.9 g (T ≥ 0.1 mg) keeps the thread visibly taut during ordinary motion; to be verified by a visual test. The limit is waived only for the intentional free-fall drop. |
+| ASM-011 | An S-curve jerk limit of ~500 m/s³ is assumed to appear smooth; to be verified by a visual test. |
+| ASM-012 | A smooth transition from the old to the new pattern over ~1 s is assumed to look good and be acceptable for live changes; to be verified visually. |
+| ASM-013 | A replacement module is available in stock, so module exchange time (≤ 10 min) is the binding recovery metric. |
+| ASM-014 | Ball vertical displacements up to 50 µm are visually acceptable (imperceptible at the viewing distances of ASM-006); to be verified by a visual test. |
 
 ---
 
-## 8. Glossary
+## 8. Verification & Test
+
+| ID | Test | Verifies |
+|----|------|----------|
+| T-DROP-001 | Make the drop: execute an intentional free-fall descent and monitor the thread (visual and/or tension sensor). Confirm the thread stays taut during ordinary motion and goes slack only during the intended drop, and that the catch arrests the ball within 1 cm. | FR-MOT-003, FR-MOT-012, FR-MOT-013, ASM-008, ASM-010 |
+| T-SMOOTH-001 | Run the fastest acceleration/deceleration transitions and observe visually that no jerk or stepping is perceived. | FR-MOT-002, FR-MOT-006, ASM-011 |
+| T-FRAME-001 | Apply a static proof load of 2× the worst-case dynamic load (≈12 kN) to the frame and verify no failure or permanent deformation. | NFR-SAFE-006 |
+| T-VISUAL-001 | Move a ball in 50 µm increments and observe from the closest viewing distance (0.5 m) whether the displacement is perceptible. | ASM-014, FR-MOT-002 |
+
+---
+
+## 9. Glossary
 
 | Term | Definition |
 |------|-----------|
-| **CAN** | Controller Area Network, serial bus protocol |
-| **CAN-FD** | CAN with Flexible Data-rate, supports higher bitrate and larger payloads |
-| **FOC** | Field-Oriented Control, BLDC motor control algorithm |
-| **NEMA** | National Electrical Manufacturers Association (motor frame standard) |
-| **PIO** | Programmable I/O (RP2350 feature for precise timing) |
+| **Jerk** | Rate of change of acceleration; limited for visually smooth motion |
+| **Quantization** | Smallest commanded position increment at the drum |
 | **S-curve** | Jerk-limited motion profile with smooth acceleration transitions |
-| **StallGuard** | TMC motor driver feature for current-based load sensing |
-| **StealthChop** | TMC motor driver mode for quiet, smooth low-speed operation |
-| **µ-Step** | Microstepping — subdividing full motor steps for smoother motion |
 
 ---
 
-*Document version: 2.0*
+*Document version: 3.0*

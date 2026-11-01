@@ -1,6 +1,6 @@
 # Hanging Balls — Kinetic Sculpture
 
-A real-time kinetic art installation featuring **120 polished steel balls** (50 g each) suspended in a 10 × 12 grid, each driven by an individual stepper motor. The balls move vertically over a 1 m range, producing flowing waves, interference patterns, and choreographed visual symphonies.
+A real-time kinetic art installation featuring **120 polished steel balls** (50 g each) suspended in a grid (10 × 12 layout is a proposal), each driven by an independent motor. The balls move vertically over a 1 m range, producing flowing waves, interference patterns, and choreographed visual symphonies. The system has two parts: a PC pattern-development and 3D-simulation environment, and the physical motor installation.
 
 ```
   ┌──────────────────────────────────────────┐
@@ -20,8 +20,8 @@ A real-time kinetic art installation featuring **120 polished steel balls** (50 
 
 | | |
 |---|---|
-| **Balls** | 120 × 50 g polished steel (Ø ≈ 46 mm) |
-| **Grid** | 10 columns × 12 rows |
+| **Balls** | 120 × 50 g polished steel (Ø ≈ 23 mm) |
+| **Grid** | 10 columns × 12 rows (layout proposal) |
 | **Travel** | 1000 mm (1 m) |
 | **Speed ceiling** | 4.5 m/s (free-fall over 1 m is 4.43 m/s; 4.5 m/s is the rounded ceiling) |
 
