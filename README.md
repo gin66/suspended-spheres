@@ -1,6 +1,6 @@
 # Hanging Balls — Kinetic Sculpture
 
-A real-time kinetic art installation featuring **120 polished steel balls** (50 g each) suspended in a grid (10 × 12 layout is a proposal), each driven by an independent motor. The balls move vertically over a 1 m range, producing flowing waves, interference patterns, and choreographed visual symphonies. The system has two parts: a PC pattern-development and 3D-simulation environment, and the physical motor installation.
+A real-time kinetic art installation featuring **100–120 hollow chrome-finished plastic spheres** (Ø 60–80 mm, ≤ 50 g each) suspended in a grid (10 × 10 or 10 × 12, layout a proposal), each driven by an independent motor. The spheres move vertically over ~2 m, very slowly and smoothly, producing flowing waves, interference patterns, and choreographed visual symphonies. The system has two parts: a PC pattern-development and 3D-simulation environment, and the physical motor installation.
 
 ```
   ┌──────────────────────────────────────────┐
@@ -10,7 +10,7 @@ A real-time kinetic art installation featuring **120 polished steel balls** (50 
   │  ROW 12 :  ●  ●  ●  ●  ●  ●  ●  ●  ●  ●  │
   │                                          │
   │  12 rows × 10 columns = 120 balls        │
-  │  Vertical travel: 1000 mm (1 m)          │
+  │  Vertical travel: ~2000 mm (2 m)        │
   └──────────────────────────────────────────┘
 ```
 
@@ -20,12 +20,13 @@ A real-time kinetic art installation featuring **120 polished steel balls** (50 
 
 | | |
 |---|---|
-| **Balls** | 120 × 50 g polished steel (Ø ≈ 23 mm) |
-| **Grid** | 10 columns × 12 rows (layout proposal) |
-| **Travel** | 1000 mm (1 m) |
-| **Speed ceiling** | 4.5 m/s (free-fall over 1 m is 4.43 m/s; 4.5 m/s is the rounded ceiling) |
+| **Balls** | 100–120 hollow chrome-finish plastic (Ø 60–80 mm, ≤ 50 g) |
+| **Grid** | 10 × 10 or 10 × 12 (layout proposal) |
+| **Travel** | ~2000 mm (2 m) |
+| **Footprint** | ~3 × 3 m (3 × 3.5 m possible), under a 3 m ceiling |
+| **Motion** | very slow and smooth; max commanded speed ≤ 0.3 m/s (proposal) |
 
-> 4.5 m/s bounds the system; it is not a speed every move must reach. A free-fall drop with a short braked catch is a legitimate motion.
+> The piece is designed for slow, hypnotic motion. Free-fall and high-speed catch behaviour are not required.
 
 ---
 
@@ -38,6 +39,7 @@ All technical Markdown lives in [`doc/`](doc/). Only this file and [`AGENTS.md`]
 | [**System Requirements**](doc/system_requirements.md) | Formal functional and non-functional requirements, interfaces, constraints, assumptions |
 | [**Mechanical Analysis**](doc/mechanical_analysis.md) | Speed ceiling, force/torque budgets, thread dynamics, inertia, drum and frame design |
 | [**Controller Analysis**](doc/controller_analysis.md) | Platform and driver selection, stepping resolution, bus budget, clock drift |
+| [**Motor Selection**](doc/motor_selection.md) | Trade study of cheap motor variants against the requirement set |
 | [**Risk Register**](doc/RISK.md) | Dynamic loads, noise, architecture risks, and mitigations |
 | [**AGENTS.md**](AGENTS.md) | Mission and development-environment notes |
 

@@ -8,23 +8,23 @@
 
 ### 1.1 Dynamic Load on Structural Frame
 
-When all 120 balls (50 g each) move simultaneously, the system generates significant dynamic loads on the structural frame:
+The design is now slow and the supporting structure is substantial steel beams, owned by the designer (`ASM-016`):
 
-- **Static weight:** 120 × 50 g = 6 kg ≈ 59 N
-- **Worst-case dynamic load:** all 120 balls catching a free-fall drop together ≈ 120 × 49 N ≈ 5.9 kN — about 100× the static load
-- **Torsional stress:** Uneven movement across columns induces significant torsional loading on the frame
-- **Implication:** The structural design is critically important to handle these combined forces safely and reliably
+- **Static weight:** ≤ 120 × 50 g = 6 kg ≈ 59 N
+- **Slow-motion dynamic load:** ≤ ≈ 0.52 N per ball → ≈ 62 N total (≈ 5 % above static)
+- **No free-fall catch load** — free-fall is not part of the motion repertoire
+- **Asymmetry:** uneven movement still produces modest torsional loading
 
-> **Design imperative:** Structural integrity must be validated under worst-case asymmetric load scenarios, not just static weight.
+> **Scope note:** structural design and verification are the designer's responsibility. The control system's job is to stay within the slow-motion load envelope.
 
 ### 1.2 Primary Technical Risk: Cumulative Noise Floor
 
-The cumulative acoustic and mechanical noise from 120 steppers operating simultaneously is the primary technical risk:
+The cumulative acoustic and mechanical noise from 100–120 motors is still a significant risk, though slow motion greatly reduces it compared with the earlier high-speed concept:
 
-- Noise may radiate through the spheres and the mechanical enclosure
+- Noise may radiate through the hollow ornaments and the mechanical enclosure
 - Strategic structural and acoustic decoupling may mitigate (but not eliminate) the issue
 - Predicting full-scale system behavior from a small demonstrator is inherently difficult
-- **Fallback strategy:** If the noise floor proves unacceptable, reconsider the actuation strategy — explore **BLDC or PMSM motors**, potentially controlled via the **SimpleFOC library**, which may offer quieter operation
+- **Fallback strategy:** If the noise floor proves unacceptable, explore **BLDC or PMSM motors** (potentially with the **SimpleFOC library**), which may run more quietly
 
 ---
 
@@ -78,14 +78,14 @@ The cumulative acoustic and mechanical noise from 120 steppers operating simulta
 
 ### 2.7 Quartz Drift Between Controllers
 
-Each column controller runs on its own quartz oscillator. A consumer crystal is specified at ± 35 ppm; two crystals at opposite ends of that tolerance drift at up to 70 ppm relative to each other. At 4.5 m/s this becomes a visible position error:
+Each controller runs on its own quartz oscillator. A consumer crystal is specified at ± 35 ppm; two crystals at opposite ends of that tolerance drift at up to 70 ppm relative to each other. At the fastest planned speed (0.3 m/s) this becomes a visible position error:
 
-| Elapsed time | Worst-case relative drift (70 ppm) | Position error at 4.5 m/s |
+| Elapsed time | Worst-case relative drift (70 ppm) | Position error at 0.3 m/s |
 |--------------|-----------------------------------|---------------------------|
-| 1 minute | 4.2 ms | ~19 mm |
-| 5 minutes | 21 ms | ~94 mm |
+| 1 minute | 4.2 ms | ~1.3 mm |
+| 5 minutes | 21 ms | ~6.3 mm |
 
-At the 21 ms figure the error is comparable to the 100 mm proposed grid pitch, so wave and interference patterns visibly break up. The drift is certain, not intermittent; without correction it is a synchronisation failure rather than a nuisance.
+At the fastest planned speed (0.3 m/s) 21 ms of drift gives ≈ 6.3 mm after 5 minutes and ≈ 0.75 m after an hour — the latter exceeds the ~300 mm grid pitch, so wave patterns visibly break up. The drift is certain, not intermittent; without correction it is a synchronisation failure rather than a nuisance.
 
 **Mitigation — not a different oscillator:**
 
@@ -100,21 +100,21 @@ At the 21 ms figure the error is comparable to the 100 mm proposed grid pitch, s
 
 | # | Risk | Severity | Likelihood | Mitigation |
 |---|------|----------|------------|------------|
-| 1 | **Structural failure under asymmetric dynamic load** | Critical | Medium | Validate frame under worst-case asymmetric loading; factor of safety ≥ 2 (see `NFR-SAFE-006`) |
-| 2 | **Cumulative stepper noise floor** | High | High | Acoustic/structural decoupling; fallback to BLDC/PMSM + SimpleFOC |
-| 3 | **NEMA-11 max RPM unspecified** | Medium | High | Empirical stress test in PoC phase |
+| 1 | **Structural failure** | Critical | Low | Designer-owned substantial steel structure; control loads are static/slow (≤ 62 N total) |
+| 2 | **Cumulative motor noise floor** | High | Medium | Acoustic/structural decoupling; slow motion helps; fallback to BLDC/PMSM + SimpleFOC |
+| 3 | **Motor selection for slow, quiet operation** | Low | Low | RPM/torque are trivial at 0.3 m/s; choose on noise, cost, and integration |
 | 4 | **PC real-time limitation** | High | Certain | Offload all step generation to edge controllers; PC handles pattern scheduling only |
 | 5 | **No open-source firmware scales to 120 steppers** | Medium | Certain | Custom firmware development required |
-| 6 | **Power supply heat dissipation** | High | High | Active air cooling design; thermal modeling of driver arrays |
-| 7 | **High peak current distribution (120 motors)** | High | High | Low-resistance bus design; voltage drop analysis; local bulk capacitance |
+| 6 | **Power supply heat dissipation** | Medium | Medium | Slow motion reduces duty; air cooling and thermal modelling of driver arrays |
+| 7 | **Current distribution across many motors** | Medium | Medium | Low-resistance bus design; voltage-drop analysis; local bulk capacitance |
 | 8 | **Module interconnect reliability** | Medium | Medium | Minimize connectors; use board-level interconnects; gold-plated contacts |
 | 9 | **ESP32 long-term stability (WiFi + CAN + stepper control)** | Medium | Medium | Watchdog management; task isolation; stress-test continuous operation |
 | 10 | **X/Y pendulum swing from guide imperfections** | Low-Medium | Medium | Precision overhead guide design; transient swing modeling |
 | 11 | **Loss of inter-controller synchronization from quartz drift** | High | High | Global timebase with periodic SYNC; measure and correct drift (rest pause or clock trim); optional TCXO; verify ≤ 1 ms before each pattern |
 | 12 | **Grounding / EMI: ground loops and common-mode noise between motor power returns, controller ground, and bus reference** | High | Medium | Separate power and signal returns; single-point bonding; shielded or isolated bus; validate EMC; see `IR-ELEC-004` |
 | 13 | **Fire from an electrical fault or overheated driver array** | High | Medium | Overcurrent/short-circuit protection, thermal design, fire-retardant enclosure/cable/decorative materials; see `NFR-SAFE-010` |
-| 14 | **Position-scale error from multi-layer winding** | High | Medium | Level-wind single layer, or calibrate radius vs turns; second layer adds ≈4 % scale error (≈40 mm over travel) vs the 50 µm/pitch limit (`NFR-PHYS-007`) |
-| 15 | **Free-fall catch overloads thread/motor** | High | Medium | ≈49 N (≈153 N with inertia) per catch; provide a brake/energy absorber, verify thread ≥150 N (`IR-MECH-002`) and frame at ≈5.9 kN (`NFR-SAFE-006`) |
+| 14 | **Position-scale error from multi-layer winding** | High | Medium | Level-wind single layer, or calibrate radius vs turns; second layer adds ≈4 % scale error (≈80 mm over the 2 m travel) vs the 50 µm/pitch limit (`NFR-PHYS-007`) |
+| 15 | **Hollow ornament detachment or cracking** | Medium | Medium | Containment (`NFR-SAFE-001`); inspect ornaments; secure the thread attachment |
 
 ---
 

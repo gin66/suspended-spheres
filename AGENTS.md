@@ -7,7 +7,7 @@
 
 ## 1. Mission
 
-Hanging Balls is a real-time kinetic art installation: 120 polished steel balls suspended in a grid (a 10 × 12 layout is a proposal), each independently driven vertically over a 1 m range, together producing travelling waves, interference patterns, and choreographed sequences. The system is delivered as a PC pattern-development/3D-simulation environment plus the physical installation.
+Hanging Balls is a real-time kinetic art installation: 100–120 hollow chrome-finished plastic spheres (Ø 60–80 mm, ≤ 50 g) suspended in a grid (10 × 10 or 10 × 12, layout a proposal), each independently driven vertically over ~2 m, very slowly and smoothly, together producing travelling waves, interference patterns, and choreographed sequences. The system is delivered as a PC pattern-development/3D-simulation environment plus the physical installation. The installation occupies roughly 3 × 3 m (possibly 3 × 3.5 m) under a 3 m ceiling; the supporting steel structure is the designer's responsibility.
 
 The visual result is the product. Motion must look smooth, stay synchronized across the grid, and remain safe when something fails.
 

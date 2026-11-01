@@ -1,6 +1,12 @@
 # Controller Analysis — Hanging Balls
 
-> Detailed evaluation of microcontroller platforms for the 120-ball kinetic sculpture.
+> Detailed evaluation of microcontroller platforms for the 100–120-ball kinetic sculpture.
+>
+> **Operating point updated.** The piece now uses 100–120 hollow chrome-finish
+> spheres (Ø 60–80 mm, ≤ 50 g) over ~2 m of travel at very slow speeds
+> (≤ 0.3 m/s, `ASM-015`). Figures below that still refer to the earlier
+> 4.5 m/s free-fall concept are marked as such; the platform/bus conclusions
+> (local motion generation, modular grouping) remain valid.
 
 ---
 
@@ -10,13 +16,13 @@ Before evaluating controllers, we define the hard requirements:
 
 | Requirement | Value |
 |-------------|-------|
-| Motors per controller | 12 (one column) |
-| Communication | CAN 2.0B or CAN-FD @ 1 Mbit/s |
-| Speed ceiling | 4.5 m/s (free fall over 1 m; a bound, not a target) |
-| Per-ball acceleration | ≥ 30 m/s² (`FR-MOT-004`) |
-| Synchronization precision | < 1 ms across all 120 balls |
-| Endstop detection | Stall current or a switch at the lower stop |
-| Real-time motion control | Yes — deterministic timing |
+| Motors per controller | design choice (12-motor grouping as baseline) |
+| Communication | modular field bus (CAN 2.0B as baseline) |
+| Max speed | 0.3 m/s (`ASM-015`) |
+| Max acceleration | ~0.5 m/s² (`ASM-015`) |
+| Synchronization precision | < 1 ms across all 100–120 balls |
+| Position reference | exactly one endstop (`FR-MOT-009`) |
+| Real-time motion control | Yes — deterministic timing, local trajectories |
 
 ---
 
@@ -158,7 +164,7 @@ If CAN is unacceptable, an I2C ring bus could work:
 - Master polls controllers for status
 - Controllers report motor positions/speeds
 - **Limitation:** I2C max 400 kHz (standard) or 3.4 MHz (fast-mode plus)
-- **Latency concern:** 120 motors on a slow I2C ring may be too slow for 4.5 m/s control
+- **Latency concern:** 120 motors on a slow I2C ring may be too slow for deterministic multi-axis control
 
 #### Pros
 - ✅ PIO allows deterministic, hardware-level step pulse generation
@@ -213,7 +219,7 @@ If CAN is unacceptable, an I2C ring bus could work:
 - ✅ Good for single-ball proof-of-concept
 
 #### Cons
-- ❌ **Too slow** for 4.5 m/s motion profiles
+- ❌ **Too slow** for deterministic motion (less critical at 0.3 m/s, but still not recommended)
 - ❌ No CAN-FD
 - ❌ Only 2 KB SRAM — insufficient for trajectory buffers
 - ❌ 8-bit CPU — poor floating-point performance
@@ -293,9 +299,9 @@ For completeness, brushless DC motors with Field-Oriented Control (FOC) were con
 | Noise | StealthChop (quiet) | Quiet |
 | Complexity | Simpler | Encoder + FOC algorithm |
 | Cost | Lower | Higher (encoder + driver) |
-| Max speed @ 4.5 m/s | Viable with proper drum | Better margin |
+| Max speed 0.3 m/s | Easy | Easy |
 
-**Verdict:** BLDC + FOC could handle higher speeds but adds encoder complexity and cost. For 4.5 m/s, steppers are sufficient. Consider BLDC only if speed target increases significantly (> 6 m/s).
+**Verdict:** At 0.3 m/s both are easily sufficient. Steppers are simpler and cheaper; BLDC + FOC remains an option for lower noise or if the speed target rises substantially.
 
 ---
 
@@ -353,11 +359,11 @@ This section answers a critical design question: **is 1/16 microstepping suffici
 
 ### 8.1 The Core Trade-off
 
-| Approach | Timing Resolution | Max µ-Stepping | Linear Resolution (20 mm drum) | Max Step Rate @ 4.5 m/s |
+| Approach | Timing Resolution | Max µ-Stepping | Linear Resolution (20 mm drum) | Max Step Rate @ 0.3 m/s |
 |----------|------------------|----------------|-------------------------------|------------------------|
-| **I2S mux** | ~4 µs | 1/16 (practical) | 19.6 µm | 229 kHz |
-| **PIO (Pico 2)** | ~6.7 ns | 1/32+ | 9.8 µm | 458 kHz |
-| **Direct GPIO (ESP32)** | ~50–100 ns | 1/32+ | 9.8 µm | 458 kHz |
+| **I2S mux** | ~4 µs | 1/16 (practical) | 19.6 µm | 15.3 kHz |
+| **PIO (Pico 2)** | ~6.7 ns | 1/32+ | 9.8 µm | 30.6 kHz |
+| **Direct GPIO (ESP32)** | ~50–100 ns | 1/32+ | 9.8 µm | 30.6 kHz |
 
 ### 8.2 Linear Resolution by Drum Diameter and Microstepping
 
@@ -392,7 +398,7 @@ The ball is ~23 mm in diameter. A 19.6 µm step displacement is:
 
 **Conclusion:** 1/16 microstepping resolution is **visually imperceptible** — the step transitions appear perfectly smooth. 1/8 (39.3 µm) also meets `ASM-014`; finer microstepping (1/32, 1/256) provides no visual benefit at this scale.
 
-### 8.4 Timing Analysis at Maximum Speed (4.5 m/s)
+### 8.4 Timing Analysis at Maximum Speed (0.3 m/s)
 
 **Step rate required at max speed:**
 ```
@@ -401,15 +407,15 @@ Steps/sec = velocity / linear_resolution_per_step
 
 | Microstepping | 10 mm Drum | 20 mm Drum | 30 mm Drum |
 |--------------|-----------|-----------|-----------|
-| Full Step | 28,648 Hz | 14,324 Hz | 9,549 Hz |
-| 1/4 µ-Step | 114,592 Hz | 57,296 Hz | 38,197 Hz |
-| 1/8 µ-Step | 229,183 Hz | 114,592 Hz | 76,394 Hz |
-| **1/16 µ-Step** | **458,366 Hz** | **229,183 Hz** | **152,788 Hz** |
-| 1/32 µ-Step | 916,732 Hz | 458,366 Hz | 305,577 Hz |
+| Full Step | 1,910 Hz | 955 Hz | 637 Hz |
+| 1/4 µ-Step | 7,639 Hz | 3,820 Hz | 2,546 Hz |
+| 1/8 µ-Step | 15,279 Hz | 7,639 Hz | 5,093 Hz |
+| **1/16 µ-Step** | **30,558 Hz** | **15,279 Hz** | **10,186 Hz** |
+| 1/32 µ-Step | 61,115 Hz | 30,558 Hz | 20,372 Hz |
 
-**At 1/16 µ-Step with 20 mm drum @ 4.5 m/s:**
-- Step frequency: **229,183 steps/sec**
-- Time per step: **4.36 µs**
+**At 1/16 µ-Step with 20 mm drum @ 0.3 m/s:**
+- Step frequency: **15,279 steps/sec**
+- Time per step: **65.4 µs**
 
 ### 8.5 I2S Mux Timing Budget
 
@@ -440,20 +446,20 @@ Frame time = 192 bits / 80 MHz = 2.4 µs
 
 This means the I2S mux can update all 12 steppers every **~2.4 µs**, which translates to a **maximum step pulse frequency of ~416 kHz per motor** (if every frame contains a step pulse).
 
-**At 1/16 µ-Step, 20 mm drum, 4.5 m/s:**
-- Required: 229,183 Hz (4.36 µs per step)
+**At 1/16 µ-Step, 20 mm drum, 0.3 m/s:**
+- Required: 15,279 Hz (65.4 µs per step)
 - I2S mux capability: ~416,000 Hz (2.4 µs per frame)
-- **Margin: 1.8×** — ✅ adequate margin
+- **Margin: 27×** — ✅ very comfortable
 
 ### 8.6 What About 1/32 Microstepping via I2S Mux?
 
 ```
-Required step rate (1/32, 20 mm drum, 4.5 m/s): 458,366 Hz
-Time per step: 2.18 µs
+Required step rate (1/32, 20 mm drum, 0.3 m/s): 30,558 Hz
+Time per step: 32.7 µs
 I2S mux frame time: 2.4 µs
 ```
 
-**Margin: 0.91×** — ❌ **I2S mux cannot sustain 1/32 µ-Step at 4.5 m/s**.
+**Margin: 13.6×** — ✅ **I2S mux can sustain 1/32 µ-Step at 0.3 m/s**.
 
 The I2S mux would need to run faster or use a wider frame, but this would consume more CPU bandwidth and introduce jitter.
 
@@ -471,10 +477,10 @@ Maximum step frequency = 1 / 13.3 ns = 75 MHz (theoretical)
 Practical max (with overhead): ~5–10 MHz
 ```
 
-**At 1/32 µ-Step, 20 mm drum, 4.5 m/s:**
-- Required: 458,366 Hz (2.18 µs per step)
+**At 1/32 µ-Step, 20 mm drum, 0.3 m/s:**
+- Required: 30,558 Hz (32.7 µs per step)
 - PIO capability: ~5,000,000 Hz (conservative)
-- **Margin: ~11×** — ✅ more than sufficient
+- **Margin: ~164×** — ✅ far more than sufficient
 
 ### 8.8 Summary: Resolution Recommendation
 
@@ -483,8 +489,8 @@ Practical max (with overhead): ~5–10 MHz
 | **Visual smoothness** | ✅ Imperceptible steps | ✅ (no visible improvement) |
 | **Holding torque** | Good | ~2× better (lower ripple) |
 | **Resonance damping** | Acceptable | Better (finer control) |
-| **I2S mux @ 4.5 m/s** | ✅ 1.8× margin | ❌ 0.91× margin (fails) |
-| **PIO @ 4.5 m/s** | ✅ 22× margin | ✅ 11× margin |
+| **I2S mux @ 0.3 m/s** | ✅ 27× margin | ✅ 13.6× margin |
+| **PIO @ 0.3 m/s** | ✅ 327× margin | ✅ 164× margin |
 | **CPU load** | Lower | ~2× higher |
 | **Bus load** | No difference | No difference (steps are local, not on CAN) |
 
@@ -493,12 +499,12 @@ Practical max (with overhead): ~5–10 MHz
 **1/16 microstepping is the optimal choice for the I2S multiplexing approach:**
 
 1. **Visually indistinguishable** from finer stepping — ball motion appears perfectly smooth
-2. **Fits within I2S mux timing** with 1.8× margin at max speed (4.5 m/s)
+2. **Fits within I2S mux timing** with 27× margin at max speed (0.3 m/s)
 3. **Sufficient holding torque** for 50 g ball + acceleration forces
 4. **No CAN-bus penalty** — step generation is local; microstepping does not change CAN traffic
 5. **Acceptable resonance** — stepper motors at 1/16 have manageable resonance peaks
 
-**Use 1/32 microstepping only with direct GPIO/PIO control** (not I2S mux), where the step-rate margin is large enough.
+At the slow operating speed, 1/32 is also feasible on the I2S mux. It remains optional; 1/16 already meets the 50 µm limit with margin.
 
 For the **Pico 2 with PIO**, 1/32 microstepping is feasible and provides slightly smoother low-speed motion, but the visual benefit is marginal. **1/16 remains the recommended default** for both platforms; once the ramp is local, microstepping does not load the CAN bus.
 
@@ -801,7 +807,7 @@ If controllers with different motor counts (4, 8, 12) are mixed on the same bus:
 | Parameter | Value |
 |-----------|-------|
 | Controller grouping | **12 motors per controller** (10 controllers total) |
-| Control rate | **500 Hz** (sufficient for 4.5 m/s motion) |
+| Control rate | **500 Hz** (ample for ≤ 0.3 m/s motion) |
 | Bus protocol | **CAN-FD** if streaming positions (1 Mbit/s base / 8 Mbit/s data phase); **classic CAN 2.0B** if trajectories are local (§9.5.8) |
 | Messages per cycle | 20 (2 frames × 10 controllers) |
 | Bus utilization @ 500 Hz | **37.5%** (comfortable margin) |
@@ -964,11 +970,11 @@ Position error from timing drift: Δx = v × Δt
 | Pattern Speed | Drift @ 5 min (21 ms) | Drift @ 1 hour (2.5 s) |
 |--------------|----------------------|------------------------|
 | Static (v = 0) | 0 mm | 0 mm |
-| Slow breathing (v = 0.5 m/s) | 10.5 mm | 1.25 m |
-| Medium wave (v = 2 m/s) | 42 mm | 5 m (off grid!) |
-| Fast wave (v = 4.5 m/s) | 94 mm | 11.2 m (way off grid!) |
+| Very slow (v = 0.05 m/s) | 1.05 mm | 125 mm |
+| Slow wave (v = 0.15 m/s) | 3.2 mm | 375 mm |
+| Fastest (v = 0.3 m/s) | 6.3 mm | 750 mm |
 
-> **Critical finding:** At 4.5 m/s, controllers drift **94 mm out of sync after only 5 minutes** — exceeding grid spacing (80–120 mm). After 1 hour, balls are **11 meters apart** — completely unsynchronized.
+> **Critical finding:** Even in the slow regime, controllers drift **6.3 mm after 5 minutes** at the fastest speed and **0.75 m after 1 hour** — larger than the ~300 mm grid pitch and clearly visible in a wave pattern. Clock correction is still required.
 
 ### 10.4 Correction Strategy: Pause-Based Clock Alignment
 
@@ -1116,9 +1122,9 @@ Correction needed: 3.5 µs per 100 ms = 0.0035%
 ```
 No rest periods → no pause-based correction
 Drift accumulates: 35 µs/s
-After 30 s: 1.05 ms drift → 4.7 mm position error at 4.5 m/s
-After 5 min: 10.5 ms drift → 47 mm position error at 4.5 m/s
-(At the 70 ppm worst case: 21 ms → about 95 mm.)
+After 30 s: 1.05 ms drift → 0.32 mm position error at 0.3 m/s
+After 5 min: 10.5 ms drift → 3.2 mm position error at 0.3 m/s
+(At the 70 ppm worst case: 21 ms → about 6.3 mm.)
 ```
 
 **Solution for continuous-motion patterns:** Use a **TCXO (temperature-compensated crystal oscillator)** with ± 5 ppm drift. Corrections needed only every 15–30 minutes, and even then, only ~300 µs per correction.
