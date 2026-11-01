@@ -65,6 +65,11 @@ A real-time kinetic art installation comprising 120 individually-controlled stee
 | FR-SYNC-002 | The system shall support buffered motion commands executed on synced timeline. | MUST |
 | FR-SYNC-003 | The system shall broadcast SYNC messages over CAN at ≥ 100 Hz for timebase alignment. | MUST |
 | FR-SYNC-004 | Inter-controller communication latency shall be ≤ 5 ms (worst case, 10 controllers). | MUST |
+| FR-SYNC-005 | Each controller shall independently track its local oscillator drift relative to the master timebase. | MUST |
+| FR-SYNC-006 | The system shall correct oscillator drift (up to 35 ppm consumer quartz) by inserting timing pauses during ball rest periods, maintaining ≤ 1 ms inter-controller alignment at all times. | MUST |
+| FR-SYNC-007 | Correction shall be applied by extending idle/rest periods (not by altering motion trajectories) so ball position is unaffected. | MUST |
+| FR-SYNC-008 | Maximum correction pause per SYNC cycle shall be ≤ 5 ms for consumer-grade quartz (35 ppm worst-case drift). | MUST |
+| FR-SYNC-009 | For patterns with no rest periods (continuous rapid motion), the system shall use temperature-compensated crystal oscillators (TCXO, ± 5 ppm) to limit drift to ≤ 300 µs per 15 minutes. | SHOULD |
 
 ### 3.4 Communication
 
