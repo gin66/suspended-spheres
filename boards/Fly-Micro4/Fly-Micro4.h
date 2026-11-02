@@ -2,8 +2,8 @@
  * Fly-Micro4 (Mellow, RP2040) GPIO map
  *
  * Sources:
- *   boards/pin.webp               (connector pinout)
- *   boards/Fly_Micro4_schematic.pdf (net names / RP2040 pin numbers)
+ *   pin.webp               (connector pinout)
+ *   Fly-Micro4-schematic.pdf (net names / RP2040 pin numbers)
  *
  * GPIO0..GPIO29 are all assigned below. USB (GPIO? none), QSPI, BOOT
  * (QSPI_SS) and RUN are dedicated RP2040 pins and are not GPIOs.

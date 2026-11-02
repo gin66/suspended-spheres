@@ -41,6 +41,7 @@ All technical Markdown lives in [`doc/`](doc/). Only this file and [`AGENTS.md`]
 | [**Controller Analysis**](doc/controller_analysis.md) | Platform and driver selection, stepping resolution, bus budget, clock drift |
 | [**Motor Selection**](doc/motor_selection.md) | Trade study of cheap motor variants against the requirement set |
 | [**Risk Register**](doc/RISK.md) | Dynamic loads, noise, architecture risks, and mitigations |
+| [**Fly-Micro4 GPIO Map**](boards/Fly-Micro4/Fly-Micro4.h) | RP2040 pin assignments for the motion controller board |
 | [**AGENTS.md**](AGENTS.md) | Mission and development-environment notes |
 
 ---
@@ -51,10 +52,19 @@ All technical Markdown lives in [`doc/`](doc/). Only this file and [`AGENTS.md`]
 Suspended_Spheres/
 ├── README.md                   # This file — project overview and entry point
 ├── AGENTS.md                   # Mission, overview, development notes
+├── boards/
+│   └── Fly-Micro4/
+│       ├── Fly-Micro4.h            # GPIO map for firmware
+│       ├── Fly-Micro4-schematic.pdf
+│       ├── Fly-Micro4.step
+│       └── pin.webp                # Connector pinout
 └── doc/
     ├── system_requirements.md
     ├── mechanical_analysis.md
     ├── controller_analysis.md
+    ├── motor_selection.md
+    ├── BOM_summary.md
+    ├── BOM_priced.csv
     └── RISK.md
 ```
 
