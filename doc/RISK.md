@@ -41,6 +41,8 @@ The cumulative acoustic and mechanical noise from 100–120 motors is still a si
 | **Dedicated stepper boards plus a few Pico 2 boards** | Significantly more work; introduces reliability concerns (loose cables, bad connections). |
 | **One custom PCB with 4/8/12 stepper drivers per board** | Best balance of integration and reliability. Reduces point-of-failure connections. |
 
+The selected node is the Mellow Fly-Micro4, a COTS 4-axis board, with the CAN termination rework in `controller_analysis.md`. The custom carrier stays in that survey as the design that was not built.
+
 ### 2.2 PC Real-Time Limitation
 
 - **A PC is not suitable for hard real-time step pulse generation** at kSteps/s rates across 120 motors.
@@ -65,9 +67,10 @@ The cumulative acoustic and mechanical noise from 100–120 motors is still a si
 | Option | Upgrade Path | Bandwidth | Time Sync | Verdict |
 |--------|-------------|-----------|-----------|---------|
 | **USB (25 connections to PC)** | Easy SW upgrade | Sufficient | May be insufficient for ms-level sync | ⚠️ Prototype only |
-| **WiFi, grouped nodes (8–30) + broadcast beacons** | OTA possible | Sufficient (720 B/window) | Common broadcast + receive timestamp; FTM if needed | ✅ **Baseline** |
+| **Wired CAN, 30 × Fly-Micro4** | UF2 over USB; identity in `Fly_Micro4_addressing.md` | Classic CAN 1 Mbit/s; budget in `motion_streaming_whitepaper.md` | Sync frame, 20–100 ms | ✅ **Selected** |
+| **WiFi, grouped nodes (8–30) + broadcast beacons** | OTA possible | Sufficient (720 B/window) | Common broadcast + receive timestamp; FTM if needed | Superseded by the CAN selection |
 
-> **Recommendation:** WiFi is sufficient for this application when controllers are grouped (8–30 nodes), commands are buffered 20–100 ms ahead, and a numbered broadcast is timestamped on reception. The hardwired E-stop is independent of the network.
+> **Decision:** the installation bus is classic CAN on 30 Fly-Micro4 nodes. WiFi remains sufficient on paper for a grouped command stream, and it is not the bus being built. The hardwired E-stop is independent of the network.
 
 ### 2.6 Proof-of-Concept Strategy
 

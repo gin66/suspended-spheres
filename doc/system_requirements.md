@@ -92,7 +92,8 @@ This document states **behaviour and constraints**. Specific design choices — 
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| FR-ARCH-001 | Each controller shall execute its trajectory locally at a rate sufficient to satisfy FR-SYNC-001 and FR-MOT-002. The master shall distribute motion parameters rather than per-ball position samples; controller grouping is modular. | MUST |
+| FR-ARCH-001 | Each ball's trajectory shall be executed locally at a rate sufficient to meet FR-SYNC-001 and FR-MOT-002, independent of the master's command rate. | MUST |
+| FR-ARCH-002 | The master-to-controller command load shall be independent of the local control/step rate: increasing microstepping or the local update rate shall not increase network traffic. | MUST |
 
 ### 3.6 Monitoring & Diagnostics
 
@@ -133,6 +134,7 @@ This document states **behaviour and constraints**. Specific design choices — 
 | NFR-REL-003 | Single controller failure shall not affect operation of other controllers. | MUST |
 | NFR-REL-004 | Thread failure (breakage) on one ball shall not cause cascading failures. Continuous detection is not required; a break can be inferred during homing when the step count exceeds the travel limit before the reference is found (see FR-MOT-010). | MUST |
 | NFR-REL-005 | Power loss recovery: the system shall re-home all balls on power restoration (per FR-MOT-010). | MUST |
+| NFR-REL-006 | On loss of the master or network, each controller shall bring its axes to rest within the configured deceleration limits (or hold if already at rest) and retain its position reference; recovery shall not require re-homing unless the controller was reset. | MUST |
 
 ### 4.2 Safety
 
@@ -261,4 +263,4 @@ This document states **behaviour and constraints**. Specific design choices — 
 
 ---
 
-*Document version: 5.0 — speed envelope clarified: nominal 2 m in 4–5 s, optional 2–3 s effects (`ASM-015`).*
+*Document version: 5.1 — `FR-ARCH-001` made outcome-based; `FR-ARCH-002` (rate-independent command load) and `NFR-REL-006` (master/network loss behaviour) added.*
