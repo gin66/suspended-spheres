@@ -41,6 +41,7 @@ All technical Markdown lives in [`doc/`](doc/). Only this file and [`AGENTS.md`]
 | [**Controller Analysis**](doc/controller_analysis.md) | Platform and driver selection, stepping resolution, bus budget, clock drift |
 | [**Motor Selection**](doc/motor_selection.md) | Trade study of cheap motor variants against the requirement set |
 | [**Motion Streaming White Paper**](doc/motion_streaming_whitepaper.md) | Fly-Micro4 motion payload, RP2040/FastAccelStepper implementation, PC simulation architecture |
+| [**Motion streaming host TDD**](doc/motion_streaming_tdd.md) | Test-first plan for the motion core and the designer loop, with no hardware |
 | [**Fly-Micro4 addressing**](doc/Fly_Micro4_addressing.md) | Node identity, commissioning and CAN-ID allocation for the selected board |
 | [**Risk Register**](doc/RISK.md) | Dynamic loads, noise, architecture risks, and mitigations |
 | [**Fly-Micro4 GPIO Map**](boards/Fly-Micro4/Fly-Micro4.h) | RP2040 pin assignments for the motion controller board |
@@ -68,6 +69,7 @@ Suspended_Spheres/
     ├── controller_analysis.md
     ├── motor_selection.md
     ├── motion_streaming_whitepaper.md
+    ├── motion_streaming_tdd.md    # Host tests that need no hardware
     ├── Fly_Micro4_addressing.md   # Node identity and CAN-ID allocation
     ├── BOM_summary.md
     ├── BOM_priced.csv

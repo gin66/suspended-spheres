@@ -1039,7 +1039,9 @@ adapter directly from browser JavaScript.
 | Fault injection | Kill a frame, a node, the master, the bus | Controlled stop/hold; no jump; safe |
 
 The golden trace is the key artifact: it turns “the sim looks right” into a
-reproducible comparison.
+reproducible comparison. The host-only sequence for that trace is
+`motion_streaming_tdd.md`. Scope, homing repeatability, and bus electrical
+checks stay on a bench.
 
 ### 6.8 Project layout
 
@@ -1153,7 +1155,7 @@ shared core, the host tests and this table together.
 | Phase | Deliverable | Exit criterion |
 |-------|-------------|----------------|
 | W0 | Bench one Fly-Micro4 + 4 motors + USB-CAN | can2040 + FAS coexist; 4 axes step correctly; termination understood |
-| W1 | Protocol + shared core + host tests | Golden traces pass; worst-case chunk/tick asserts |
+| W1 | Protocol + shared core + host tests | `motion_streaming_tdd.md` host gate: golden traces pass; worst-case chunk/tick asserts |
 | W2 | One node HIL | `N·Δt` messages, 4 axes, sync < 1 ms, homing, fault injection |
 | W3 | 8 nodes / 32 axes | 40–60 % bus, PSU/thermal/termination validated |
 | W4 | 30 nodes / 120 axes | Full pattern, visual/noise test, 60 s homing |
@@ -1169,7 +1171,8 @@ shared core, the host tests and this table together.
 3. Decide `N=3` + speed vs `N=4` and the `Δt` (10/11/15 ms) by a bench
    quantization and jitter test on one ball at the slowest intended speed; keep the per-node
    A (10 ms / 16-bit full-range) packing as an alternate.
-4. Stand up the shared core and the host tests before writing firmware.
+4. Stand up the shared core and the host tests in `motion_streaming_tdd.md`
+   before writing firmware. That list is the work that needs no board.
 5. Prototype the web viewer with a synthetic 120-ball sine field; add the WASM
    core once the API is stable.
 
@@ -1235,3 +1238,4 @@ Drift (35 ppm):
 - Official Mellow Fly-Micro4 pin map and Klipper reference:
   `boards/Fly_Micro4_pinmap.md`, `boards/Fly_Micro4_klipper_reference.cfg`.
 - Node identity and CAN-ID allocation: `Fly_Micro4_addressing.md`.
+- Host TDD plan (no hardware): `motion_streaming_tdd.md`.
