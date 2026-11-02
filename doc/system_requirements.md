@@ -1,4 +1,4 @@
-# System Requirements — Hanging Balls
+# System Requirements — Suspended Spheres
 
 > Formal system-level requirements specification for the 100–120-ball kinetic sculpture.
 
