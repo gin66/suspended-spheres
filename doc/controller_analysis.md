@@ -774,7 +774,7 @@ After 5 min: 10.5 ms drift → 12.6 mm position error at 1.2 m/s
 
 ## 11. Off-the-Shelf Controllers — Production Assessment (November 2026)
 
-> **These are candidates for the installed piece, not bench-only experiments.** They are evaluated for WiFi, included drivers, DIAG availability, node count for 120 axes, cost, and production fit. Prices are approximate, in EUR including German VAT, excluding shipping; AliExpress “from” prices usually refer to a bare board or accessory variant.
+> **These are candidates for the installed piece, not bench-only experiments.** They are evaluated for WiFi, included drivers, DIAG availability, node count for 120 axes, cost, and production fit. Prices are approximate, in EUR including German VAT, excluding shipping; AliExpress/Mellow “from” prices usually refer to a bare board or accessory variant and often exclude tax. **Verify the exact SKU/photo before using a price**: the same listing may mix board-only, driver-bundle, WiFi-module and interface-board variants. In particular, the FLY D5 board price excludes its five TMC2209 modules, while the FLY E3 Pro Ultra/Max includes five onboard TMC2209 but only XYZ sensorless homing.
 >
 > The architecture is grouping-agnostic: **4–16 motors per node**. A COTS board fixes the grouping (4–8); the custom board uses 16. The timebase, buffering and local-planner design in §9/§12 apply to both.
 
@@ -784,7 +784,15 @@ After 5 min: 10.5 ms drift → 12.6 mm position error at 1.2 m/s
 |-------|----------------------|-------------------|------|-------------------|---------------|
 | **MKS DLC32 V2.1** | 3 (X/Y/Z) | No — bare, or kit with 3 × TMC2209 | ✅ ESP32 on board | ⚠️ UART must be soldered to the I²C pins, plus a DIAG wire; three drivers need a 470 Ω modification | €20 bare, €30–35 with 3 drivers |
 | **MKS DLC32 MAX** | 4 | No — kit with TMC2209 available | ✅ ESP32 on board | ⚠️ Same DLC32 wiring caveat; not documented for this board | ~$31 kit |
-| **FYSETC E4** | **3 usable** (4 drivers) | ✅ **4 × TMC2209 soldered** | ✅ ESP32 on board (ESP3D) | ✅ DIAG on X/Y/Z; E axis has no DIAG. **With no mechanical switches, only 3 axes are usable** | **€36** |
+| **FYSETC E4** | **3 usable** (4 drivers) | ✅ **4 × TMC2209 soldered** | ✅ ESP32 on board (ESP3D) | ✅ DIAG on X/Y/Z; E axis has no DIAG. **With no mechanical switches, only 3 axes are usable** | **€30.39** |
+| **FYSETC Cheetah v2.0** | **3 usable** (4 drivers) | ✅ **4 × TMC2209 onboard** | ❌ no WiFi; ❌ no CAN (USB/UART only) | ⚠️ Sensorless homing on X/Y/Z; E0 has no endstop/DIAG | €35.39 |
+| **Mellow FLY-RPFMEX** | 4 | ✅ **4 × TMC2209 onboard** | ❌ no WiFi/CAN; **USB-C (USBSERIAL)** host link | ✅ **4/4 DIAG** on independent RP2040 GPIOs | ~€26.59 |
+| **Mellow FLY-Micro4 V1.0** | 4 | ✅ **4 × TMC2209 onboard** | ✅ **CAN** (bridging); **CAN: 2-pin PH2.0**; no WiFi | ✅ **4/4 DIAG** on independent RP2040 GPIOs; **no NTC inputs** — TMC2209 `otpw`/`otsd` only | ~€27 (free shipping; ~€24.33 net with €80 coupon at 30 boards) |
+| **FYSETC Spider V3.0 H7** | **6 usable** (8 sockets) | No — sockets | ❌ no WiFi; ✅ **CAN** + USB-C | ⚠️ **6/8 DIAG** (X/Y/Z/E0/E1/E2 via shared endstop pins); E3/E4 none; **CAN connector verify; remove 120 Ω on 18/20** | $34.90 |
+| **MKS Monster8 V1/V2** | **6 usable** (8 sockets) | No — sockets | ❌ no WiFi; ✅ **CAN** | ⚠️ **6/8 DIAG** (DIAG0–5 on six endstops); F407 @ 168 MHz | ~€45–55 (verify) |
+| **Mellow Fly-Super8 Pro H723** | 8 | No — sockets | ⚠️ WiFi for RRF; ✅ **CAN** | ✅ **8/8 DIAG** per driver (Fly-2209 switch) | ~$80–100 (verify) |
+| **Mellow Fly-CDYv3** | 6 | No — sockets | ⚠️ **ESP32 WiFi (RRF only)**; USB for Klipper | ✅ per-driver DIAG (verify 6/6) | ~$35 (verify) |
+| **BTT SKR 3 / SKR 3 EZ** | 5 | No — sockets (EZ drivers) | ⚠️ **ESP32/ESP-12S WiFi module**; ✅ **FDCAN hardware** (classic in stock firmware) | ✅ **5/5 DIAG** (shared with endstop pins); H743 @ 480 MHz | ~€50–60 (verify) |
 | **MKS TinyBee** | 5 axes / 6 motors | ✅ on-board TMC2209 | ✅ ESP32 on board | ❌ **No UART to the drivers**; DIP-switch microstepping only | €30–44 |
 | **PiBot V4.96 Pro** (runs FluidNC / GrblHAL) | 6 | No — StepStick sockets; TMC2130-SPI variant | ✅ ESP32 on board | ⚠️ Possible via TMC2130 SPI; verify DIAG routing | ~€80 |
 
@@ -792,11 +800,14 @@ After 5 min: 10.5 ms drift → 12.6 mm position error at 1.2 m/s
 
 | Board | Axes | Drivers included? | WiFi | StallGuard | Approx. price |
 |-------|------|-------------------|------|------------|---------------|
-| **BTT Octopus V1.1 / Pro** | 8 | No | ⚠️ **Add-on ESP8266 module** (the board provides an ESP8266 interface; not included) | ✅ TMC2209/2226/5160; **DIAG0–DIAG7 exposed on J22/J23** (Pro V1.1 schematic) | €43–45 + ~€4/driver + €5–15 ESP8266 module |
-| **BTT Octopus Pro H723** (CAN) | 8 | No | ✅ **FDCAN + MCP2542** (RJ11); no WiFi | ✅ TMC2209/2226/5160; **DIAG0–DIAG7 exposed** | **€67** + ~€4/driver |
+| **BTT Octopus V1.1 / Pro F446** | 8 | No | ⚠️ **Add-on ESP8266 module** (not included) | ✅ TMC2209/2226/5160; **8/8 DIAG via jumpers**; **classic CAN** (no FD); **CAN: V1.1 2-pin; Pro RJ11**; **3 NTC inputs (V1.1) / 5 NTC inputs + PT100/PT1000 (Pro); sensors external** | €43–45 + ~€4/driver + €5–15 ESP8266 module |
+| **BTT Octopus Pro H723 (V5.0)** (CAN) | 8 | No | ✅ **FDCAN hardware** + MCP2542 (RJ11 — not recommended for field cabling; V1.1 2-pin preferred); **stock firmware = classic CAN 1 Mbit/s**, no WiFi | ✅ TMC2209/2226/5160; **DIAG0–DIAG7 via DIAG jumpers** (module DIAG pins required); **5 NTC inputs + PT100/PT1000; sensors external** | **€94.69 incl. 8 × TMC2209** |
+| **Mellow FLY D5 V1.0** | 5 | No — **5 driver sockets** (TMC2209 modules separate) | ❌ no WiFi; ✅ CAN | ✅ TMC2209 UART/StallGuard4; **DIAG via on-board jumpers** (module DIAG pin required) | ~€18–20 board (excl. VAT) + 5 drivers |
+| **Mellow FLY E3 Pro Ultra / Ultra Max** | 5 | ✅ **5 × TMC2209 onboard** | ⚠️ **ESP32 WiFi module option** | ⚠️ **Only XYZ support sensorless homing (3/5 DIAG)**; CAN; STM32H723VGT6 | €87 / €99 |
 | **Duet 3 Mini 5+ WiFi** | 5 | ✅ **5 × TMC2209** | ✅ native | ✅ supported in RRF; check DIAG per axis | €116–160; FYSETC “Big Dipper” clone ~€94 |
 | **Duet 2 WiFi** (legacy) | 5 | Sockets | ✅ native | ✅ | ~€100+ used/legacy |
-| **BTT Manta M8P + CB1** | 8 | No | ✅ via CB1 compute module (Klipper host) | ✅ | ~€80–100 |
+| **BTT Manta M8P V2 + CB1/CM4** | 8 | No — sockets | ✅ via CB1/CM4 compute module (Klipper host + WiFi) | ✅ **8/8 DIAG via jumpers** (verify) | ~€80–100 + CB1/CM4 |
+| **Mellow FLY-C8 (H5 + F407)** | **6 usable** (8 sockets) | No — sockets | ✅ **WiFi/Ethernet/CAN**; Allwinner H5 host + F407 MCU | ⚠️ **6/8 DIAG** (DRIVER0–5); DRIVER6/7 none | ~€100–150 (verify) |
 
 ### 11.3 System-level production comparison — 120 axes
 
@@ -804,10 +815,23 @@ Costs below are **boards only, no TMC drivers**. Add ~€1,200–1,400 for 120 m
 
 | Board | Usable axes/board | Boards | WiFi nodes | Per-axis DIAG | Boards cost | Drivers (per board) | Drivers (120 axes) | Production verdict |
 |-------|--------------|--------|------------|---------------|-------------|-------------------|------------------|--------------------|
-| **FYSETC E4** | **3** (4 drivers) | **40** | **40** | 3 of 4 | **€1,440** | 4 × TMC2209 included | — | Cheapest per board, but 3 usable axes → 40 boards/nodes; classic ESP32 (no FTM) |
+| **FYSETC E4** | **3** (4 drivers) | **40** | **40** | 3 of 4 | **€1,215.60** | 4 × TMC2209 included | — | Cheapest COTS system cost, but 3 usable axes → 40 boards/nodes; classic ESP32 (no FTM) |
+| **FYSETC Cheetah v2.0** | **3** (4 drivers) | **40** | — | **3 of 4** | **€1,415.60** | 4 × TMC2209 onboard | — | No WiFi/CAN; USB/UART single-printer board; not a network node |
+| **Mellow FLY-RPFMEX** | **4** | **30** | — | **4 of 4** | **€798** (30 × €26.59) | 4 × TMC2209 onboard | — | Best 4-axis/4-DIAG candidate; **USB-C host link** → 30 USB nodes; no CAN/WiFi; expansion-board form factor but usable standalone via USB-C + 24 V |
+| **Mellow FLY-Micro4 V1.0** | **4** | **30** | — (30 CAN) | **4 of 4** | **~€730 net** (30 × €27 = €810, −€80 coupon; free shipping) | 4 × TMC2209 onboard | — | **Stock: rejected** (fixed split termination, 2-pin CAN without GND; J3 removes only one 60 Ω half, not a proper disable). **With termination rework: viable** — remove both R39/R58 on all but the two end nodes. Lowest-cost COTS at €27/board; 30 nodes. |
+| **FYSETC Spider V3.0 H7** | **6** (8 sockets) | **20** | — (20 CAN) | **6 of 8** | **~€1,220** (20 × ~€61 incl. drivers) | 6 × TMC2209 | ~€522 | **Stock: rejected** (permanent 120 Ω). **With rework: viable** — remove the 120 Ω on 18 of 20 boards. |
+| **MKS Monster8 V1/V2** | **6** (8 sockets) | **20** | — (20 CAN) | **6 of 8** | **~€1,500–1,600** (20 × ~€75–80 incl. drivers) | 6 × TMC2209 | ~€522 | 6/8 DIAG + CAN, F407; **CAN termination must be selectable/DNP — verify** |
+| **Mellow Fly-Super8 Pro H723** | **8** | **15** | 15 (RRF WiFi) | **8 of 8** | **~€1,875** (15 × ~€125 incl. drivers) | 8 × TMC2209 | ~€522 | 8/8 DIAG + CAN + H723; likely above the Octopus bundle on cost |
+| **Mellow Fly-CDYv3** | **6** | **20** | 20 (ESP32, RRF) | **6 of 6** (verify) | **~€1,220** (20 × ~€61 incl. drivers) | 6 × TMC2209 | ~€522 | 6-axis WiFi option; WiFi only with RRF, Klipper via USB; F407 |
+| **BTT SKR 3 / SKR 3 EZ** | **5** | **24** | 24 (WiFi module) | **5 of 5** | **~€1,800–1,900** (24 × ~€75–80 incl. drivers) | 5 × TMC2209 | ~€522 | 5/5 DIAG + FDCAN hardware + WiFi module; 24 nodes, higher cost/axis than Octopus |
+| **BTT Manta M8P V2 + CB1/CM4** | **8** | **15** | 15 (CB1 WiFi) | **8 of 8** | **~€2,300–2,600** (15 × ~€150–175 incl. drivers + CB1) | 8 × TMC2209 | ~€522 | 8/8 DIAG + WiFi per node, but a Linux host per board; expensive/complex |
+| **Mellow FLY-C8 (H5 + F407)** | **6** (8 sockets) | **20** | 20 (H5 WiFi) | **6 of 8** | **~€2,600+** (20 × ~€130 incl. drivers) | 6 × TMC2209 | ~€522 | Host+MCU all-in-one; 20 Linux hosts; 6/8 DIAG; expensive/overkill |
 | **Duet 3 Mini 5+ WiFi / Big Dipper** | 5 | 24 | 24 | 5 (verify) | **€2,256 clone / €2,784 genuine** | 5 × TMC2209 included | — | Most production-ready COTS: native WiFi, included drivers, RRF stall detection |
-| **Octopus Pro H723, no WiFi** | 8 | 15 | — (15 CAN) | **8/8 (J22/J23)** | **€1,005** | 8 × TMC2209 | ~€480 | Lowest Octopus hardware cost; requires wired CAN or external WiFi bridge |
-| **Octopus Pro H723 + ESP8266 module** | 8 | 15 | 15 | **8/8 (J22/J23)** | **€1,080** | 8 × TMC2209 | ~€480 | Best WiFi axis count/cost: 15 nodes, 8/8 DIAG; WiFi is an add-on ESP8266 |
+| **Octopus Pro H723, no WiFi** | 8 | 15 | — (15 CAN) | **8 via DIAG jumpers (module pins required)** | **€1,420** | included (8 × TMC2209) | — | Lowest Octopus hardware cost, but RJ11 is a poor field connector; use V1.1 2-pin |
+| **Octopus Pro H723 + ESP8266 module** | 8 | 15 | 15 | **8 via DIAG jumpers (module pins required)** | **€1,570** | included (8 × TMC2209) | — | 15 nodes, 8 DIAG via jumpers; WiFi add-on; RJ11 cabling caveat |
+| **Octopus V1.1 / Pro F446** | 8 | 15 | — (15 CAN) | **8/8 via DIAG jumpers** (module pins) | **~€1,200** (15 × ~€80 incl. drivers) | 8 × TMC2209 | ~€522 | **Classic CAN, no FD.** Cheaper than the H723 bundle; same always-fitted 120 Ω termination — DNP/remove on non-end nodes. |
+| **Mellow FLY D5 V1.0** | 5 | 24 | — (24 CAN) | **5 via DIAG jumpers (module pins required)** | **€960–1,000** (24 × ~€40–42 incl. drivers) | 5 × TMC2209 (separate) | ~€522 | Cheapest CAN node; **STM32F072 (48 MHz, 128 KB flash, 16 KB RAM)** is the step-rate/firmware risk; no WiFi |
+| **Mellow FLY E3 Pro Ultra / Max** | **3** (5 drivers) | **40** | 40 (ESP32 module) | **3 of 5** | **€3,480–3,960** | 5 × TMC2209 onboard | — | H723 + onboard drivers, but only 3 usable axes → 40 boards; not competitive with the E4 |
 | **Custom carrier, ESP32-S3** | 16 | 8 | 8 | 16/16 (wired) | **~€260–300** | 16 × TMC2209 | ~€480 | **Best fit/cost:** 16/16 DIAG, 8 nodes, no QFN; needs custom PCB + firmware |
 | **Custom carrier, Pico 2 (RP2354B)** | 12 | 10 | 10 | 12/12 (wired) | **~€300–350** | 12 × TMC2209 | ~€480 | 10 nodes; 200 kHz PIO on RISC-V; WiFi handled separately |
 | **MKS DLC32 MAX** | **0** (no DIAG) | — | — | 0 free | — | — | — | **Unusable under the no-switch rule** without rework |
@@ -817,21 +841,67 @@ Costs below are **boards only, no TMC drivers**. Add ~€1,200–1,400 for 120 m
 ### 11.4 Findings for production
 
 1. **COTS can be the product**, but the node count rises: 10–40 nodes instead of 8 with a 16-axis custom board. A dedicated router AP handles that; an ESP32 SoftAP (≈10 clients) does not.
-2. **DIAG is mandatory per axis; no switches are allowed.** An axis without stall detection is not usable under the project constraint. That changes the comparison: the E4 provides **3 usable axes per board**, so 120 axes require **40 boards/nodes**. The Duet is 5/5 (verify). The Octopus Pro V1.1 exposes all eight DIAG pins (J22/J23), so it qualifies with 8/8; confirm the exact board revision. TinyBee and DLC32 are unusable without rework.
+2. **DIAG is mandatory per axis; no switches are allowed.** An axis without stall detection is not usable under the project constraint. That changes the comparison: the E4 provides **3 usable axes per board**, so 120 axes require **40 boards/nodes**. The Duet is 5/5 (verify). The Octopus Pro has on-board **DIAG jumpers** (manual §4.3) that connect each driver's diagnostic output to an endstop input. A stock TMC2209 StepStick does **not** bring DIAG out on its 2×8 header (it is a separate pad), so the jumper only works if the module has the DIAG pin fitted. Pre-assembled modules with the extra 2-pin `DIAG`/`INDEX` header (e.g. Makebase/MKS TMC2209, ~€34.79 for 8, ~€4.35 each) satisfy this without soldering. With those modules and the jumpers fitted, the Octopus is **8/8 DIAG**; with bare StepSticks it is UART-only. Verify the board revision, jumper numbering and endstop pin map. TinyBee and DLC32 are unusable without rework.
 3. **Timebase:** classic ESP32 boards (E4, DLC32, TinyBee) and the Octopus ESP8266 module have **no FTM**. They use the numbered broadcast receive-time scheme (§9.2A); FTM is only an upgrade. Check the Duet WiFi module separately.
 4. **Firmware is still custom.** RRF/Marlin/FluidNC do not scale to a 120-axis global timeline. Buying a COTS board saves hardware integration, not the control software. This is the main remaining cost.
 5. **Serviceability is good:** each COTS board is a field-replaceable module, matching `NFR-MAINT-006`.
-6. **Cost:** FYSETC E4 is €1,440 in boards but needs 40 nodes, ~€2,640–2,840 all-in. Duet clone is ~€3,460–3,660 all-in; the genuine board is ~€3,980–4,180 and can exceed the cap. Octopus is ~€2,760–2,960 all-in with 8/8 DIAG and 15 WiFi nodes; the no-module CAN variant is ~€1,005 (boards) + ~€480 (120 TMC2209) + motors, PSU and cabling (~€1,200–1,400) = ~€2,685–2,885. The Octopus variant + ESP8266 module is ~€1,080 (boards) + ~€480 (120 TMC2209) + motors, PSU and cabling = ~€2,760–2,960. The **ESP32-S3 carrier** is ~€260–300 (pure carrier, no TMC) + ~€480 (120 TMC2209) + motors, PSU and cabling (~€1,200–1,400) = ~€1,940–2,180 with 8 nodes and 16/16 DIAG; the **Pico 2 carrier** is ~€300–350 (pure carrier, no TMC) + ~€480 (120 TMC2209) + motors, PSU and cabling = ~€1,980–2,230 with 10 nodes and 12/12 DIAG; a fully custom SMT board is ~€2,300–2,500.
+6. **Cost:** FYSETC E4 is €1,215.60 in boards (40 × €30.39) but needs 40 nodes, ~€2,420–2,620 system total. Duet clone is ~€3,460–3,660 system total; the genuine board is ~€3,980–4,180 and can exceed the cap. Octopus is ~€2,770–2,970 system total with 8 DIAG via on-board jumpers (module pins required) and 15 WiFi nodes; the no-module CAN variant is ~€1,420 (15 bundles at €94.69, including 120 TMC2209) + motors, PSU and cabling (~€1,200–1,400) = ~€2,620–2,820. The Octopus variant + ESP8266 module is ~€1,570 + motors, PSU and cabling = ~€2,770–2,970. The **Octopus V1.1 2-pin** is cheaper (~€2,385–2,825 system total) and is the preferred cabling variant; the Pro H723's RJ11 is the caveat. The **ESP32-S3 carrier** is ~€260–300 (pure carrier, no TMC) + ~€480 (120 TMC2209) + motors, PSU and cabling (~€1,200–1,400) = ~€1,940–2,180 with 8 nodes and 16/16 DIAG; the **Pico 2 carrier** is ~€300–350 (pure carrier, no TMC) + ~€480 (120 TMC2209) + motors, PSU and cabling = ~€1,980–2,230 with 10 nodes and 12/12 DIAG; a fully custom SMT board is ~€2,300–2,500.
 7. **The module-based carrier is the missing middle:** a custom PCB carrying an ESP32-S3 module, 16 TMC2209 StepSticks (plugged into sockets) and a 74HC595 chain gives exact axis count, per-axis DIAG and 8 nodes without QFN soldering. It still requires a PCB design and the same custom firmware.
 8. **Stall detection is now the only reference**, so it must be validated on the real drum at 50 g. It needs a hard stop and motion; false negatives are a homing failure. Add a plausibility check (step count vs travel) and treat a missed home as a fault (`FR-MOT-010`).
+9. **Mellow FLY D5 is the cheapest 5-axis CAN board, but the MCU is the constraint.** It has 5 driver **sockets**; TMC2209 modules are separate, and the module needs the extra DIAG pin for the board's DIAG jumpers. The STM32F072 (48 MHz Cortex-M0, 128 KB flash, 16 KB RAM, no PIO/FPU) must generate 5 axes of step pulses and run the custom S-curve/timebase firmware. At the 1.2 m/s tier that is ~305 k step events/s; validate the achievable step rate and RAM headroom on the bench before adopting it. At the 0.6 m/s nominal tier the load is roughly half. CAN only, no WiFi.
+10. **FLY E3 Pro Ultra / Ultra Max is not a 5-axis candidate under the no-switch rule.** It has 5 × TMC2209 onboard and an H723, but only XYZ support sensorless homing (3/5 DIAG), so 120 axes need 40 boards at €87–99 — worse than the E4 at €30.39 with the same 3 usable axes.
+11. **Cheetah v2.0 is rejected for network topology, not for the drivers.** It has 4 × TMC2209 onboard and sensorless homing at €35.39, but only X/Y/Z have endstop/DIAG inputs (E0 does not) and the board has **no WiFi and no CAN** — only USB/UART. It is a single-printer board; 120 axes would need 40 boards and a USB infrastructure, and it costs more than the E4 while lacking the E4's onboard ESP32.
+12. **FLY-RPFMEX is the best 4-axis/4-DIAG candidate, but it is a USB-C node.** It has 4 × TMC2209 onboard, an RP2040 (dual-core 133 MHz, PIO), and 4/4 DIAG on independent GPIOs at ~€26.59 — 30 boards ≈ €798 for 120 axes. Klipper uses `USBSERIAL` over the Type-C port; there is no CAN or WiFi. It can be used standalone via USB-C + 12–24 V (the missing heaters/temperature are irrelevant here), but 30 USB MCUs require a powered hub tree and a host with enough USB bandwidth/ports, and the timebase/sync design must be USB-based rather than CAN-broadcast. Hardware-wise it is the strongest cheap 4-axis node; topology-wise it is a different architecture from the CAN/WiFi baseline.
+13. **Spider V3.0 H7 is disqualified by its CAN termination.** At $34.90 it is the cheapest 6-axis CAN board (H723, 8 sockets, 6/8 DIAG), but the FYSETC wiki states the 120 Ω CAN termination is permanent and cannot be disabled. A 20-node bus of these boards would be massively over-terminated. It is usable only as a bus end node, or after removing the termination resistor on every non-end board — not acceptable for a production node.
+14. **Fly-Super8 Pro H723 is the 8/8-DIAG alternative, but likely not cheaper.** It has 8 sockets, H723, CAN and per-driver DIAG (8/8), but the price is not published on the doc page (estimate $80–100). At ~$125/board with drivers, 15 boards ≈ $1,875, above the Octopus Pro V5.0 bundle. The Fly-CDYv3 at ~$35 gives 6 axes and per-driver DIAG with ESP32 WiFi (RRF only), but Klipper uses USB; it is a 20-node WiFi/USB path.
+15. **BTT SKR 3 / SKR 3 EZ is a 5/5-DIAG CAN/WiFi board, but 24 nodes is costly.** It has an H743 @ 480 MHz, five driver sockets, DIAG on all five axes (shared with the endstop pins), FDCAN and an ESP32/ESP-12S WiFi module header. At ~€75–80/board with drivers, 120 axes need 24 boards ≈ €1,800–1,900 hardware — above the Spider V3.0 H7 (~€1,220 for 20 boards) and the Octopus Pro V5.0 bundle (~€1,420 for 15 boards incl. drivers). It is a good 5-axis/5-DIAG node, but not the cheapest per axis; verify its CAN termination is selectable/DNP before shortlisting.
+16. **FLY-Micro4 V1.0 is disqualified by its CAN physical layer.** The schematic shows an MCP2542 transceiver and a 2-pin PH2.0 CAN connector (CANH/CANL only, no common GND), plus a fixed split termination R39/R58 60.4 Ω + C63 100 nF. J3 removes only one 60.4 Ω half, leaving an asymmetric single-ended 60 Ω + C63 termination rather than opening the 120 Ω differential pair; it is not a proper termination disable. Thirty boards on one bus would over-terminate it (~4 Ω). The 4/4 DIAG and RP2040 are good, but the CAN termination makes it unsuitable as a 30-node production node.
+17. **MKS Monster8 V1/V2 is a 6-axis CAN board only if its termination is selectable.** It has 8 sockets, built-in CAN and an F407, but only DIAG0–5 are routed (to the six endstops), so it is 6-axis. At ~€75–80/board with drivers, 20 boards ≈ €1,500–1,600. Before considering it, verify the CAN termination is selectable or DNP-able; the Spider V3.0 H7 is cheaper but is itself rejected on permanent termination.
+18. **RAMPS 1.4 / MKS Gen L are rejected.** They are 8-bit ATmega2560 boards at 16 MHz with five driver sockets, no WiFi/CAN, and no DIAG routing to the MCU. The step-rate requirement (≈30 kHz/axis at 0.6 m/s, ≈61 kHz at 1.2 m/s; 150–305 k events/s for five axes) is far beyond an AVR running S-curves, and sensorless homing would need hand-wired DIAG. They are hobby/bench boards, not 120-axis nodes.
+19. **Manta M8P V2 is an 8/8-DIAG WiFi board, but each node carries a Linux host.** It has 8 driver sockets, 8/8 DIAG via jumpers, and a CB1/CM4 slot for Klipper + WiFi. At ~€150–175/node with drivers and CB1, 15 nodes ≈ €2,300–2,600 hardware (~€3,500–4,000 system total), with 15 Linux hosts to manage. The Octopus Pro V5.0 bundle gives the same 8 axes for ~€1,420 incl. drivers; the Manta is only justified if a host per node is a requirement, and its CAN termination must be selectable/DNP.
+20. **FLY-C8 is a host-controller all-in-one, not a cheap driver board.** It pairs an Allwinner H5 (1 GB DDR3, WiFi/Ethernet/CAN, HDMI) with an STM32F407 MCU and 8 driver sockets, but only DRIVER0–5 have DIAG (6/8). It is a complete Klipper host + 6-axis node at ~€100–150; 120 axes would need 20 boards, each with a Linux host, ~€2,600+ hardware. It is only justified if a host per node is required; the Octopus/Spider paths are cheaper and simpler.
+21. **Octopus versions: FD is only the H723, and FD is not needed here.** The Octopus V1.1 / Pro F446 uses classic CAN and is ~€43–45 + drivers, cheaper than the H723/FD version (€94.69 bundle). For 120 axes at 1 Mbit/s, classic CAN is sufficient. Also correct the earlier implication: the Octopus does **not** have jumper-selectable termination; §11.6.1/§13.2 record an always-fitted 120 Ω, so it needs the same termination DNP/removal step as the other cheap CAN boards. Only the custom carrier has switchable termination.
 
 ### 11.5 Production shortlist
 
+> **CAN-FD caveat:** on the COTS boards (Octopus H723, SKR 3, Manta) the FD capability is **hardware-only**; stock Katapult/Klipper runs classic CAN 1 Mbit/s. Do not select or price a board on CAN-FD unless you are also writing the custom bootloader/firmware that enables FD. For this project, classic CAN is sufficient.
+
+> **CAN selection criterion:** a CAN node must have **selectable or DNP-able termination** (fit 120 Ω only at the two physical ends). No COTS board in this survey is confirmed stock-qualified: the Octopus, FLY-Micro4, Spider V3.0 H7 and Monster8 all require the termination resistors to be DNP/removed on every non-end node, or must be verified against their schematic. The **custom carrier** is the only design here with switchable split termination.
+
+> **Flashing/maintenance:** RP2040/RP2354B nodes use **BOOTSEL/UF2** over USB-C — no bootloader install, easy recovery. STM32 boards (Octopus, Spider, Monster8, Super8 Pro) need an **initial bootloader via SD card, USB DFU/BOOT0, or ST-Link**, then Katapult/Klipper over CAN. CAN updates are fine once Katapult is installed; the initial multi-board setup and brick recovery are the extra work. This favors the Micro4 (RP2040) or the custom carrier (RP2354B) when field flashing matters.
+
+| Board | MCU | Initial flash | Recovery | Field update |
+|---|---|---|---|---|
+| **Octopus V1.1 / Pro F446** | STM32F446 | SD card, USB DFU/BOOT0, or ST-Link; install Katapult | DFU/ST-Link | Katapult over CAN |
+| **Octopus Pro H723** | STM32H723 | SD/DFU/BOOT0/ST-Link; install Katapult | DFU/ST-Link | Katapult over CAN |
+| **FLY-Micro4** | RP2040 | **USB-C BOOTSEL/UF2** | **BOOTSEL/UF2** | USB UF2 or Katapult over CAN |
+| **Spider V3.0 H7** | STM32H723 | SD/DFU/ST-Link; install Katapult | DFU/ST-Link | Katapult over CAN |
+| **MKS Monster8** | STM32F407 | SD/DFU/ST-Link; install Katapult | DFU/ST-Link | Katapult over CAN |
+| **Fly-Super8 Pro** | STM32H723 | SD/DFU/ST-Link; install Katapult | DFU/ST-Link | Katapult over CAN |
+| **Custom carrier** | RP2354B | **USB-C BOOTSEL/UF2** | **BOOTSEL/UF2** | USB UF2 or Katapult over CAN |
+
+The RP2040/RP2354B ROM UF2 is the simplest initial flash and recovery. The STM32 boards are field-updatable over CAN once Katapult is installed, but the first install and brick recovery need SD/DFU/ST-Link.
+
+
+> **Cost basis (important).** **Termination rework is assumed in-house/free**; if outsourced, add €10–150 depending on the board (13 resistors on the Octopus V1.1, 56 on the Micro4, 18 on the Spider). **Board set** = boards + drivers. **Hardware subtotal** = board set + board-level power/CAN harness. **System total** = hardware subtotal + motors, PSU and cabling. The COTS hardware figures in this list are **boards + drivers only**. Add ~€1,200–1,400 for motors, PSU and cabling. The custom Pico 2 carrier figure is a **system total**. Like-for-like **system totals**: RPFMEX ~€2,000–2,200; Pico 2 carrier ~€1,980–2,230; E4 ~€2,420–2,620; Micro4 ~€2,030–2,380; Octopus V1.1 ~€2,385–2,825; Octopus Pro H723 bundle ~€2,620–2,820. The Micro4 and Spider V3.0 H7 are viable only with termination rework; no COTS board here is stock-qualified. The Octopus Pro H723 bundle is among the most expensive system totals, not the Pico carrier; the Octopus V1.1 is cheaper; the Pico carrier's hidden cost is custom PCB/firmware engineering and first-article debug, not BOM. See `BOM_summary.md` for the custom carrier's parts-only and manufacturing ranges.
+
 - **Best COTS integration:** **Duet 3 Mini 5+ WiFi** or the FYSETC Big Dipper clone — 5/5 DIAG (verify), native WiFi, 24 nodes.
-- **Best axis count / cost, WiFi:** **Octopus Pro H723 + ESP8266 WiFi module** — 8/8 DIAG (J22/J23), 15 nodes, ~€1,565–1,575 for boards + drivers + module. The module is not included; the board provides an ESP8266 interface.
-- **Best Octopus hardware cost, wired:** **Octopus Pro H723 without WiFi module** — 8/8 DIAG, 15 CAN nodes, ~€1,485 for boards + drivers; add CAN master and harness (§13).
-- **FYSETC E4:** €36, but only **3 usable axes** → 40 boards/nodes. Cheapest per board, not the lowest system cost. No FTM.
-- **Best fit / near-lowest system cost:** **custom Pico 2 carrier (bare RP2354B) + 12 TMC2209** — 10 nodes, 12/12 DIAG, ~€300–350 pure carrier + ~€480 drivers (120 axes), ~€1,980–2,230 all-in; requires custom PCB + firmware.
+- **Best 8-axis classic-CAN value, with rework:** **Octopus V1.1 (non-Pro)** — 8/8 DIAG via jumpers, 3 NTC inputs, **2-pin CAN**, 15 nodes, ~€1,200 for boards + drivers. Remove the 120 Ω on 13 of 15 boards. **STM32 flashing:** SD/DFU/ST-Link, then Katapult over CAN; not UF2. The **Pro F446/H723 uses RJ11**, which is not an appropriate field connector; use the Pro only if you need its 5 NTC + PT100 inputs and replace the RJ11 with a pigtail.
+- **Octopus Pro H723 — cabling caveat:** 8/8 DIAG, 5 NTC + PT100, 15 nodes, €94.69/board incl. drivers, but the **6P6C RJ11** is a poor field connector. Excluded from the cabling shortlist; use the V1.1 2-pin or a JST-GH pigtail.
+- **FYSETC E4:** €30.39, but only **3 usable axes** → 40 boards/nodes. Cheapest COTS system cost, but the highest node count and no FTM.
+- **FYSETC Cheetah v2.0:** €35.39 with 4 onboard TMC2209, but 3/4 DIAG and **no WiFi/CAN**; not a network node.
+- **Mellow FLY-RPFMEX:** ~€26.59 with 4 onboard TMC2209 and **4/4 DIAG** on RP2040; 30 boards ≈ €798. **USB-C/USBSERIAL** host link, no CAN/WiFi → 30 USB nodes; strongest cheap 4-axis hardware, but a different topology from the CAN/WiFi baseline.
+- **Mellow FLY-Micro4 V1.0 — reliability/cost middle ground:** 4/4 DIAG, 4 × TMC2209 onboard (no sockets), RP2040, CAN; 30 nodes, **~€730 net for 30 boards** (€27 each, free shipping, −€80 coupon). **Viable with termination rework:** remove R39/R58 on 28 of 30 boards and keep them on the two end nodes. The 2-pin CAN has no GND, but a 1 V ground shift is inside the CAN common-mode range; use a common 24 V busbar/star ground. A TMC failure costs a 4-axis board (~€27), so board replacement is the module swap. At €27/board, 30 boards = €810 − €80 coupon = **€730 net**, free shipping; hardware subtotal ~€830–980 and system total ~€2,030–2,380 with motors/PSU/cabling. This is now the **lowest-cost COTS option**. **RP2040 UF2 via USB-C** — easiest flashing/recovery.
+- **FYSETC Spider V3.0 H7:** **viable with rework** — 6/8 DIAG, 20 nodes, ~€1,220; remove the permanent 120 Ω on 18 of 20 boards. STM32H7 flashing via SD/DFU/ST-Link, not UF2.
+- **MKS Monster8 V1/V2:** ~€45–55, 8 sockets, **6/8 DIAG** (DIAG0–5), CAN, F407 → 20 boards, ~€1,500–1,600 with drivers; dominated by the Spider V3.0 H7. STM32F407 flashing via SD/DFU, not UF2.
+- **Mellow Fly-Super8 Pro H723:** 8 sockets, **8/8 DIAG**, CAN, H723 — 15 boards, but likely ~€1,875 with drivers, above the Octopus bundle.
+- **Mellow Fly-CDYv3:** ~$35, 6 axes, per-driver DIAG, ESP32 WiFi (RRF only) → 20 boards, ~€1,220 with drivers; Klipper via USB.
+- **BTT SKR 3 / SKR 3 EZ:** ~€50–60, 5 axes, **5/5 DIAG**, FDCAN + WiFi module, H743 → 24 boards, ~€1,800–1,900 with drivers; good 5-axis node, but verify selectable CAN termination and note the higher cost.
+- **BTT Manta M8P V2 + CB1/CM4:** 8 axes, **8/8 DIAG**, WiFi via a Linux host per board → 15 nodes, ~€2,300–2,600 hardware; heavier and more expensive than the Octopus bundle.
+- **Mellow FLY-C8:** host+MCU all-in-one (H5 + F407), 8 sockets but **6/8 DIAG**, WiFi/Ethernet/CAN → 20 boards, each a Linux host, ~€2,600+; overkill unless host-per-node is required.
+- **Mellow FLY D5 V1.0:** ~€40–42/board with 5 TMC2209 modules → 24 CAN nodes, ~€960–1,000 hardware; 5/5 DIAG via jumpers if the modules have the DIAG pin. Cheapest CAN node, but only if the STM32F072 can carry the custom 5-axis step/timebase firmware.
+- **Mellow FLY E3 Pro Ultra / Max:** €87/€99 with 5 onboard TMC2209, but only 3/5 axes support sensorless homing → 40 boards; not competitive.
+- **Best integration, not lowest cost:** **custom Pico 2 carrier (bare RP2354B) + 12 TMC2209** — 10 nodes, 12/12 DIAG, ~€300–350 pure carrier + ~€480 drivers (120 axes). The €548 figure is parts only for 10 boards; with PCB/assembly/test/yield/NRE the hardware subtotal is ~€1,110–1,980, plus design/first-article effort (`BOM_summary.md`). **RP2354B UF2 via USB-C** — the easiest flashing/recovery of the shortlist. Choose it only if 10 nodes and the integrated thermal/interlock/expansion justify the design NRE.
 - **Pico 2 carrier:** 12/12 DIAG, 10 nodes, 200 kHz PIO; pure carrier ~€300–350 (no TMC, no WiFi); WiFi handled separately.
 - **Unusable as-is under the no-switch rule:** MKS TinyBee (no UART), MKS DLC32 (no free DIAG).
 - **Custom 16-axis board:** lowest node count, but the module carrier is now cheaper at ~€1,940–2,180.
@@ -864,7 +934,7 @@ The missing middle: a custom PCB that carries **modules**, not QFN chips. Only p
 | Assembly (passives/connectors) | 1 | €5–10 |
 | **Pure carrier (no TMC)** | | **~€32–37** |
 | **8 pure carriers** | | **~€256–296** |
-| **+ NRE (stencil, setup, review)** | | **~€50–100** |
+| **+ NRE (stencil, setup, review; first-article/design separate)** | | **~€50–100** |
 
 With motors, PSU and cabling (~€1,200–1,400), the system is ~€1,940–2,180 (excluding NRE) — the lowest-cost production path in this table.
 
@@ -876,12 +946,13 @@ With motors, PSU and cabling (~€1,200–1,400), the system is ~€1,940–2,18
 - **`DIAG` is event-driven.** It is a push-pull output that asserts on stall, over-temperature pre-warning, short-to-GND and open-load. All 12 go to interrupt-capable GPIOs, so a fault raises an ISR and the handler reads `DRV_STATUS`/`SG_RESULT` over UART — no continuous polling of 12 drivers.
 - **`EN` is the motor-power control, not a high-side FET.** All 12 `ENN` pins share `TMC_EN` (active-low) with a **single 10 kΩ pull-up to `+3V3` at the MCU** (`R9`), so a floating or crashed MCU leaves every output stage **disabled**. Per-driver pull-ups were dropped deliberately: a bad IC joint leaves that pin floating anyway, so 12 resistors would only cover a cracked trace, at the cost of 11 parts and ~4 mA of GPIO sink current. A series MOSFET on the shared 24 V rail is rejected: it would switch ~1.2 mF (12 × 100 µF) and needs soft-start, while `EN` already disables the output stage in microseconds and keeps the logic powered.
 - **Driver instance (×12, one page each):** `TMC2209-LA` QFN-28; `0.47 Ω` sense resistors (max 0.47 A RMS at `IRUN=31`, ≈0.25 A at `IRUN≈17`); `100 nF + 100 µF` on `VS`; `100 nF` `VCP→VS`; `22 nF` `CPO–CPI`; `2.2 µF` on `5VOUT`; `100 nF` on `VCC_IO`; `1 kΩ` `PDN_UART` series; `MS1`/`MS2` tied **directly** to `GND`/`+3V3` (no straps); 4-pin motor connector. `CLK` and `SPREAD` are tied to GND (internal clock, StealthChop), `VREF`/`INDEX` open.
+- **Motor and endstop connectors:** 12 × 4-pin JST XH (`J4`–`J15`) for motor phases are required. The 12 × 2-pin JST XH (`J18`–`J29`) endstop connectors are **DNP by default** — sensorless homing via `DIAG` is the default; direct wiring to the U23 spare inputs can replace them. U24, C117 and R90–R101 are also DNP.
 - **Temperature sensing:** the TMC2209 has **no numeric temperature register** — `DRV_STATUS` only exposes `otpw` (pre-warning) and `otsd` (shutdown). Actual temperatures come from four `TMP1075DGKR` on I²C1: `U19` 0x48 ambient, `U20`/`U21`/`U22` 0x49/0x4A/0x4B for the three driver groups (A0–A2 strapped to GND/+3V3). Shared 2 × 4.7 kΩ pull-ups, 100 nF per sensor. On the PCB each sensor sits mid-group with a copper patch to the plane; `DIAG` remains the fast per-driver cutoff.
 - **UART addressing:** three single-wire buses carry four drivers each (drivers 1–4 bus 0, 5–8 bus 1, 9–12 bus 2); `MS1`/`MS2` are hard-tied to `GND`/`+3V3` to set address 0–3 (no 0 Ω straps — the addresses are fixed in the bus plan). The 12 pages differ only in designators, the per-driver local nets, `STEPnn`/`DIRnn`/`DIAGnn`, and the two hard-tied address pins.
-- 12 step + 12 direction + CAN-FD (MCP2518FD + **MCP2562FD**) + 3× TMC UART (bit-banged) + I²C1 (4 temperature sensors + 2 GPIO expanders) + expander interrupt + common enable + status LED = **37 GPIO, 11 spare**. The 12 `DIAG` lines and the end switches are on two `TCA9555` expanders, so the STEP/DIR block fits entirely inside the PIO `GPIO0–31` window.
+- 12 step + 12 direction + CAN (MCP2518FD + **TJA1051T/3**; **MCP2562FD** is the pin-compatible CAN-FD alternative) + 3× TMC UART (bit-banged) + I²C1 (4 temperature sensors + 1 populated GPIO expander; U24 DNP) + expander interrupt + common enable + status LED = **37 GPIO** for the motion core, plus **11 GPIO** for the expansion/service block (§11.6.0a) = **48 GPIO, 0 spare**. The 12 `DIAG` lines are on **U23 (TCA9555, 0x20)** with 4 spare inputs; **U24 (0x21) is DNP** for the optional endstops, so the STEP/DIR block fits entirely inside the PIO `GPIO0–31` window.
 - 2 MB integrated QSPI flash; 24 V → 5 V/3.3 V DC-DC; USB-C for programming/debug.
 - **USB-C (device, programming/debug):** 16-pin receptacle, `CC1`/`CC2` pulled down with 5.1 kΩ (sink), `D±` pass through a `USBLC6-2SC6` ESD array, `SBU` pins open.
-- **USB / 24 V diode-OR:** `VBUS → D3 (SS14) → +5V_SYS` and `buck +5V → D4 (SS14) → +5V_SYS`; the AMS1117 runs from `+5V_SYS`. Whichever source is present powers the board, the other diode blocks, so **USB alone can flash the board** and neither the 24 V buck nor the USB host is ever back-fed. With both connected `+5V_SYS` sits at the higher source minus ~0.5 V; the AMS1117 still regulates at the MCU's ~0.2 A load. There is **no VBUS-sense GPIO** (none is needed by the USB device stack; a spare GPIO exists if wanted).
+- **USB / 24 V diode-OR:** `VBUS → D3 (SS14) → +5V_SYS` and `buck +5V → D4 (SS14) → +5V_SYS`; the AMS1117 runs from `+5V_SYS`. Whichever source is present powers the board, the other diode blocks, so **USB alone can flash the board** and neither the 24 V buck nor the USB host is ever back-fed. With both connected `+5V_SYS` sits at the higher source minus ~0.5 V; the AMS1117 still regulates at the MCU's ~0.2 A load. There is **no VBUS-sense GPIO** (none is needed by the USB device stack; all GPIO are now assigned, so VBUS sense would have to share an ADC channel).
 - **24 V input protection:** fuse → **33 V TVS** → reverse-polarity P-MOS → buck input, then the TPS54360B (600 kHz, 162 kΩ `RT`, EN divider 453 kΩ/88.7 kΩ → UVLO ≈ 7.3 V start / 5.8 V stop typical). The TVS sits **before** the P-MOS on purpose: the SMBJ33A clamps at 53.3 V while the reverse-polarity FET is only rated **Vds 40 V**, so clamping first keeps the FET's Vds to ≈ clamp − 24 V ≈ 29 V instead of exposing it to the unclamped surge.
 - **24 V current budget (per board):** the motor rail dominates — 12 × TMC2209 at 0.25 A RMS holding = **≈3 A continuous** (72 W). The buck itself only adds ~0.1 A (it carries ~0.25 A at 5 V). Therefore **F1 must be 4–5 A**, not 2 A, and the P-MOS, connector and 24 V copper must be rated for ≥3 A continuous.
 - **Bulk on the 24 V rail is the real requirement, not the buck's 10 µF.** The 2 × 10 µF ceramics are the buck's HF input and are correctly sized for ~0.1 A input ripple. The motor rail needs **220–470 µF / 35–50 V bulk** near the motor connectors plus **100 µF per driver** (as in §11.6's ESP32-carrier note). A small ferrite/few-µH filter between the motor `+24 V` and the buck input keeps chopper noise out of the converter.
@@ -893,7 +964,7 @@ With motors, PSU and cabling (~€1,200–1,400), the system is ~€1,940–2,18
 |------|-----|-------------|
 | 4-layer PCB, 120 × 160 mm | 1 | €8 |
 | RP2354B (QFN-80) | 1 | €4 |
-| CAN-FD transceiver (MCP2562FD-H/SN) | 1 | €1 |
+| CAN transceiver (TJA1051T/3, classic; MCP2562FD FD alternative) | 1 | €0.58 |
 | 24 V → 5 V/3.3 V DC-DC | 1 | €2 |
 | Fuse holder + 5 A Nano2 fuse (Littelfuse 0154005.DR, 125 V, 50 A interrupt) | 1 | €1.50 |
 | 24 V bulk polymer, 220 µF / 35 V (SPE1VM221E12OL) | 1 | €0.50 |
@@ -904,11 +975,11 @@ With motors, PSU and cabling (~€1,200–1,400), the system is ~€1,940–2,18
 | USB-C connector (programming/debug) | 1 | €0.30 |
 | Status LED + resistor | 1 | €0.10 |
 | Assembly (QFN/passives/connectors) | 1 | €10–15 |
-| **Driver board (RP2354B + 12 TMC2209)** | | **~€70–80** |
-| **10 driver boards** | | **~€700–800** |
-| **+ NRE (stencil, setup, review)** | | **~€50–100** |
+| **Driver board (RP2354B + 12 TMC2209; parts + PCB + SMT)** | | **~€69–74** |
+| **10 driver boards (same basis)** | | **~€690–740** |
+| **+ NRE (stencil, setup, review; first-article/design separate)** | | **~€50–100** |
 
-With 12 × TMC2209-LA (~€2.83 each = €34/board) plus motors, PSU and cabling (~€1,200–1,400), the full system is ~€1,970–2,220 — comparable to the ESP32-S3 carrier and below the Octopus CAN path. The bare IC is chosen for **`DIAG` and reliability**, not cost: 12 socketed 2 A contacts are the classic failure point in an installation that runs unattended, and the socket cannot carry `DIAG` at all.
+With 12 × TMC2209-LA (~€2.83 each = €34/board) plus motors, PSU and cabling (~€1,200–1,400), the 10-board system is ~€1,890–2,140 on the parts+PCB+SMT basis. Including THT soldering, test, yield and NRE, the hardware subtotal is ~€1,074–1,939 and the system total ~€2,274–3,339, plus design/first-article effort (`BOM_summary.md`); it is **not cheaper** than the Octopus V1.1 or Micro4 once design NRE is counted. The bare IC is chosen for **`DIAG` and reliability**, not cost: 12 socketed 2 A contacts are the classic failure point in an installation that runs unattended, and the socket cannot carry `DIAG` at all.
 
 **GPIO budget, bare RP2354B (48 GPIO), 12 axes:**
 
@@ -919,9 +990,15 @@ With 12 × TMC2209-LA (~€2.83 each = €34/board) plus motors, PSU and cabling
 | TMC UART (3 buses) | 3 | 3 |
 | I²C1 (4 temp sensors + 2 GPIO expanders) | 2 | 2 |
 | Expander interrupt (`EXINT`) | 1 | 1 |
-| Common enable | 1 | 1 |
+| Common enable (via interlock gate) | 1 | 1 |
 | Status/fault LED | 1 | 1 |
-| **Total** | **37** | **37 — 11 spare** |
+| Expansion: interlock sense | 1 | 1 |
+| Expansion: WiFi UART | 2 | 2 |
+| Expansion: RS-485 (TX/RX/DE) | 3 | 3 |
+| Expansion: 24 V rail sense (ADC0) | 1 | 1 |
+| Expansion: SPI display CS/DC | 2 | 2 |
+| Expansion: fan PWM/tach | 2 | 2 |
+| **Total** | **48** | **48 — 0 spare** |
 
 **Pin assignment (final):**
 
@@ -929,23 +1006,72 @@ With 12 × TMC2209-LA (~€2.83 each = €34/board) plus motors, PSU and cabling
 |------|-----|------|-----|
 | 0–3 | SPI0 MISO/CS/SCK/MOSI | 28 | `CAN_INT` |
 | 4, 5 | STEP01, DIR01 | 29 | `EXINT` (TCA9555) |
-| 6, 7 | STEP02, DIR02 | 30 | `TMC_EN` |
+| 6, 7 | STEP02, DIR02 | 30 | `TMC_EN_CTRL` → interlock gate |
 | 8, 9 | STEP03, DIR03 | 31 | `LED_STATUS` |
 | 10, 11 | STEP04, DIR04 | 32–34 | `TMC_UART0/1/2` |
-| 12, 13 | STEP05, DIR05 | 35–41 | spare |
-| 14, 15 | STEP06, DIR06 | 42, 43 | I²C1 SDA/SCL |
-| 16, 17 | STEP07, DIR07 | 44–47 | spare |
-| 18, 19 | STEP08, DIR08 | | |
-| 20, 21 | STEP09, DIR09 | | |
-| 22, 23 | STEP10, DIR10 | | |
-| 24, 25 | STEP11, DIR11 | | |
-| 26, 27 | STEP12, DIR12 | | |
+| 12, 13 | STEP05, DIR05 | 35 | `INTERLOCK` |
+| 14, 15 | STEP06, DIR06 | 36, 37 | `WIFI_TX`, `WIFI_RX` |
+| 16, 17 | STEP07, DIR07 | 38, 39 | `RS485_TX`, `RS485_RX` |
+| 18, 19 | STEP08, DIR08 | 40 / ADC0 | `VIN_24V_SENSE` |
+| 20, 21 | STEP09, DIR09 | 41 / ADC1 | `DISP_CS` |
+| 22, 23 | STEP10, DIR10 | 42, 43 | I²C1 SDA/SCL |
+| 24, 25 | STEP11, DIR11 | 44 / ADC4 | `DISP_DC` |
+| 26, 27 | STEP12, DIR12 | 45 / ADC5 | `RS485_DE` |
+| | | 46 / ADC6 | `FAN_PWM` |
+| | | 47 / ADC7 | `FAN_TACH` |
 
-All 24 STEP/DIR pins sit inside the PIO `GPIO0–31` window. The 12 `DIAG` lines went to a **TCA9555 I²C expander** (0x20), which asserts `EXINT` on any change — DIAG stays interrupt-driven while freeing 12 pins. End switches use a second **TCA9555** (0x21) on 12 × 2-pin headers, each with a 10 kΩ pull-up to `+3V3`.
+All 24 STEP/DIR pins sit inside the PIO `GPIO0–31` window. The 12 `DIAG` lines went to a **TCA9555 I²C expander** (0x20), which asserts `EXINT` on any change — DIAG stays interrupt-driven while freeing 12 pins. The optional endstop inputs use a second **TCA9555** (U24, 0x21) on 12 × 2-pin headers with 10 kΩ pull-ups; **U24, C117, R90–R101 and J18–J29 are DNP** in the default build (sensorless homing via DIAG).
 
 The CAN-FD **5 pins are four SPI signals plus INT** — there is no enable pin. The transceiver STB is tied low, and the controller's crystal is local to the module. Polling instead of using INT drops it to 4 pins; add CLKIN only if the MCU supplies the controller clock instead of a local crystal.
 
-Boot/reset uses the dedicated RUN pin; USB and the crystal are dedicated. With DIAG and the end switches on I²C expanders the design uses **37 of 48 GPIO, leaving 11 spare** for future features (per-driver enable, second LED, extra sensors).
+Boot/reset uses the dedicated RUN pin; USB and the crystal are dedicated. With DIAG on U23 (and optional DNP endstops on U24) the motion core uses **37 of 48 GPIO**; the remaining 11 are assigned to the expansion/service block below, so **no GPIO is left unallocated**.
+
+#### 11.6.0a Expansion and service block (11 pins)
+
+The `Expansion` schematic page carries the following optional and service circuits. All configuration is by **pluggable 2.54 mm shunts or DNP headers**; there are no 0 Ω links and no solder bridges.
+
+| Circuit | Nets / parts | Default population | Notes |
+|---------|--------------|--------------------|-------|
+| Enclosure interlock | `INTERLOCK` loop → 74LVC1G32 OR gate, output `TMC_EN` | fitted | NC loop through all panels; 10 kΩ pull-up, 100 nF filter. Gate also takes `TMC_EN_CTRL` from GPIO30. Opening the loop forces `TMC_EN` high (all drivers off) even if the MCU is hung; a dead gate leaves the bus pull-up to disable the drivers. Fulfils `NFR-SAFE-005` without relying on firmware. |
+| 24 V rail sense | 100 kΩ / 10 kΩ divider → `VIN_24V_SENSE` (ADC0) | fitted | 2.18 V at 24 V, 100 nF filter; detects brown-out before motion. |
+| WiFi bridge | 1×5 `5V / 3V3 / GND / TX / RX` → `WIFI_TX/RX` | DNP header | ESP32-C3 SuperMini (or equivalent) as a UART↔WiFi bridge. The host RP2354B forwards to CAN if it is the network master. No per-node ESP32-CAM. |
+| RS-485 | SP3485 + SM712 + 3P terminal, `RS485_TX/RX/DE`, jumperable 120 Ω | fitted (optional function) | 3.3 V half-duplex; DE//RE on one GPIO; fail-safe bias fitted — fit bias at **one** RS485 node only (DNP on the others); A/B follow the SP3485 convention (silkscreen warning). |
+| SPI display | 1×7 `3V3 / GND / SCK / MOSI / CS / DC / RST` | DNP header | Shares `SPI0_SCK/MOSI` with the MCP2518FD; `CS`/`DC` use GPIO41/44. RST and backlight to 3V3. |
+| Fan | 1×4 `GND / +5V_SYS / TACH / PWM` | DNP header | 4-pin 5 V fan. `JP2`/`JP3` (1×3 shunts) route GPIO46/47 to the fan or to the future-use header. |
+| Future use | 1×5 `3V3 / +5V_SYS / GND / EXP_IO1 / EXP_IO2` | fitted | `EXP_IO1/2` are the alternate JP2/JP3 positions. |
+| Saleae / logic analyser | `J37` GND+`INTERLOCK,WIFI_TX,WIFI_RX,RS485_TX`; `J38` GND+`RS485_RX,CAN_INT,EXINT,TMC_UART0`; `J39` GND+ADC pins | DNP | Two GND+4 groups for an 8-channel analyser, plus a separate analog header. |
+| Driver probes | 12 × 1×4 `GND / STEPnn / DIRnn / DIAGnn` | DNP | One header next to each TMC2209 on its driver page. |
+| Test points | `TP1`…`TP8` = `+24V_PROT`, `+5V_SYS`, `+3V3`, `+1V1`, `GND`, `CANH`, `CANL`, `TMC_EN` | fitted | 1×1 2.54 mm pads. |
+
+**Expansion BOM (JLCPCB/LCSC, verified in stock at design time).**
+
+| Ref | Part | LCSC | Populated |
+|-----|------|------|-----------|
+| U26 | 74LVC1G32GW OR gate, SOT-353 | C19829655 | yes |
+| R102 | 10 kΩ 0402 pull-up | C25744 | yes |
+| R103 | 100 kΩ 0402 divider top | C25741 | yes |
+| R104 | 10 kΩ 0402 divider bottom | C25744 | yes |
+| C119, C120 | 100 nF 0402 | C1525 | yes |
+| J32 | 1×2 2.54 mm interlock loop | C492401 | yes |
+| J33 | 1×5 2.54 mm WiFi module | C492404 | header yes, module DNP |
+| J34 | 1×7 2.54 mm SPI display | C492406 | header yes, module DNP |
+| J35 | 1×4 2.54 mm fan | C2691448 | header yes, fan DNP |
+| JP2, JP3 | 1×3 2.54 mm shunt selectors | C2937625 | yes |
+| J36 | 1×5 2.54 mm future use | C492404 | yes |
+| J37, J38 | 1×5 2.54 mm Saleae | C492404 | **DNP** |
+| J39 | 1×7 2.54 mm analog probe | C492406 | **DNP** |
+| J41–J52 | 1×4 2.54 mm driver probes | C2691448 | **DNP** |
+| TP1–TP8 | 1×1 2.54 mm test points | C492400 | yes |
+| U25 | SP3485EN RS-485, SOIC-8 | C8963 | yes |
+| D7 | PSM712 TVS, SOT-23 | C32677 | yes |
+| R18, R19 | 680 Ω 0402 fail-safe bias | C25130 | yes (fit at one node only; DNP on the others) |
+| R20 | 120 Ω 1206 termination | C17909 | via J31 shunt |
+| R24 | 10 kΩ 0402 DE pull-down | C25744 | yes |
+| C118 | 100 nF 0402 | C1525 | yes |
+| J30 | 3P 5.0 mm terminal | C474882 | yes |
+| J31 | 1×2 2.54 mm termination shunt | C492401 | yes |
+
+> **Motor rail.** The driver `VM`/`VS` pins and their bulk capacitors are the **same net as `+24V_PROT`** (after the fuse and reverse-polarity P-MOS). There is no separate motor-supply input: the 24 V input feeds both the buck and the TMC2209 output stages, as the 24 V current budget assumes.
 
 A single-wire WS2812 fits the same LED pin, so it does not change the count. It does need 5 V and a level shifter (3.3 V data is marginal against the 0.7 VDD threshold), and precise 800 kHz timing. Since all three PIO blocks are committed to the step streams, drive it from the second core with interrupts disabled for the ~30 µs frame, or use a plain LED.
 
@@ -967,22 +1093,20 @@ The Pico carrier fixes this at the board level: **two JST-GH connectors (CAN IN 
 CAN OUT) and a jumper-selectable split termination**, so a node can be an end node
 from either side and every intermediate node leaves its termination open.
 
-**Transceiver.** `MCP2562FD-H/SN` (SOIC-8, CAN-FD, 8 Mbit/s), not the TJA1050 that
-an earlier draft of this section listed. The TJA1050 is a 5 V-only part with a
-5 V RXD output, which would overdrive the 3.3 V RP2354B; it has no VIO pin. The
-MCP2562FD runs VDD = 5 V with VIO = 3.3 V, so its digital side matches the MCU.
-Both rails already exist on the carrier (24 V → 5 V, 5 V → 3.3 V).
+**Grounding.** The CAN GND is **optional**: CAN is differential and a 1 V ground shift is inside the transceiver common-mode range, so a 2-pin CAN is electrically sufficient when all nodes share a common 24 V return. The 3-pin JST-GH's GND is useful as a signal/ESD reference if needed; if used, keep it as a separate signal ground, join it to the power ground at one star point (preferably at the PSU), and do not use it as a motor return. The Octopus RJ11's GND is tied to the power ground and its connector is poor; the Micro4 2-pin has no GND and references the power ground. Both are electrically acceptable for ~1 V, but the connector/cabling differs.
+
+**Transceiver.** `TJA1051T/3` (SOIC-8, classic CAN 1 Mbit/s, VCC = 5 V with VIO = 3.3 V) is the default: same pinout as the `MCP2562FD-H/SN` and ~€0.58 vs €2.90. The TJA1050 is the 5 V-only part with a 5 V RXD output and no VIO, so it would overdrive the 3.3 V RP2354B; do not use it. Both rails already exist on the carrier (24 V → 5 V, 5 V → 3.3 V). **CAN-FD alternative:** `MCP2562FD-H/SN` is pin-compatible (same SOIC-8; pin 8 is STBY instead of S, tie to GND), so the same footprint can be fitted when CAN-FD is needed. The `MCP2518FD` controller is FD-capable; the default TJA1051T/3 limits the bus to classic CAN.
 
 | Pin | Name | Connection |
 |-----|------|------------|
 | 1 | TXD | MCP2518FD `TXCAN` (controller drives the bus) |
 | 2 | VSS | GND |
-| 3 | VDD | `+5V_SYS`, 100 nF |
+| 3 | VCC (VDD) | `+5V_SYS`, 100 nF |
 | 4 | RXD | MCP2518FD `RXCAN` |
 | 5 | VIO | +3V3, 100 nF |
 | 6 | CANL | bus CANL, 60.4 Ω split leg |
 | 7 | CANH | bus CANH, 60.4 Ω split leg |
-| 8 | STBY | GND (normal mode; high = standby) |
+| 8 | S (STBY on MCP2562FD) | GND (normal mode; high = silent/standby) |
 
 **Physical layer.**
 
@@ -991,7 +1115,7 @@ Both rails already exist on the carrier (24 V → 5 V, 5 V → 3.3 V).
               │               │                              ├── C1 4.7nF ── GND
   J2 CAN-OUT ─o───────────────o── CANL ── R2 60.4R ──[JP2] ──┘
                               │
-                              ├── U MCP2562FD (CANH/CANL)
+                              ├── U TJA1051T/3 (MCP2562FD pin-compatible FD alternative)
                               └── D PESD1CAN
 ```
 
@@ -1009,30 +1133,31 @@ Both rails already exist on the carrier (24 V → 5 V, 5 V → 3.3 V).
   header (`PZ2.54-2x2`), with two shunts: **fit both shunts only on the two
   physical end nodes.**
 - `PESD1CAN` protects the bus against field transients on the JST-GH wiring.
-- BOM: 2 × `SM03B-GHS-TB`, 1 × `MCP2562FD-H/SN`, 1 × `MCP2518FD` (SOIC-14, local
+- BOM: 2 × `SM03B-GHS-TB`, 1 × `TJA1051T/3` (pin-compatible `MCP2562FD` for CAN-FD), 1 × `MCP2518FD` (SOIC-14, local
   40 MHz crystal), 2 × 60.4 Ω, 1 × 4.7 nF, 1 × 2 × 2 header, 1 × `PESD1CAN`,
   3 × 100 nF.
 
-**Concrete GPIO map (RP2354B, 48 GPIO, 37 used).** The earlier table sized the
-budget; this is the pin-level assignment used by the design.
+**Concrete GPIO map (RP2354B, 48 GPIO, 48 used).** This is the pin-level
+assignment used by the schematic; it supersedes the earlier budget-only table.
 
 | Signal | GPIO | Alt function used |
 |--------|------|-------------------|
-| CAN SPI SO (MISO) | GPIO0 | SPI0 RX |
-| CAN SPI CSn | GPIO1 | SPI0 CSn |
-| CAN SPI SCK | GPIO2 | SPI0 SCK |
-| CAN SPI SI (MOSI) | GPIO3 | SPI0 TX |
-| CAN nINT | GPIO4 | SIO/IRQ |
-| TMC UART bus 0 | GPIO5 | bit-banged |
-| TEMP_SDA | GPIO6 | I2C1 SDA |
-| TEMP_SCL | GPIO7 | I2C1 SCL |
-| TMC UART bus 1 | GPIO8 | bit-banged |
-| TMC UART bus 2 | GPIO9 | bit-banged |
-| TMC common EN | GPIO10 | SIO |
-| Status LED | GPIO11 | SIO |
-| STEP 1–12 | GPIO12–23 | PIO0/PIO1/PIO2 |
-| DIR 1–12 | GPIO24–35 | SIO |
-| DIAG 1–12 | GPIO36–47 | SIO input (IRQ) |
+| CAN SPI MISO / CS / SCK / MOSI | GPIO0–3 | SPI0 |
+| STEP01…STEP12, DIR01…DIR12 | GPIO4–27 | PIO step streams |
+| CAN nINT | GPIO28 | SIO/IRQ |
+| TCA9555 expander interrupt | GPIO29 | SIO/IRQ |
+| TMC common EN (`TMC_EN_CTRL`) | GPIO30 | SIO, to interlock OR gate |
+| Status/fault LED | GPIO31 | SIO |
+| TMC UART bus 0/1/2 | GPIO32–34 | bit-banged |
+| Enclosure interlock sense | GPIO35 | SIO input |
+| WiFi bridge TX / RX | GPIO36, GPIO37 | UART |
+| RS-485 TX / RX | GPIO38, GPIO39 | UART |
+| 24 V rail sense | GPIO40 / ADC0 | ADC |
+| SPI display CS | GPIO41 / ADC1 | GPIO |
+| I²C1 SDA / SCL | GPIO42, GPIO43 | I²C1 |
+| SPI display DC | GPIO44 / ADC4 | GPIO |
+| RS-485 DE//RE | GPIO45 / ADC5 | GPIO |
+| Fan PWM / tach | GPIO46, GPIO47 / ADC6, ADC7 | GPIO / input |
 
 The 40 MHz crystal for the MCP2518FD stays local (as the doc's 5-pin CAN budget
 assumes); sharing an RP2350 clock output would need a sixth pin and is not used.
@@ -1143,9 +1268,11 @@ At the current this duty actually needs, not at driver maximum:
 
 ---
 
-## 13. Wired CAN Node — Octopus Pro H723
+## 13. Wired CAN Node — Octopus Pro H723 (V5.0)
 
-> Alternative to the WiFi baseline. The H723 variant has an FDCAN controller and an MCP2542 transceiver, 8 drivers, 8 DIAG inputs and a 6P6C RJ11 CAN connector.
+> Alternative to the WiFi baseline. The H723 variant has an FDCAN controller and an MCP2542 transceiver, 8 drivers, 8 DIAG outputs routed to endstop inputs by on-board DIAG jumpers (module DIAG pins required), and a 6P6C RJ11 CAN connector.
+>
+> **Cabling verdict:** the 6P6C RJ11 is **not an appropriate field connector**. The **Octopus V1.1 2-pin CAN** is the preferred Octopus variant; the Pro H723 is documented here for reference.
 
 ### 13.1 CAN or CAN-FD in practice
 
@@ -1160,6 +1287,8 @@ At the current this duty actually needs, not at driver maximum:
 - CAN is a **bus**, not a true daisy-chain: run a trunk with short stubs. Terminate with 120 Ω at the two physical ends only.
 - The schematic shows one CAN connector and a 120 Ω resistor. Check whether that resistor is fitted; if it is fitted on every board, remove it on all intermediate nodes or the bus will be over-terminated.
 - For in/out daisy-chaining, add a second RJ11 in parallel or use a passive splitter at each node. The custom Pico carrier (§11.6.1) already has this built in: two connectors, and a split termination switched by a 2-pole jumper so only the two end nodes are terminated.
+- **Grounding:** the RJ11 GND is tied to the board power ground. CAN is differential and a 1 V ground shift is inside the common-mode range, so **leave the RJ11 GND unconnected** unless you need a common-mode/ESD reference. If you do use it, keep it as a separate signal ground, join it at one star point, and never use it as a motor return. The Pro's remaining cabling issue is the RJ11 connector itself; the V1.1 2-pin references the power ground.
+- **Driver modules:** use pre-assembled TMC2209 StepSticks with the extra 2-pin `DIAG`/`INDEX` header fitted (e.g. Makebase/MKS, ~€34.79/8 ≈ €4.35 each). This avoids hand-soldering 18 pins per module; DIAG then reaches the MCU through the Octopus on-board DIAG jumpers, not through external wiring.
 
 ### 13.3 Firmware update
 
@@ -1167,7 +1296,7 @@ At the current this duty actually needs, not at driver maximum:
 - Budget ~10–30 s per board; 15 boards sequentially is roughly 3–8 minutes.
 - No WiFi module is needed, which removes the jamming/AP risk and saves ~€10–15 per board.
 
-**Cost (15 nodes):** ~€1,005 for 15 boards at €67 (Octopus Pro H723) + drivers, plus motors, PSU and CAN harness. That is below the WiFi-based Octopus path.
+**Cost (15 nodes):** ~€1,420 for 15 bundles at €94.69 (Octopus Pro V5.0 incl. 8 × TMC2209 each), plus motors, PSU and CAN harness. That is below the WiFi-based Octopus path.
 
 ### 13.4 Master / host options
 

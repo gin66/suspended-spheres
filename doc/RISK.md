@@ -118,6 +118,7 @@ At the optional 1.2 m/s tier, 21 ms of drift gives ≈ 25 mm after 5 minutes and
 | 15 | **Hollow ornament detachment or cracking** | Medium | Medium | Containment (`NFR-SAFE-001`); inspect ornaments; secure the thread attachment |
 | 16 | **Step-rate ceiling at the optional 1.2 m/s tier** | Medium | Medium | ESP32 I2S mux tops out at 40 kHz; 40 mm drum at 1/16 gives 30.6 kHz (1.31× margin). Benchmark before committing; a 30 mm drum misses 1.2 m/s by ~2 %, and 1/8 at 30 mm fails the 50 µm resolution |
 
+
 ---
 
 *This document is a living reference. Update it as design decisions evolve.*
