@@ -1,4 +1,4 @@
-# Hanging Balls — Kinetic Sculpture
+# Suspended Spheres — Kinetic Sculpture
 
 A real-time kinetic art installation featuring **100–120 hollow chrome-finished plastic spheres** (Ø 60–80 mm, ≤ 50 g each) suspended in a grid (10 × 10 or 10 × 12, layout a proposal), each driven by an independent motor. The spheres move vertically over ~2 m, very slowly and smoothly, producing flowing waves, interference patterns, and choreographed visual symphonies. The system has two parts: a PC pattern-development and 3D-simulation environment, and the physical motor installation.
 
@@ -48,7 +48,7 @@ All technical Markdown lives in [`doc/`](doc/). Only this file and [`AGENTS.md`]
 ## Repository Structure
 
 ```
-Hanging_Balls/
+Suspended_Spheres/
 ├── README.md                   # This file — project overview and entry point
 ├── AGENTS.md                   # Mission, overview, development notes
 └── doc/

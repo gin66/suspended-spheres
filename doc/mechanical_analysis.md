@@ -1,4 +1,4 @@
-# Mechanical Analysis — Hanging Balls
+# Mechanical Analysis — Suspended Spheres
 
 > Physics check for the slow-motion design: force/torque budgets, motor speed,
 > thread behaviour, drum winding, and scale accuracy.

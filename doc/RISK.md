@@ -1,6 +1,6 @@
-# RISK.md — Hanging Balls Risk Register & Technical Review
+# RISK.md — Suspended Spheres Risk Register & Technical Review
 
-> Detailed technical review and risk assessment for the Hanging Balls kinetic sculpture project.
+> Detailed technical review and risk assessment for the Suspended Spheres kinetic sculpture project.
 
 ---
 

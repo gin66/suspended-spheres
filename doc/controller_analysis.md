@@ -1,4 +1,4 @@
-# Controller Analysis — Hanging Balls
+# Controller Analysis — Suspended Spheres
 
 > Detailed evaluation of microcontroller platforms for the 100–120-ball kinetic sculpture.
 >
