@@ -381,16 +381,33 @@ node owns, and how a board is commissioned are in `Fly_Micro4_addressing.md`.
 
 ### 4.5 Sync, status and commands
 
-- **Sync / window header** (broadcast, one per motion window or 20–100 ms):
-  32-bit master time in µs (or a 16-bit tick + epoch in a second frame), plus
-  the active `Δt`/`N`. A header at the start of each `N·Δt` window gives the
-  nominal `T` for the following motion frames. Identifiers stay 11-bit;
-  `Fly_Micro4_addressing.md` does not define a 29-bit form. Nodes timestamp the
-  start-of-frame with a free-running 1 MHz timer and fit offset/rate.
-- **Status** (node → master, 10 Hz): state, fault flags, per-axis 8-bit
-  following-error bucket, buffer depth, last sequence. 8 B per node. On
-  request or on failure, include per-ball position and velocity
-  (`FR-MON-001`); do not stream them continuously.
+- **Sync / window header** (broadcast, one per motion window or 20–100 ms).
+  One 8-byte frame, field 0, type 2, little-endian:
+
+  | Offset | Type | Field |
+  |--------|------|--------|
+  | 0 | `uint32` | `t_us_low`, low 32 bits of the master time in µs |
+  | 4 | `uint16` | `dt_us` (10 000, 11 000, or 15 000) |
+  | 6 | `uint8` | `n` (3 or 4) |
+  | 7 | `uint8` | `seq`, increments once per sync, wraps at 256 |
+
+  The core timeline is still `int64` µs. The node recovers the high half by
+  counting wraps of `t_us_low` (one wrap is about 71.6 min). A header at the
+  start of each `N·Δt` window gives the nominal `T` for the following motion
+  frames. Identifiers stay 11-bit. Nodes timestamp the start-of-frame with a
+  free-running 1 MHz timer and fit offset/rate.
+- **Status** (node → master, 10 Hz). One 8-byte frame, type 3, little-endian:
+
+  | Offset | Type | Field |
+  |--------|------|--------|
+  | 0 | `uint8` | `state`: 0 idle, 1 homing, 2 primed, 3 playing, 4 holding, 5 fault |
+  | 1 | `uint8` | `fault_flags`: bit0 sample timeout, bit1 sync lost, bit2 out of range, bit3 acceleration exceeded, bit4 underrun, bit5 following error, bit6 reset |
+  | 2–5 | `uint8` × 4 | following-error bucket per axis, in steps, saturated at 255 |
+  | 6 | `uint8` | `buffer_depth`, queued motion messages, saturated at 255 |
+  | 7 | `uint8` | `last_seq`, low 8 bits of the last accepted sync `seq` |
+
+  On request or on failure, a separate command response carries per-ball
+  position and velocity (`FR-MON-001`). The 10 Hz frame never does.
 - **Command/home/parameter**: on demand, acknowledged. Homing and calibration
   are not in the motion stream.
 - **E-stop**: the hardwired power removal remains the safety function
@@ -523,6 +540,28 @@ This is much easier than the WiFi case in `controller_analysis.md` §10:
   even 100 µs is 10 % of the budget.
 - Use a first-order phase-locked correction on the local sample clock. Do not
   step the position to correct time; adjust the rate.
+- Three integer times, all in microseconds. Division truncates toward zero.
+  A residual accumulator keeps the fractional microsecond, so five advances
+  of 20 ms match one advance of 100 ms.
+  - **Master time** is the `int64` timeline reconstructed from the sync frame.
+    An advance of `dt` µs adds `dt` to it.
+  - **Local time** is the node's crystal. The same advance adds
+    `dt + extra`, where `extra` comes from a residual:
+    `acc += dt × crystal_ppm`, `extra = acc / 1 000 000`,
+    `acc -= extra × 1 000 000`. At +35 ppm, one advance of 100 000 µs adds
+    3 µs and leaves `acc = 500 000`. One advance of 1 000 000 µs adds 35 µs
+    and leaves `acc = 0`.
+  - **Eval time** is what the interpolator receives. The first sync sets it
+    to that frame's master time and sets the correction to 0 ppm. Each later
+    sync measures
+    `correction_ppm = (d_local − d_master) × 1 000 000 / d_master`
+    (`d_master > 0`; otherwise the correction is unchanged), then rebases the
+    anchors so eval time is the same value before and after the call. Between
+    syncs,
+    `eval = anchor_master + elapsed_local × (1 000 000 − correction_ppm) / 1 000 000`.
+    After a 1 s interval at +35 ppm the correction becomes 35, and the next
+    1 s of master time adds 999 999 µs to eval time. The earlier offset stays.
+    The sync does not add a position offset.
 - `N·Δt` is **lookahead**, not transport latency. A frame is ~130 µs on the
   bus at 1 Mbit/s, well inside `FR-SYNC-004` (≤ 5 ms worst-case inter-controller
   latency).
@@ -660,8 +699,13 @@ The RP2040 has no FPU. Define the core units once:
   is only ~4,000 evaluations/s — negligible against 133 MHz.
 - Keep a fractional-step accumulator per axis. The position→step conversion
   must not accumulate rounding error.
-- The host/WASM build uses the same integer types. Do not use `float` in the
-  shared core; convert to float only in the renderer.
+- The steps/mm factor is the Q16.16 integer for `3200 / (π × 40 mm)` that
+  makes 1.2 m/s over 2 ms equal 61 steps. Position codes use
+  `code × 2 000 000 / 65 535`. Both are integer divisions, truncating toward
+  zero except where a test names `round`.
+- The host/WASM build uses the same integer types. The shared core has no
+  `float` or `double`. Convert to floating point only in the renderer and in
+  test printers.
 
 ### 5.5 Task and interrupt architecture
 
@@ -942,6 +986,11 @@ rendering and `mc_pack_frame` to show/emit the exact wire bytes. Host tests run
 the same functions. This is the contract that makes “simulated and real motion
 match” (`FR-SIM-001`) testable rather than aspirational.
 
+Host tests are C++17, built with CMake as the executable `motion_core_tests`,
+and they use one `ASSERT` macro. The WASM build is Emscripten (`emcc -std=c++17`).
+The clock double, the debounce interval, and the test order are in
+`motion_streaming_tdd.md` §0.1.
+
 ### 6.4 Pattern model
 
 Keep the authoring model separate from the wire format:
@@ -1074,12 +1123,56 @@ updates the running preview.
 
 | File | Role |
 |------|------|
-| `patterns/<name>.anim.json` | Authoring source: layers, groups, grid, `Δt`, `N`, duration. This is the file the sim watches |
+| `patterns/<name>.anim.json` | Authoring source. Schema version 1, below. This is the file the sim watches |
 | `patterns/<name>.report.json` | Written on every bake: violations with ball, time, limit, measured value, allowed value. Empty `violations` means the take may be exported |
 | `patterns/<name>.hbp` | Baked export for the installation. Written only from a clean report |
-| `patterns/<name>.py` | Optional generator. A person or an agent runs it; it writes the `.anim.json`. The sim does not execute it |
+| `patterns/<name>.py` | Optional generator. A person or an agent runs it; it writes the `.anim.json`. The checker and the sim read only the JSON |
 
-- Watch the `.anim.json` (mtime, then a content hash). Debounce a burst of writes, rebake on a worker, and swap the trajectory in place.
+Version 1 is a JSON object. Every number is an integer. A missing required
+field, or a numeric field that is not an integer, fails the parse.
+
+| Field | Required | Values |
+|-------|----------|--------|
+| `version` | yes | `1` |
+| `grid` | yes | `[cols, rows]`: `[10, 10]` or `[10, 12]` |
+| `dt_ms` | yes | `10`, `11`, or `15` |
+| `n` | yes | `3` or `4` |
+| `duration_ms` | yes | length of the take, in milliseconds |
+| `tier` | yes | `ordinary`, `nominal`, or `optional` |
+| `layers` | yes | array of layer objects |
+
+The sine layer used by the parity golden has integer fields `op` (`"sine"`),
+`amplitude_um`, `period_ms`, `wavelength_cols`, and `axis` (`"col"` or
+`"row"`). The checked-in parity file is `patterns/golden_sine.anim.json`:
+
+```json
+{
+  "version": 1,
+  "grid": [10, 12],
+  "dt_ms": 10,
+  "n": 3,
+  "duration_ms": 1000,
+  "tier": "ordinary",
+  "layers": [
+    {
+      "op": "sine",
+      "amplitude_um": 50000,
+      "period_ms": 5000,
+      "wavelength_cols": 10,
+      "axis": "col"
+    }
+  ]
+}
+```
+
+Peak speed is `0.05 m × 2π / 5 s ≈ 0.063 m/s`, inside the ordinary tier.
+Other cadences are this file with `dt_ms` in {10, 11, 15} and `n` in {3, 4}.
+A violation case raises `amplitude_um` until the selected tier is exceeded.
+The host test may run `tests/fixtures/write_sine.py` to produce a version-1
+file. Passing that `.py` path to the checker is a parse error.
+
+- Watch the `.anim.json` (mtime, then a content hash). Debounce bursts by
+  50 ms, rebake on a worker, and swap the trajectory in place.
 - Keep the camera, the selection and the playhead. The new samples apply from the current time forward; the view does not jump back to t = 0 on every save.
 - A file that does not parse keeps the last good take on screen and shows the parse error. The previous report stays, with the parse error appended, so a watcher can see that the reload failed.
 - The **Wire** and **Steps** fidelity toggles in §6.5 apply to the reloaded take, so quantization and the step grid stay visible while the file is being edited.
@@ -1115,7 +1208,7 @@ shows the result while it is running. The agent is another editor of the file.
 
 | Contract | Definition |
 |----------|------------|
-| Time | Global monotonic µs; `Δt` sample ticks; sync frames carry the master time and active `Δt`/`N` |
+| Time | `int64` µs. Master, local, and eval time are §4.9. Sync carries `t_us_low`, `dt_us`, `n`, and `seq` (§4.5) |
 | Position | int32 µm in the core; wire format is 16-bit full-range (0–2000 mm; 65535 = 2000 mm; LSB 0.0305 mm) |
 | Axis order | Local axes 0..3 are Drive0–Drive3 in silkscreen order. Motor IDs and node IDs are in `Fly_Micro4_addressing.md` |
 | Sample | Absolute position at a timeline tick; no deltas in the baseline |
@@ -1123,7 +1216,7 @@ shows the result while it is running. The agent is another editor of the file.
 | Step chunk | 2 ms, `|steps| ≤ 128`, `ticks ∈ [3200, 65535]` at 16 MHz |
 | Fault | Hold/decelerate, report, never jump; E-stop is hardware |
 | Identity/addressing | `Fly_Micro4_addressing.md` |
-| Pattern file | `.anim.json` is the watched authoring source; `.hbp` is the baked export; `.report.json` is the limit report (§6.9) |
+| Pattern file | Version-1 `.anim.json` is the watched source (§6.9). `.hbp` is the baked export. `.report.json` is the limit report |
 
 Any change to the wire format, interpolation or step limits must update the
 shared core, the host tests and this table together.

@@ -8,6 +8,90 @@
 > Write one failing test, then the smallest code that makes it pass. Do not
 > implement a phase ahead of its tests. Numbers below are the assertions;
 > the derivations stay in the whitepaper.
+>
+> **Read first:** `motion_streaming_whitepaper.md` and `Fly_Micro4_addressing.md`.
+> This file is the test list. Those two are the protocol. The decisions in §0.1
+> are closed; do not reopen them in the host implementation.
+
+---
+
+## 0.1 Closed decisions
+
+**Language and build.** C++17. The host harness is CMake (3.16 or newer) and
+produces one executable, `motion_core_tests`. Firmware later uses PlatformIO
+on the same sources. No Bazel, no fetched test framework.
+
+**Assertions.** One `ASSERT(cond)` macro in the test directory. A failure
+prints the file, the line, and the expression, then returns a non-zero status
+from `main`. Catch2 and GoogleTest are not dependencies.
+
+**WASM.** Emscripten, as in the whitepaper §6.8 (`emcc -std=c++17`). Phase 12
+compiles the same sources and compares bytes with the native binary. Node
+runs the WASM side. This phase is last.
+
+**Clock.** Tests never sleep and never read the operating-system clock. One
+type, in the test support code:
+
+```cpp
+struct PlaybackClock {
+  void set_crystal_ppm(int32_t ppm);   // 0, or ±35 for the drift test
+  void advance_us(int64_t dt_us);      // dt_us >= 0; moves master time by dt_us
+  int64_t master_us() const;           // sync-frame timeline, int64 microseconds
+  int64_t local_us() const;            // master time scaled by the crystal
+  void on_sync(int64_t master_us);     // may change the correction rate
+  int64_t eval_us() const;             // time passed to mc_eval
+  int32_t correction_ppm() const;
+  bool sync_lost(int64_t timeout_us) const;
+};
+```
+
+`advance_us`, `local_us`, `on_sync`, `eval_us`, and `correction_ppm` follow
+the integer rules in the whitepaper §4.9. `mc_eval` is called with
+`eval_us()`. `sync_lost(timeout_us)` is true before the first sync, and true
+again when local time since the last sync exceeds `timeout_us`. Phase 1 does
+not implement this type. It is first required by the node tests in §8.
+
+The file watcher does not own a clock. Its calls take `now_us` from the
+test: `on_change(now_us, bytes)` and `poll(now_us)`. The debounce interval
+is 50 ms.
+
+**Layouts.** Assert the tables that already exist. Do not restate them here.
+
+- Sync frame, 10 Hz status frame, and the version-1 `.anim.json` schema,
+  including `patterns/golden_sine.anim.json`: whitepaper §4.5 and §6.9.
+- `SET_ID` A/B: `Fly_Micro4_addressing.md` §3.
+- The other clean cadences and the violation case are built in the test from
+  that golden, as §6.9 describes.
+- `tests/fixtures/write_sine.py` is the generator in A8. The checker never
+  runs it.
+
+## 0.2 First implementation slice
+
+As of 2026-11-03 there is no `rp2040/` directory, no CMake file, and no
+`patterns/golden_sine.anim.json`. Creating that scaffold is part of this
+slice. Leave `boards/`, `LICENSE`, and the EasyEDA project unchanged.
+
+This plan is ready to implement. The first session covers §1 and §2 only,
+in that order:
+
+1. Read `motion_streaming_whitepaper.md` and `Fly_Micro4_addressing.md`.
+2. Add `rp2040/lib/motion_core/`, `rp2040/lib/motion_core/tests/`, the C++17
+   CMake target `motion_core_tests`, and the `ASSERT` macro from §0.1.
+3. Write H1–H4, then U1–U8. One failing test, then the code that passes it.
+
+That session stops there. It does not add `PlaybackClock`, the identifier
+tests (§3), the frame codecs beyond the endian check in U7, the golden
+file, the Python fixture, or the WASM build.
+
+Later byte layouts are the Markdown tables in the whitepaper §4.5 and in
+`Fly_Micro4_addressing.md` §3. There is no separate schema file. A test
+copies those offsets.
+
+`set_crystal_ppm` and `on_sync` are independent. From a zeroed clock,
+`set_crystal_ppm(35)` then `advance_us(100000)` returns `master_us() == 100000`
+and `local_us() == 100003`, with residual `500000`. `on_sync` does not read
+the crystal value. It sets `correction_ppm` from the measured intervals in
+the whitepaper §4.9. Implement that type with the §8 tests, not in this slice.
 
 ---
 
@@ -16,17 +100,18 @@
 - The shared core is C++ with the integer types in the whitepaper §5.4.
   Host tests and the WASM build call that core. The renderer may use
   floating point; the core may not.
-- A simulated clock and an in-memory frame log stand in for the bus. No
-  PIO, no can2040, no GPIO, no serial port.
-- A single host executable and one assertion macro are enough. Add a test
-  framework only when this list outgrows that harness.
+- Timed tests use `PlaybackClock` from §0.1 and an in-memory frame log.
+  No PIO, no can2040, no GPIO, no serial port, no operating-system clock.
+- The host executable and the `ASSERT` macro are §0.1.
 - Tests live next to the core (`rp2040/lib/motion_core/tests/`), as in the
   whitepaper §5.10. They run on the development machine.
-- Where the papers describe a payload but do not yet name every byte, the
-  first test of that payload is a layout table checked into the same change.
-  Do not invent a second layout in the test and a different one in the code.
-- Items marked **freeze** are that layout table. Items marked **property**
-  generate many inputs from one rule.
+- Payload bytes and the animation schema are the whitepaper and the
+  addressing note. A test that needs a different layout is a documentation
+  change first.
+- Items marked **property** generate many inputs from one rule. I10 and B7
+  are exhaustive loops over their small domains. C10 and N14 use one
+  xorshift32 seed, `0x12345678`, and print that seed with the failing input.
+  No clock is used as a seed, and no property-test library is added.
 
 **Out of this list** (needs hardware or a scope): PIO block ownership,
 can2040 on the wire, termination and grounding, USB-CAN adapter throughput,
@@ -114,21 +199,19 @@ Whitepaper §4.2, §4.3, §4.5. Addressing §3.
 - [ ] **P2** An `N=4` motion payload is exactly 8 bytes: four unsigned
   16-bit positions. Pack and unpack are inverses.
 - [ ] **P3** A payload shorter or longer than 8 bytes is rejected.
-- [ ] **P4** **Freeze**, then test, the sync frame: 32-bit master time in
-  µs, plus the active `Δt` and `N`, in one or two 8-byte frames as the
-  layout table says. A sync ID is field 0, type 2.
-- [ ] **P5** **Freeze**, then test, the status frame: 8 bytes, type 3,
-  carrying state, fault flags, an 8-bit following-error bucket per axis,
-  buffer depth, and the last sequence. It does not carry a continuous
-  120-axis position stream.
+- [ ] **P4** The sync frame matches the whitepaper §4.5 byte table. A sync
+  ID is field 0, type 2. After `t_us_low` wraps, the reconstructed `int64`
+  time gains `2^32` µs.
+- [ ] **P5** The 10 Hz status frame matches the whitepaper §4.5 byte table.
+  It carries no position and no velocity.
 - [ ] **P6** Command, home, and parameter frames are types 4, 5, and 6.
   A motion decoder ignores them. Homing bytes are not part of the motion
   sample buffer.
 - [ ] **P7** `DISC` payload is exactly the 8-byte flash ID. `HELLO`
   payload is the same 8 bytes, with the short node ID in the CAN ID.
-- [ ] **P8** One `SET_ID` frame cannot hold an 8-byte flash ID plus a node
-  ID plus flags. The codec requires two frames, types 10 then 11, field 0.
-  **Freeze** the split, then test both directions.
+- [ ] **P8** `SET_ID` A and B match `Fly_Micro4_addressing.md` §3. The node
+  accepts B only when bytes 0–3 equal its flash-ID prefix. A single 8-byte
+  frame is rejected.
 - [ ] **P9** The per-node alternate (four 16-bit positions, one frame per
   node) packs and unpacks. A flag on the unpacked frame says it is not the
   per-motor baseline.
@@ -319,9 +402,10 @@ Addressing §1–§3. No flash chip: the test supplies an 8-byte ID.
 
 Whitepaper §6.4, §6.6, §6.9. Headless. No browser.
 
-- [ ] **A1** **Freeze** a minimal `.anim.json` schema: grid, `Δt`, `N`,
-  duration, and a layer list. A file missing any of those fields fails
-  parse. The parser accepts `10×10` and `10×12`.
+- [ ] **A1** `.anim.json` version 1 matches the whitepaper §6.9.
+  A file missing `version`, `grid`, `dt_ms`, `n`, `duration_ms`, `tier`, or
+  `layers` fails parse. The parser accepts grids `[10, 10]` and `[10, 12]`.
+  A non-integer numeric field fails parse.
 - [ ] **A2** The same `.anim.json` bakes to the same sample bytes on two
   runs. A one-bit change in a layer parameter changes the bytes.
 - [ ] **A3** Layers that bake and pass a slow take: keyframes, sine,
@@ -355,9 +439,10 @@ Whitepaper §6.4, §6.6, §6.9. Headless. No browser.
 - [ ] **A7** Unpacking `.hbp` and running `mc_eval` reproduces
   `trajectory.bin`. Packing that trajectory with P1 or P2 reproduces the
   wire bytes the manifest names.
-- [ ] **A8** A Python generator writes `.anim.json`. The checker reads
-  only the JSON. A test points the checker at the `.py` path and expects
-  a parse failure, which locks "the sim does not execute the script".
+- [ ] **A8** `tests/fixtures/write_sine.py` writes a version-1 `.anim.json`.
+  The test process may run that script. The checker accepts the JSON it
+  wrote. The checker returns a parse error when its input path ends in
+  `.py`.
 - [ ] **A9** A 120-ball sine inside the ordinary tier bakes clean, stays
   inside the travel, and stays under 60 % bus load at the file's `Δt`
   and `N`.
@@ -394,8 +479,9 @@ Whitepaper §6.9. A temp directory and a fake clock. No window, no WebGL.
 
 Whitepaper §6.3, §6.7. Still no board.
 
-- [ ] **W1** The same core sources compile to WASM. A host driver calls
-  the native binary and the WASM binary with one golden `.anim.json`.
+- [ ] **W1** The same core sources compile with Emscripten (`-std=c++17`).
+  A host driver calls the native binary and the WASM binary (via Node)
+  with `patterns/golden_sine.anim.json` from the whitepaper §6.9.
 - [ ] **W2** Sample bytes, chunk bytes, packed CAN frames, and the report
   JSON match bit for bit between the two builds.
 - [ ] **W3** The golden file is checked in. A change to interpolation,
@@ -406,15 +492,17 @@ Whitepaper §6.3, §6.7. Still no board.
 
 ## 13. Suggested order
 
-The list is already in dependency order. A practical cut:
+The list is already in dependency order. The first session is §0.2:
+harness (§1) then units (§2), including the new directories and CMake.
+After that:
 
-1. Phase 1 and phase 2, so later tests print real units and real IDs.
-2. Phase 3 (P1, P2, P3, P10) and phase 5 (B1–B5, B7).
-3. Phase 6 (C1–C8) and phase 7 (S1–S8).
-4. Phase 8 (N1–N8, N13) and phase 4 payloads that still need a freeze
-   (P4, P5, P8).
-5. Phase 9 and phase 10, which are the designer loop.
-6. Phase 11, then phase 12.
+1. Identifiers (§3).
+2. Motion payloads P1, P2, P3, P10 (§4) and the bus budget B1–B5, B7 (§5).
+3. Interpolation C1–C8 (§6) and steps S1–S8 (§7).
+4. Node playback N1–N8, N13 (§8) and the remaining payloads P4, P5, P8.
+   Those byte tables are in the whitepaper §4.5 and the addressing note §3.
+5. Commissioning (§9) and the pattern bake (§10).
+6. Live file state (§11), then native/WASM parity (§12).
 
 Phase 12 is the host gate named in roadmap W1: golden traces pass, and
 the worst-case chunk and tick asserts (S3–S5) pass. W0 and the scope

@@ -50,14 +50,24 @@ and does not affect the motion bus budget.
 |------|-------------------|---------|
 | Discover | field 0, type `DISC` | full 64-bit flash ID (8 B) |
 | Hello | node ID, type `HELLO` | full 64-bit flash ID |
-| Assign | field 0, type `SET_ID` A/B | flash ID + assigned node ID + flags |
+| Assign | field 0, type `SET_ID` A then B | A: 8-byte flash ID. B: 4-byte prefix, short ID, flags, column, row |
 | Confirm | node ID, type `HELLO` | short node ID in CAN ID, flash ID in payload |
 
 - Unassigned nodes advertise on `DISC` with a deterministic backoff derived
   from the flash ID (e.g. a 10-bit hash × 5 ms). The identifier stays 11-bit.
   Discovery is boot and maintenance traffic; it does not run during a pattern.
 - `SET_ID` uses two consecutive frames because the 64-bit flash ID plus the
-  assigned ID does not fit in one 8-byte payload.
+  assigned ID does not fit in one 8-byte payload. Both are field 0,
+  little-endian:
+
+  | Frame | Type | Bytes |
+  |-------|------|--------|
+  | A | 10 | `0–7` flash ID, the same 8 bytes as `DISC` |
+  | B | 11 | `0–3` flash ID prefix (bytes 0–3 of A); `4` short node ID; `5` flags; `6` column; `7` row |
+
+  The node accepts B only when bytes 0–3 equal its own flash ID. `flags` bit 0
+  means the column and row are valid. Column is `0–9`, row is `0–11`. The
+  master stores `axes_per_node` (4 on this board) in its own table.
 - A node with a stored short ID uses it on boot and sends `HELLO`; the master
   verifies the mapping. If the master's config is lost, it can reassign.
 
