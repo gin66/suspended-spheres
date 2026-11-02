@@ -872,47 +872,80 @@ With motors, PSU and cabling (~€1,200–1,400), the system is ~€1,940–2,18
 
 - **Bare RP2354B** (QFN-80, 48 GPIO) on a custom 4-layer carrier board.
 - FastAccelStepper on RISC-V gives **12 steppers** at 200 kHz.
-- 12 × TMC2209 StepSticks plug into sockets on the carrier — **not included in carrier BOM** (same model as Octopus).
-- 12 step + 12 direction + 12 DIAG + CAN-FD (MCP2518FD) + 3× TMC UART (bit-banged) + 1× I²C temperature sensor + common enable + status LED = **48 GPIO, exactly full**.
+- 12 × **bare TMC2209** (QFN-28, `TMC2209-LA`) soldered on the carrier, one per axis. The StepStick socket is rejected here: its 2×8 header carries EN/MS1/MS2/PDN_UART/CLK/STEP/DIR/GND and VM/GND/A1/A2/B1/B2/VDD/GND, but **`DIAG` is only on a `CONT1` solder pad**, so a socketed build cannot deliver the 12 `DIAG` lines the architecture relies on.
+- **`DIAG` is event-driven.** It is a push-pull output that asserts on stall, over-temperature pre-warning, short-to-GND and open-load. All 12 go to interrupt-capable GPIOs, so a fault raises an ISR and the handler reads `DRV_STATUS`/`SG_RESULT` over UART — no continuous polling of 12 drivers.
+- **`EN` is the motor-power control, not a high-side FET.** All 12 `ENN` pins share `TMC_EN` (active-low) with a **single 10 kΩ pull-up to `+3V3` at the MCU** (`R9`), so a floating or crashed MCU leaves every output stage **disabled**. Per-driver pull-ups were dropped deliberately: a bad IC joint leaves that pin floating anyway, so 12 resistors would only cover a cracked trace, at the cost of 11 parts and ~4 mA of GPIO sink current. A series MOSFET on the shared 24 V rail is rejected: it would switch ~1.2 mF (12 × 100 µF) and needs soft-start, while `EN` already disables the output stage in microseconds and keeps the logic powered.
+- **Driver instance (×12, one page each):** `TMC2209-LA` QFN-28; `0.47 Ω` sense resistors (max 0.47 A RMS at `IRUN=31`, ≈0.25 A at `IRUN≈17`); `100 nF + 100 µF` on `VS`; `100 nF` `VCP→VS`; `22 nF` `CPO–CPI`; `2.2 µF` on `5VOUT`; `100 nF` on `VCC_IO`; `1 kΩ` `PDN_UART` series; `MS1`/`MS2` tied **directly** to `GND`/`+3V3` (no straps); 4-pin motor connector. `CLK` and `SPREAD` are tied to GND (internal clock, StealthChop), `VREF`/`INDEX` open.
+- **Temperature sensing:** the TMC2209 has **no numeric temperature register** — `DRV_STATUS` only exposes `otpw` (pre-warning) and `otsd` (shutdown). Actual temperatures come from four `TMP1075DGKR` on I²C1: `U19` 0x48 ambient, `U20`/`U21`/`U22` 0x49/0x4A/0x4B for the three driver groups (A0–A2 strapped to GND/+3V3). Shared 2 × 4.7 kΩ pull-ups, 100 nF per sensor. On the PCB each sensor sits mid-group with a copper patch to the plane; `DIAG` remains the fast per-driver cutoff.
+- **UART addressing:** three single-wire buses carry four drivers each (drivers 1–4 bus 0, 5–8 bus 1, 9–12 bus 2); `MS1`/`MS2` are hard-tied to `GND`/`+3V3` to set address 0–3 (no 0 Ω straps — the addresses are fixed in the bus plan). The 12 pages differ only in designators, the per-driver local nets, `STEPnn`/`DIRnn`/`DIAGnn`, and the two hard-tied address pins.
+- 12 step + 12 direction + CAN-FD (MCP2518FD + **MCP2562FD**) + 3× TMC UART (bit-banged) + I²C1 (4 temperature sensors + 2 GPIO expanders) + expander interrupt + common enable + status LED = **37 GPIO, 11 spare**. The 12 `DIAG` lines and the end switches are on two `TCA9555` expanders, so the STEP/DIR block fits entirely inside the PIO `GPIO0–31` window.
 - 2 MB integrated QSPI flash; 24 V → 5 V/3.3 V DC-DC; USB-C for programming/debug.
+- **USB-C (device, programming/debug):** 16-pin receptacle, `CC1`/`CC2` pulled down with 5.1 kΩ (sink), `D±` pass through a `USBLC6-2SC6` ESD array, `SBU` pins open.
+- **USB / 24 V diode-OR:** `VBUS → D3 (SS14) → +5V_SYS` and `buck +5V → D4 (SS14) → +5V_SYS`; the AMS1117 runs from `+5V_SYS`. Whichever source is present powers the board, the other diode blocks, so **USB alone can flash the board** and neither the 24 V buck nor the USB host is ever back-fed. With both connected `+5V_SYS` sits at the higher source minus ~0.5 V; the AMS1117 still regulates at the MCU's ~0.2 A load. There is **no VBUS-sense GPIO** (none is needed by the USB device stack; a spare GPIO exists if wanted).
+- **24 V input protection:** fuse → **33 V TVS** → reverse-polarity P-MOS → buck input, then the TPS54360B (600 kHz, 162 kΩ `RT`, EN divider 453 kΩ/88.7 kΩ → UVLO ≈ 7.3 V start / 5.8 V stop typical). The TVS sits **before** the P-MOS on purpose: the SMBJ33A clamps at 53.3 V while the reverse-polarity FET is only rated **Vds 40 V**, so clamping first keeps the FET's Vds to ≈ clamp − 24 V ≈ 29 V instead of exposing it to the unclamped surge.
+- **24 V current budget (per board):** the motor rail dominates — 12 × TMC2209 at 0.25 A RMS holding = **≈3 A continuous** (72 W). The buck itself only adds ~0.1 A (it carries ~0.25 A at 5 V). Therefore **F1 must be 4–5 A**, not 2 A, and the P-MOS, connector and 24 V copper must be rated for ≥3 A continuous.
+- **Bulk on the 24 V rail is the real requirement, not the buck's 10 µF.** The 2 × 10 µF ceramics are the buck's HF input and are correctly sized for ~0.1 A input ripple. The motor rail needs **220–470 µF / 35–50 V bulk** near the motor connectors plus **100 µF per driver** (as in §11.6's ESP32-carrier note). A small ferrite/few-µH filter between the motor `+24 V` and the buck input keeps chopper noise out of the converter.
+- **Input capacitor voltage rating: 50 V is accepted.** The rail is a clean 24 V supply, so 50 V gives ~2 × continuous margin; the SMBJ33A clamp (~53 V) is a transient only. The 50 V MLCCs fail **short**, so **F1 clears the fault** (it sits upstream of the caps). If margin is ever tightened, use two `200 nF / 100 V` in series (→ 100 nF / 200 V) rather than a single higher-voltage part, with ~1 MΩ balancing resistors.
 - **10 boards / 10 nodes** for 120 axes, **12/12 DIAG**.
 - WiFi handled separately (Octopus Pro H723 CAN node, or a standalone ESP32-S3 AP). The carrier itself has no WiFi.
 
 | Item | Qty | Cost (est.) |
 |------|-----|-------------|
-| 4-layer PCB, 100 × 100 mm | 1 | €5 |
+| 4-layer PCB, 120 × 160 mm | 1 | €8 |
 | RP2354B (QFN-80) | 1 | €4 |
-| CAN transceiver (TJA1050) | 1 | €1 |
+| CAN-FD transceiver (MCP2562FD-H/SN) | 1 | €1 |
 | 24 V → 5 V/3.3 V DC-DC | 1 | €2 |
-| Capacitors, connectors, fuse, TVS | 1 set | €10 |
+| Fuse holder + 5 A Nano2 fuse (Littelfuse 0154005.DR, 125 V, 50 A interrupt) | 1 | €1.50 |
+| 24 V bulk polymer, 220 µF / 35 V (SPE1VM221E12OL) | 1 | €0.50 |
+| Capacitors, connectors, TVS | 1 set | €10 |
 | 12 × motor connectors (mating with motor cable) | 12 | €1.50 |
-| 12 × TMC2209 StepStick sockets | 12 | €1.20 |
+| 12 × TMC2209-LA (QFN-28, C2150710) | 12 | €34 |
+| Per-driver passives (VCP/CPO caps, sense resistors, 100 µF) | 12 set | €6 |
 | USB-C connector (programming/debug) | 1 | €0.30 |
 | Status LED + resistor | 1 | €0.10 |
-| Assembly (QFN/passives/connectors) | 1 | €5–10 |
-| **Pure carrier (no TMC, no WiFi)** | | **~€30–35** |
-| **10 pure carriers** | | **~€300–350** |
+| Assembly (QFN/passives/connectors) | 1 | €10–15 |
+| **Driver board (RP2354B + 12 TMC2209)** | | **~€70–80** |
+| **10 driver boards** | | **~€700–800** |
 | **+ NRE (stencil, setup, review)** | | **~€50–100** |
 
-With 12 × TMC2209 StepSticks (~€4 each = €48/board) plus motors, PSU and cabling (~€1,200–1,400), the full system is ~€1,980–2,230 — within ~€50 of the ESP32-S3 carrier and below the Octopus CAN path.
+With 12 × TMC2209-LA (~€2.83 each = €34/board) plus motors, PSU and cabling (~€1,200–1,400), the full system is ~€1,970–2,220 — comparable to the ESP32-S3 carrier and below the Octopus CAN path. The bare IC is chosen for **`DIAG` and reliability**, not cost: 12 socketed 2 A contacts are the classic failure point in an installation that runs unattended, and the socket cannot carry `DIAG` at all.
 
 **GPIO budget, bare RP2354B (48 GPIO), 12 axes:**
 
 | Function | Qty | GPIO |
 |----------|-----|------|
-| 12 × STEP (PIO) | 12 | 12 |
-| 12 × DIR | 12 | 12 |
-| 12 × DIAG | 12 | 12 |
-| CAN-FD controller (MCP2518FD: SCK/MOSI/MISO/CS + INT) | 5 | 5 |
-| TMC UART (3 buses, bit-banged) | 3 | 3 |
-| Temperature sensor (I²C) | 2 | 2 |
+| 12 × STEP + 12 × DIR (PIO, interleaved) | 24 | 24 |
+| CAN-FD controller (SCK/MOSI/MISO/CS + INT) | 5 | 5 |
+| TMC UART (3 buses) | 3 | 3 |
+| I²C1 (4 temp sensors + 2 GPIO expanders) | 2 | 2 |
+| Expander interrupt (`EXINT`) | 1 | 1 |
 | Common enable | 1 | 1 |
 | Status/fault LED | 1 | 1 |
-| **Total** | **48** | **48 — exactly full** |
+| **Total** | **37** | **37 — 11 spare** |
+
+**Pin assignment (final):**
+
+| GPIO | Net | GPIO | Net |
+|------|-----|------|-----|
+| 0–3 | SPI0 MISO/CS/SCK/MOSI | 28 | `CAN_INT` |
+| 4, 5 | STEP01, DIR01 | 29 | `EXINT` (TCA9555) |
+| 6, 7 | STEP02, DIR02 | 30 | `TMC_EN` |
+| 8, 9 | STEP03, DIR03 | 31 | `LED_STATUS` |
+| 10, 11 | STEP04, DIR04 | 32–34 | `TMC_UART0/1/2` |
+| 12, 13 | STEP05, DIR05 | 35–41 | spare |
+| 14, 15 | STEP06, DIR06 | 42, 43 | I²C1 SDA/SCL |
+| 16, 17 | STEP07, DIR07 | 44–47 | spare |
+| 18, 19 | STEP08, DIR08 | | |
+| 20, 21 | STEP09, DIR09 | | |
+| 22, 23 | STEP10, DIR10 | | |
+| 24, 25 | STEP11, DIR11 | | |
+| 26, 27 | STEP12, DIR12 | | |
+
+All 24 STEP/DIR pins sit inside the PIO `GPIO0–31` window. The 12 `DIAG` lines went to a **TCA9555 I²C expander** (0x20), which asserts `EXINT` on any change — DIAG stays interrupt-driven while freeing 12 pins. End switches use a second **TCA9555** (0x21) on 12 × 2-pin headers, each with a 10 kΩ pull-up to `+3V3`.
 
 The CAN-FD **5 pins are four SPI signals plus INT** — there is no enable pin. The transceiver STB is tied low, and the controller's crystal is local to the module. Polling instead of using INT drops it to 4 pins; add CLKIN only if the MCU supplies the controller clock instead of a local crystal.
 
-Boot/reset uses the dedicated RUN pin, and USB and the crystal are dedicated. The final GPIO drives a **status/fault LED**, so direct wiring is **exactly 48/48 with no spare**. That fits, but leaves zero margin: any future signal, per-driver enable, or second LED forces the 74HC165. With the 165 the total is 39, leaving 9 GPIO free.
+Boot/reset uses the dedicated RUN pin; USB and the crystal are dedicated. With DIAG and the end switches on I²C expanders the design uses **37 of 48 GPIO, leaving 11 spare** for future features (per-driver enable, second LED, extra sensors).
 
 A single-wire WS2812 fits the same LED pin, so it does not change the count. It does need 5 V and a level shifter (3.3 V data is marginal against the 0.7 VDD threshold), and precise 800 kHz timing. Since all three PIO blocks are committed to the step streams, drive it from the second core with interrupts disabled for the ~30 µs frame, or use a plain LED.
 
@@ -926,6 +959,83 @@ That does not force a mux: **bit-bang the third bus (or all three) on the second
 
 **Pico 2 module limitation:** once CAN-FD, UART and a temperature sensor are added, the Pico 2 module's ~26 GPIO is too tight even with both shift registers: 12 STEP + 3 DIR + 3 DIAG + 5 CAN + 3 UART + 2 temp + 1 enable = 29. For a CAN node, use the **bare RP2354B** (48 GPIO); the Pico 2 module is better suited to the WiFi-only variant or to 8 axes.
 
+#### 11.6.1 CAN front end — two connectors, symmetric switchable termination
+
+The Octopus Pro has one CAN connector and an always-fitted 120 Ω (§13.2), so an
+installed set over-terminates as soon as more than two boards keep the resistor.
+The Pico carrier fixes this at the board level: **two JST-GH connectors (CAN IN /
+CAN OUT) and a jumper-selectable split termination**, so a node can be an end node
+from either side and every intermediate node leaves its termination open.
+
+**Transceiver.** `MCP2562FD-H/SN` (SOIC-8, CAN-FD, 8 Mbit/s), not the TJA1050 that
+an earlier draft of this section listed. The TJA1050 is a 5 V-only part with a
+5 V RXD output, which would overdrive the 3.3 V RP2354B; it has no VIO pin. The
+MCP2562FD runs VDD = 5 V with VIO = 3.3 V, so its digital side matches the MCU.
+Both rails already exist on the carrier (24 V → 5 V, 5 V → 3.3 V).
+
+| Pin | Name | Connection |
+|-----|------|------------|
+| 1 | TXD | MCP2518FD `TXCAN` (controller drives the bus) |
+| 2 | VSS | GND |
+| 3 | VDD | `+5V_SYS`, 100 nF |
+| 4 | RXD | MCP2518FD `RXCAN` |
+| 5 | VIO | +3V3, 100 nF |
+| 6 | CANL | bus CANL, 60.4 Ω split leg |
+| 7 | CANH | bus CANH, 60.4 Ω split leg |
+| 8 | STBY | GND (normal mode; high = standby) |
+
+**Physical layer.**
+
+```
+  J1 CAN-IN ──o───────────────o── CANH ── R1 60.4R ──[JP1] ──┐
+              │               │                              ├── C1 4.7nF ── GND
+  J2 CAN-OUT ─o───────────────o── CANL ── R2 60.4R ──[JP2] ──┘
+                              │
+                              ├── U MCP2562FD (CANH/CANL)
+                              └── D PESD1CAN
+```
+
+- **J1 / J2 are wired in parallel** (pin 1 = CANH, pin 2 = CANL, pin 3 = GND) and
+  the transceiver tap plus the termination sit **midway between them**, so both
+  connectors see the same stub. This is the "symmetric" requirement: neither
+  connector is privileged, and the termination is not a stub hanging off one end.
+- **Split termination**: 2 × 60.4 Ω (1 %) in series across CANH/CANL with their
+  common node returned to GND through 4.7 nF. This is the 120 Ω bus termination,
+  but symmetric with respect to CANH and CANL, and it gives the common-mode noise
+  a defined path. 2 × 60.4 Ω = 120.8 Ω, inside the usual 120 Ω ±5 % window.
+- **Both legs are switched.** A single 1-pole jumper cannot disable a split
+  termination without leaving 120 Ω partly connected; opening both legs is what
+  makes the node a clean pass-through. JP1/JP2 are the two poles of one 2 × 2
+  header (`PZ2.54-2x2`), with two shunts: **fit both shunts only on the two
+  physical end nodes.**
+- `PESD1CAN` protects the bus against field transients on the JST-GH wiring.
+- BOM: 2 × `SM03B-GHS-TB`, 1 × `MCP2562FD-H/SN`, 1 × `MCP2518FD` (SOIC-14, local
+  40 MHz crystal), 2 × 60.4 Ω, 1 × 4.7 nF, 1 × 2 × 2 header, 1 × `PESD1CAN`,
+  3 × 100 nF.
+
+**Concrete GPIO map (RP2354B, 48 GPIO, 37 used).** The earlier table sized the
+budget; this is the pin-level assignment used by the design.
+
+| Signal | GPIO | Alt function used |
+|--------|------|-------------------|
+| CAN SPI SO (MISO) | GPIO0 | SPI0 RX |
+| CAN SPI CSn | GPIO1 | SPI0 CSn |
+| CAN SPI SCK | GPIO2 | SPI0 SCK |
+| CAN SPI SI (MOSI) | GPIO3 | SPI0 TX |
+| CAN nINT | GPIO4 | SIO/IRQ |
+| TMC UART bus 0 | GPIO5 | bit-banged |
+| TEMP_SDA | GPIO6 | I2C1 SDA |
+| TEMP_SCL | GPIO7 | I2C1 SCL |
+| TMC UART bus 1 | GPIO8 | bit-banged |
+| TMC UART bus 2 | GPIO9 | bit-banged |
+| TMC common EN | GPIO10 | SIO |
+| Status LED | GPIO11 | SIO |
+| STEP 1–12 | GPIO12–23 | PIO0/PIO1/PIO2 |
+| DIR 1–12 | GPIO24–35 | SIO |
+| DIAG 1–12 | GPIO36–47 | SIO input (IRQ) |
+
+The 40 MHz crystal for the MCP2518FD stays local (as the doc's 5-pin CAN budget
+assumes); sharing an RP2350 clock output would need a sixth pin and is not used.
 
 **Trade-offs**
 
@@ -1049,7 +1159,7 @@ At the current this duty actually needs, not at driver maximum:
 - 24 V power, 8 motor connectors, one 6P6C RJ11 CAN connector.
 - CAN is a **bus**, not a true daisy-chain: run a trunk with short stubs. Terminate with 120 Ω at the two physical ends only.
 - The schematic shows one CAN connector and a 120 Ω resistor. Check whether that resistor is fitted; if it is fitted on every board, remove it on all intermediate nodes or the bus will be over-terminated.
-- For in/out daisy-chaining, add a second RJ11 in parallel or use a passive splitter at each node.
+- For in/out daisy-chaining, add a second RJ11 in parallel or use a passive splitter at each node. The custom Pico carrier (§11.6.1) already has this built in: two connectors, and a split termination switched by a 2-pole jumper so only the two end nodes are terminated.
 
 ### 13.3 Firmware update
 

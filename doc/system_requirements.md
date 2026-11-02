@@ -103,6 +103,7 @@ This document states **behaviour and constraints**. Specific design choices — 
 | FR-MON-004 | The system shall provide a monitoring interface for the operator. | SHOULD |
 | FR-MON-005 | The system shall indicate controller health locally with a visible OK/fault indication. | MUST |
 | FR-MON-006 | The system shall provide a global visual status indicator, visible to the operator, showing at least: operable/ready, error/fault, and preparation (homing/start-up) mode. | MUST |
+| FR-MON-007 | Each controller board shall have a locally actuable reset button that restarts that board without removing it from the installation and without affecting other controllers. | MUST |
 
 ### 3.7 User Interface
 
