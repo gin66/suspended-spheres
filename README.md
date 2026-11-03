@@ -55,6 +55,10 @@ All technical Markdown lives in [`doc/`](doc/). Only this file and [`AGENTS.md`]
 Suspended_Spheres/
 ├── README.md                   # This file — project overview and entry point
 ├── AGENTS.md                   # Mission, overview, development notes
+├── lib/
+│   └── motion_core/            # Shared integer motion core (PC and firmware)
+├── tests/                      # Host-only harness (CMake; no hardware)
+├── rp2040/                     # Firmware-only PlatformIO project
 ├── boards/
 │   ├── Fly_Micro4_pinmap.md         # Pin reference for the vendor files
 │   ├── Fly_Micro4_klipper_reference.cfg

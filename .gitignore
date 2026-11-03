@@ -1,2 +1,4 @@
 .easyeda
 easyEDA_backup
+.pio/
+build/

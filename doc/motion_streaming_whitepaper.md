@@ -872,15 +872,11 @@ power (`FR-MOT-011`); software only provides orderly stops.
 ### 5.10 PlatformIO project layout
 
 ```
-rp2040/
+rp2040/                       # firmware-only
 ├── platformio.ini
 ├── include/
 │   ├── board_pins.h          # per board revision; verify from schematic
 │   └── app_config.h          # node id, limits, timing
-├── lib/
-│   └── motion_core/          # portable integer core (shared with sim)
-│       ├── include/motion/...
-│       └── src/...
 ├── src/
 │   ├── main.cpp
 │   ├── can_node.cpp/.h       # can2040 adapter, RX ring, sync
@@ -889,8 +885,14 @@ rp2040/
 │   ├── tmc2209.cpp/.h
 │   └── config_store.cpp/.h
 └── test/
-    └── test_motion_core.cpp  # host/Unity tests of the shared core
+    └── test_motion_core.cpp  # on-target self-test for W0 bench
 ```
+
+The portable core itself lives **outside** `rp2040/`, in `lib/motion_core/`
+(`include/` + `src/`), so the firmware folder stays firmware-only. It is the only
+source exchanged between the PC harness and the firmware; `rp2040/platformio.ini`
+finds it through `lib_extra_dirs = ../lib`. The host harness (CMake, one
+executable `motion_core_tests`) lives in `tests/` at the repository root.
 
 `platformio.ini` outline:
 
@@ -1108,13 +1110,14 @@ simulation/
 │   ├── wasm/                 # core bindings
 │   └── bridge/               # WebSocket client for CAN playback
 ├── wasm/
-│   └── build.sh              # emcc -I../../rp2040/lib/motion_core
+│   └── build.sh              # emcc -I../../lib/motion_core
 └── patterns/                 # .anim.json sources, generators, reports, .hbp exports
 ```
 
-The core stays in `rp2040/lib/motion_core` so PlatformIO builds it directly and
-the simulation includes it by path. If the project later prefers a root
-`core/`, move it once and update both build files; do not fork the code.
+The core stays in `lib/motion_core` (repository root) so PlatformIO builds it
+directly via `lib_extra_dirs = ../lib` and the simulation includes it by path.
+If the project later prefers a root `core/`, move it once and update both build
+files; do not fork the code.
 
 ### 6.9 Live animation file
 

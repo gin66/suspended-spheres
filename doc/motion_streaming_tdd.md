@@ -67,21 +67,34 @@ is 50 ms.
 
 ## 0.2 First implementation slice
 
-As of 2026-11-03 there is no `rp2040/` directory, no CMake file, and no
-`patterns/golden_sine.anim.json`. Creating that scaffold is part of this
-slice. Leave `boards/`, `LICENSE`, and the EasyEDA project unchanged.
+As of 2026-11-03 the first session (harness + units) has been started in the
+repository: the shared core lives in `lib/motion_core/`, the host harness in
+`tests/`, and the firmware-only scaffold in `rp2040/` carries a PlatformIO
+`[env:rpipico]`. Still open: the `patterns/golden_sine.anim.json` file and the
+Python fixture. Leave `boards/`, `LICENSE`, and the EasyEDA project unchanged.
 
 This plan is ready to implement. The first session covers §1 and §2 only,
 in that order:
 
 1. Read `motion_streaming_whitepaper.md` and `Fly_Micro4_addressing.md`.
-2. Add `rp2040/lib/motion_core/`, `rp2040/lib/motion_core/tests/`, the C++17
-   CMake target `motion_core_tests`, and the `ASSERT` macro from §0.1.
+2. Add the shared core `lib/motion_core/` (with `include/` and `src/`), the
+   C++17 CMake target `motion_core_tests` in `tests/`, and the `ASSERT` macro
+   from §0.1. `rp2040/` stays firmware-only and gets the PlatformIO target later.
 3. Write H1–H4, then U1–U8. One failing test, then the code that passes it.
 
 That session stops there. It does not add `PlaybackClock`, the identifier
 tests (§3), the frame codecs beyond the endian check in U7, the golden
 file, the Python fixture, or the WASM build.
+
+**Progress note (2026-11-03, second slice).** §3 (I1–I10), §4
+(P1, P2, P3, P10) and §5 (B1–B5, B7) are now implemented and passing; the
+identifier and bus-budget APIs are in `lib/motion_core`, and the payload
+pack/unpack proved out the exact §4.2 byte layout. One clarification from
+that slice: `mc_unpack_frame` takes the expected variant (`3` or `4`) from
+the caller — the N=3 and N=4 payloads are byte-indistinguishable, so the
+variant cannot come from the wire, matching §6.3.
+Still open: interpolation (C1–C9), steps and chunks (§7), node playback
+(§8), the remaining payloads P4–P9, B6/B8, and the golden file.
 
 Later byte layouts are the Markdown tables in the whitepaper §4.5 and in
 `Fly_Micro4_addressing.md` §3. There is no separate schema file. A test
@@ -103,8 +116,8 @@ the whitepaper §4.9. Implement that type with the §8 tests, not in this slice.
 - Timed tests use `PlaybackClock` from §0.1 and an in-memory frame log.
   No PIO, no can2040, no GPIO, no serial port, no operating-system clock.
 - The host executable and the `ASSERT` macro are §0.1.
-- Tests live next to the core (`rp2040/lib/motion_core/tests/`), as in the
-  whitepaper §5.10. They run on the development machine.
+- Tests live in the host harness (`tests/`), not inside the shared core, as in
+  the whitepaper §5.10. They run on the development machine.
 - Payload bytes and the animation schema are the whitepaper and the
   addressing note. A test that needs a different layout is a documentation
   change first.
@@ -166,25 +179,25 @@ Whitepaper §3.2, §4.2, Appendix A.
 
 `Fly_Micro4_addressing.md` §2 and §4.
 
-- [ ] **I1** `id = (field << 4) | type`, and `id` is in `0 … 0x7FF`. A
+- [x] **I1** `id = (field << 4) | type`, and `id` is in `0 … 0x7FF`. A
   value above 0x7FF is rejected. There is no 29-bit encoder.
-- [ ] **I2** Type 0 and type 1 carry a motor ID in `1 … 120`. Field 0 with
+- [x] **I2** Type 0 and type 1 carry a motor ID in `1 … 120`. Field 0 with
   either motion type is rejected. Motor IDs `121 … 127` are rejected.
-- [ ] **I3** Type 2 (sync) requires field 0.
-- [ ] **I4** Types 3–7 carry a node ID in `1 … 30`, or 0 for a broadcast.
+- [x] **I3** Type 2 (sync) requires field 0.
+- [x] **I4** Types 3–7 carry a node ID in `1 … 30`, or 0 for a broadcast.
   Node ID 31 is rejected.
-- [ ] **I5** Types 8, 10 and 11 (`DISC`, `SET_ID` A/B) require field 0.
+- [x] **I5** Types 8, 10 and 11 (`DISC`, `SET_ID` A/B) require field 0.
   Type 9 (`HELLO`) carries the short node ID.
-- [ ] **I6** Types 12–15 are rejected.
-- [ ] **I7** Motor 5 / type 0 and node 5 / type 3 produce different
+- [x] **I6** Types 12–15 are rejected.
+- [x] **I7** Motor 5 / type 0 and node 5 / type 3 produce different
   identifiers. The decoder reports a motor for types 0–1 and a node for
   types 3–7 and 9.
-- [ ] **I8** Node *n* owns motors `4(n−1)+1 … 4(n−1)+4`. Node 1 owns 1–4.
+- [x] **I8** Node *n* owns motors `4(n−1)+1 … 4(n−1)+4`. Node 1 owns 1–4.
   Node 30 owns 117–120. Node 0 and node 31 own nothing.
-- [ ] **I9** Node *n* accepts motion for its four motors, frames addressed
+- [x] **I9** Node *n* accepts motion for its four motors, frames addressed
   to node *n*, and field 0. A motion frame for any other motor is discarded
   before the payload is parsed. A table drives all 30 nodes.
-- [ ] **I10** **Property.** For every motor in `1 … 120` and both motion
+- [x] **I10** **Property.** For every motor in `1 … 120` and both motion
   types, exactly one node accepts the frame.
 
 ---
@@ -193,12 +206,12 @@ Whitepaper §3.2, §4.2, Appendix A.
 
 Whitepaper §4.2, §4.3, §4.5. Addressing §3.
 
-- [ ] **P1** An `N=3` motion payload is exactly 8 bytes: three unsigned
+- [x] **P1** An `N=3` motion payload is exactly 8 bytes: three unsigned
   16-bit positions and one signed 16-bit speed, little-endian. Pack and
   unpack are inverses, including a negative speed.
-- [ ] **P2** An `N=4` motion payload is exactly 8 bytes: four unsigned
+- [x] **P2** An `N=4` motion payload is exactly 8 bytes: four unsigned
   16-bit positions. Pack and unpack are inverses.
-- [ ] **P3** A payload shorter or longer than 8 bytes is rejected.
+- [x] **P3** A payload shorter or longer than 8 bytes is rejected.
 - [ ] **P4** The sync frame matches the whitepaper §4.5 byte table. A sync
   ID is field 0, type 2. After `t_us_low` wraps, the reconstructed `int64`
   time gains `2^32` µs.
@@ -215,7 +228,7 @@ Whitepaper §4.2, §4.3, §4.5. Addressing §3.
 - [ ] **P9** The per-node alternate (four 16-bit positions, one frame per
   node) packs and unpacks. A flag on the unpacked frame says it is not the
   per-motor baseline.
-- [ ] **P10** `mc_pack_frame` / `mc_unpack_frame` follow P1 and P2 for the
+- [x] **P10** `mc_pack_frame` / `mc_unpack_frame` follow P1 and P2 for the
   variants in §6.3.
 
 ---
@@ -226,9 +239,9 @@ Whitepaper §3.3, §4.6, Appendix A. The test calls one function. The
 expected column is the whitepaper table, so a changed bit-stuffing
 assumption fails here.
 
-- [ ] **B1** Frame cost is 130 bits at 1 Mbit/s (130 µs). Ceiling is
+- [x] **B1** Frame cost is 130 bits at 1 Mbit/s (130 µs). Ceiling is
   7 700 frames/s.
-- [ ] **B2** Motion frames/s = `120 / (N·Δt)` for `Δt` in seconds.
+- [x] **B2** Motion frames/s = `120 / (N·Δt)` for `Δt` in seconds.
 
   | `N` | `Δt` | Frames/s | Load |
   |-----|------|----------|------|
@@ -239,14 +252,14 @@ assumption fails here.
   | 4 | 11 ms | 2 727 | 35 % |
   | 4 | 15 ms | 2 000 | 26 % |
 
-- [ ] **B3** Adding a 50 Hz sync and 30 × 10 Hz status (350 frames/s)
+- [x] **B3** Adding a 50 Hz sync and 30 × 10 Hz status (350 frames/s)
   raises those loads to 57, 52, 39, 44, 40, and 31 %.
-- [ ] **B4** A 10 ms *message* period (12 000 frames/s) is 156 % and is
+- [x] **B4** A 10 ms *message* period (12 000 frames/s) is 156 % and is
   reported as over budget. The limit used by the pattern checker is 60 %.
-- [ ] **B5** 120 motion frames occupy 15.6 ms of bus time.
+- [x] **B5** 120 motion frames occupy 15.6 ms of bus time.
 - [ ] **B6** The scheduler starts a window 15–20 ms before the nominal `T`
   and finishes before `T+Δt`. A plan that starts at `T` fails the test.
-- [ ] **B7** **Property.** Load scales as `1/(N·Δt)` for `Δt` in
+- [x] **B7** **Property.** Load scales as `1/(N·Δt)` for `Δt` in
   {10, 11, 15} ms and `N` in {3, 4}. Frame count does not change when the
   step rate or the microstep setting changes (`FR-ARCH-002`).
 - [ ] **B8** `Δt` and `N` applied while a segment is in flight are
