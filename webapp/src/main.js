@@ -631,6 +631,102 @@ function setPatternStatus(text) {
   if (el) el.textContent = text;
 }
 
+// ---------------------------------------------------------------------------
+// Shareable render links (#pattern=<gzip|plain base64url>)
+// ---------------------------------------------------------------------------
+
+function bytesToBase64Url(bytes) {
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function base64UrlToBytes(text) {
+  const padded = text.replace(/-/g, '+').replace(/_/g, '/');
+  const bin = atob(padded + '='.repeat((4 - (padded.length % 4)) % 4));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+async function encodePatternPayload(text) {
+  const bytes = new TextEncoder().encode(text);
+  if (typeof CompressionStream !== 'undefined') {
+    try {
+      const stream = new Blob([bytes]).stream()
+        .pipeThrough(new CompressionStream('gzip'));
+      const packed = new Uint8Array(await new Response(stream).arrayBuffer());
+      return `g1.${bytesToBase64Url(packed)}`;
+    } catch {
+      /* fall back to plain base64url */
+    }
+  }
+  return `j1.${bytesToBase64Url(bytes)}`;
+}
+
+async function decodePatternPayload(payload) {
+  if (payload.startsWith('g1.')) {
+    if (typeof DecompressionStream === 'undefined') {
+      throw new Error('this browser cannot decompress the pattern link');
+    }
+    const packed = base64UrlToBytes(payload.slice(3));
+    const stream = new Blob([packed]).stream()
+      .pipeThrough(new DecompressionStream('gzip'));
+    return new TextDecoder().decode(await new Response(stream).arrayBuffer());
+  }
+  if (payload.startsWith('j1.')) {
+    return new TextDecoder().decode(base64UrlToBytes(payload.slice(3)));
+  }
+  throw new Error('unknown pattern link format');
+}
+
+function patternTextForShare() {
+  if (!currentShow) return null;
+  ensureCoreShow(currentShow);
+  if (currentShow.sourceText) return currentShow.sourceText;
+  const duration = currentShow.duration_ms ||
+    Math.max(computeLoopPeriodMs(currentShow), currentShow.dt_ms || 10);
+  return showJson(currentShow, duration);
+}
+
+async function copyRenderLink() {
+  const text = patternTextForShare();
+  if (!text) return;
+  if (location.protocol === 'file:') {
+    setPatternStatus('Host the page to share render links');
+    return;
+  }
+  const payload = await encodePatternPayload(text);
+  const url = `${location.origin}${location.pathname}#pattern=${payload}`;
+  try {
+    await navigator.clipboard.writeText(url);
+    setPatternStatus('Render link copied');
+  } catch {
+    prompt('Copy this render link:', url);
+  }
+}
+
+async function loadPatternFromHash() {
+  const match = location.hash.match(/^#pattern=(.+)$/);
+  if (!match) return false;
+  try {
+    const text = await decodePatternPayload(match[1]);
+    const handle = pc.load(text, 1);
+    if (!handle) throw new Error(pc.lastError());
+    const show = showFromHandle('Shared pattern', handle);
+    show.sourceText = text;
+    shows.push(show);
+    selectShow(shows.length - 1, false);
+    setPatternStatus('Shared pattern loaded');
+    return true;
+  } catch (err) {
+    setPatternStatus(`Shared pattern: ${err.message}`);
+    return false;
+  }
+}
+
+document.getElementById('share-btn').addEventListener('click', copyRenderLink);
+
 async function fetchPatternCatalog() {
   const res = await fetch('/api/patterns', { cache: 'no-store' });
   if (!res.ok) throw new Error('pattern API unavailable');
@@ -694,6 +790,7 @@ async function loadCatalogPattern(name, activate = true) {
 
     const show = showFromHandle(name.replace(/\.anim\.json$/, ''), handle);
     show.sourceName = name;
+    show.sourceText = data.text;
     const existing = shows.findIndex((s) => s.sourceName === name);
     if (existing >= 0) {
       shows[existing] = show;
@@ -787,7 +884,9 @@ document.getElementById('pattern-file').addEventListener('change', async (event)
       return;
     }
     const name = file.name.replace(/\.anim\.json$/, '').replace(/\.json$/, '') || 'Loaded';
-    shows.push(showFromHandle(name, handle));
+    const show = showFromHandle(name, handle);
+    show.sourceText = text;
+    shows.push(show);
     selectShow(shows.length - 1);
     selectedPatternName = '';
     selectedPatternHash = '';
@@ -811,7 +910,8 @@ async function initViewer() {
     return;
   }
   updateShowButtons();
-  selectShow(1, false); // start on the X/Y showcase
+  const shared = await loadPatternFromHash();
+  if (!shared) selectShow(1, false); // start on the X/Y showcase
   requestAnimationFrame(animate);
   initPatternBrowser();
 }

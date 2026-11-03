@@ -112,10 +112,23 @@ downloaded or opened in a new page. The full-quality **30 s MP4** is still in
 the repository at [`doc/media/viewer-demo.mp4`](doc/media/viewer-demo.mp4) for
 offline viewing.
 
-The interactive viewer is also available as one file:
+The interactive viewer is hosted at
+<https://gin66.github.io/suspended-spheres/> and is also available as one file:
 [`webapp/viewer-standalone.html`](webapp/viewer-standalone.html). Download the
 ZIP, unzip it and double-click that file. The steps below are only for the
 authoring loop that watches `patterns/`.
+
+**LLM render links.** The hosted page accepts the pattern in the URL fragment,
+so an LLM can return a one-click preview without a server or an upload:
+
+```
+https://gin66.github.io/suspended-spheres/#pattern=<payload>
+```
+
+`<payload>` is `g1.` followed by base64url(gzip(UTF-8 `.anim.json`)), or `j1.`
+followed by base64url(UTF-8 JSON) when compression is unavailable. Open a
+pattern in the viewer and press **Copy link** to generate one. The fragment is
+never sent to the server, and no API key or file hosting is needed.
 
 ## Run the 3D Viewer
 
@@ -255,7 +268,8 @@ starting point and replace the motion description with your own idea.
 > I want to use the animations from
 > https://github.com/gin66/suspended-spheres. Please create a walking peak
 > running in circles. First create a 3D HTML preview similar to the webapp;
-> only when I ask, create the `.anim.json` as a downloadable file.
+> only when I ask, create the `.anim.json` as a downloadable file. After the
+> report is clean, export a `.hbp` playback file.
 
 **Italiano**
 
@@ -263,12 +277,22 @@ starting point and replace the motion description with your own idea.
 > https://github.com/gin66/suspended-spheres. Per favore, crea un picco che
 > cammina muovendosi in cerchi. Prima crea un’anteprima 3D in HTML simile alla
 > webapp; solo quando te lo chiedo, crea il file `.anim.json` come file
-> scaricabile.
+> scaricabile. Dopo che il report è pulito, esporta un file di riproduzione
+> `.hbp`.
 
 The preview-first request is deliberate: judge the motion before the model
 commits to the JSON. The best results come when it then writes a version-1
-`patterns/<name>.anim.json` and runs `./build/pattern_check` until the report
-has no violations.
+`patterns/<name>.anim.json`, runs `./build/pattern_check` until the report has
+no violations, and only then exports the `.hbp`. If the model can build URLs,
+it can also return a one-click hosted render link using the `#pattern=` format
+above.
+
+**Success rate varies.** Model quality, context size, language and how precisely
+the motion is described all matter. Expect several iterations: a model may
+produce invalid JSON, ignore a schema field, or pick amplitudes that exceed the
+tier limits. The preview and `pattern_check` exist to catch those cases; do not
+treat the first answer as final. Smaller or older free models are more likely to
+need manual correction.
 
 ---
 
