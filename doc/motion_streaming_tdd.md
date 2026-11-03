@@ -59,7 +59,8 @@ is 50 ms.
 
 - Sync frame, 10 Hz status frame, and the version-1 `.anim.json` schema,
   including `patterns/golden_sine.anim.json`: whitepaper §4.5 and §6.9.
-- `SET_ID` A/B: `Fly_Micro4_addressing.md` §3.
+- `ASK`, `DISC`, and `ASSIGN`: `Fly_Micro4_addressing.md` §3. The board ID
+  is volatile. The host map `(flash_id, axis) → position` is not on the wire.
 - The other clean cadences and the violation case are built in the test from
   that golden, as §6.9 describes.
 - `tests/fixtures/write_sine.py` is the generator in A8. The checker never
@@ -182,25 +183,26 @@ Whitepaper §3.2, §4.2, Appendix A.
 
 - [x] **I1** `id = (field << 4) | type`, and `id` is in `0 … 0x7FF`. A
   value above 0x7FF is rejected. There is no 29-bit encoder.
-- [x] **I2** Type 0 carries a motor ID in `1 … 120`. Type 1 is reserved and
-  rejected. Field 0 with type 0 is rejected. Motor IDs `121 … 127` are
-  rejected.
+- [ ] **I2** Type 0 carries a motor field in `0 … 119`. Motor 0 is legal.
+  Type 1 is reserved and rejected. Motor fields `120 … 127` are rejected.
+  The checked implementation still rejects field 0; update it to this rule.
 - [x] **I3** Type 2 (sync) requires field 0.
-- [x] **I4** Types 3–7 carry a node ID in `1 … 30`, or 0 for a broadcast.
-  Node ID 31 is rejected.
-- [x] **I5** Types 8, 10 and 11 (`DISC`, `SET_ID` A/B) require field 0.
-  Type 9 (`HELLO`) carries the short node ID.
+- [ ] **I4** Types 3–7 carry a board ID in `0 … 29`, or 127 for every board.
+  Fields `30 … 126` are rejected. Field 0 is board 0.
+- [ ] **I5** Types 8 (`DISC`) and 11 (`ASK`) require field 0. Type 10
+  (`ASSIGN`) carries the new board ID in the field. Type 9 is rejected.
 - [x] **I6** Types 12–15 are rejected.
-- [x] **I7** Motor 5 / type 0 and node 5 / type 3 produce different
-  identifiers. The decoder reports a motor for type 0 and a node for
-  types 3–7 and 9.
-- [x] **I8** Node *n* owns motors `4(n−1)+1 … 4(n−1)+4`. Node 1 owns 1–4.
-  Node 30 owns 117–120. Node 0 and node 31 own nothing.
-- [x] **I9** Node *n* accepts motion (type 0) for its four motors, frames
-  addressed to node *n*, and field 0. A motion frame for any other motor is
-  discarded before the payload is parsed. A table drives all 30 nodes.
-- [x] **I10** **Property.** For every motor in `1 … 120` (type 0), exactly
-  one node accepts the frame.
+- [x] **I7** Motor 5 / type 0 and board 5 / type 3 produce different
+  identifiers. The decoder reports a motor for type 0 and a board for
+  types 3–7. Type 9 is rejected (I5).
+- [ ] **I8** Board *b* owns motors `4b … 4b+3`. Board 0 owns 0–3. Board 29
+  owns 116–119. Board IDs outside 0–29 own nothing.
+- [ ] **I9** Board *b* accepts motion for those four motors, frames
+  addressed to board *b*, field 127 on types 3–7, and field 0 on types
+  2, 8 and 11. Any other motion frame is discarded before the payload is
+  parsed. A table drives all 30 boards.
+- [ ] **I10** **Property.** For every motor in `0 … 119` (type 0), exactly
+  one board accepts the frame.
 
 ---
 
@@ -223,11 +225,11 @@ Whitepaper §4.2, §4.3, §4.5. Addressing §3.
 - [ ] **P6** Command, home, and parameter frames are types 4, 5, and 6.
   A motion decoder ignores them. Homing bytes are not part of the motion
   sample buffer.
-- [ ] **P7** `DISC` payload is exactly the 8-byte flash ID. `HELLO`
-  payload is the same 8 bytes, with the short node ID in the CAN ID.
-- [ ] **P8** `SET_ID` A and B match `Fly_Micro4_addressing.md` §3. The node
-  accepts B only when bytes 0–3 equal its flash-ID prefix. A single 8-byte
-  frame is rejected.
+- [ ] **P7** `DISC` and `ASSIGN` payloads are exactly the 8-byte flash ID,
+  little-endian. `ASK` is 8 zero bytes.
+- [ ] **P8** `ASSIGN` is one frame, type 10, field = board ID 0–29, payload
+  = the flash ID. The board stores that field only when the payload matches
+  its own flash ID. A second frame is not required.
 - [ ] **P9** The per-node alternate (four 16-bit positions, one frame per
   node) packs and unpacks. A flag on the unpacked frame says it is not the
   per-motor baseline.
@@ -387,24 +389,26 @@ and a clock the test advances.
 
 Addressing §1–§3. No flash chip: the test supplies an 8-byte ID.
 
-- [ ] **M1** The master table is `flash_id → short_id → grid_position`.
-  Lookup is exact for 30 entries.
-- [ ] **M2** A second node that advertises an already assigned flash ID
-  is rejected. A second node that claims an already assigned short ID
-  is rejected.
-- [ ] **M3** An unassigned node emits `DISC` only. An assigned node emits
-  `HELLO` with its short ID and its flash ID.
-- [ ] **M4** Backoff is a pure function of the flash ID (10-bit hash ×
-  5 ms). The same ID always yields the same delay. The identifier of
-  that frame stays 11-bit.
-- [ ] **M5** `SET_ID` is two frames (P8). After both frames the node's
-  stored short ID matches the assignment, and the next frame it emits
-  is `HELLO`.
-- [ ] **M6** If the master table is empty and a node still has a stored
-  short ID, the node sends `HELLO` and the master can reassign. A test
-  covers both "table confirms" and "table reassigns".
-- [ ] **M7** Discovery frames are absent from a playback trace. A test
-  that injects `DISC` during an active pattern fails the scheduler check.
+- [ ] **M1** The host table is `(flash_id, axis 0–3) → position 0–119`,
+  plus `flash_id → board_id`. Lookup of 30 entries is exact. The board
+  under test has no position value.
+- [ ] **M2** A repeated advertisement of a known flash ID is assigned the
+  same board ID. A second board claiming that board ID is not given it.
+- [ ] **M3** A board with no board ID answers `ASK` with one `DISC`. A
+  board that already has a board ID stays silent.
+- [ ] **M4** The advertise delay is `1 ms × (flash_id byte 0 mod 10)`,
+  measured from the `ASK`. The same flash ID always waits the same
+  amount, and the wait is under 10 ms. The `DISC` identifier is field 0,
+  type 8.
+- [ ] **M5** `ASSIGN` is the single frame in P8. After a matching payload
+  the board's stored board ID equals the CAN field, and the next `ASK`
+  draws no `DISC` from that board.
+- [ ] **M6** Clearing the board's RAM ID makes it unidentified. The next
+  `ASK` produces a `DISC`, and the master assigns the board ID already
+  stored for that flash ID. The host position map is unchanged.
+- [ ] **M7** The master sends `ASK` every 5 s, including while a pattern
+  is playing. Identified boards still do not answer. An `ASK` that
+  receives no `DISC` ends the startup loop.
 
 ---
 

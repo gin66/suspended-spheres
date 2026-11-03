@@ -1212,7 +1212,7 @@ shows the result while it is running. The agent is another editor of the file.
 |----------|------------|
 | Time | `int64` µs. Master, local, and eval time are §4.9. Sync carries `t_us_low`, `dt_us`, `n`, and `seq` (§4.5) |
 | Position | int32 µm in the core; wire format is 16-bit full-range (0–2000 mm; 65535 = 2000 mm; LSB 0.0305 mm) |
-| Axis order | Local axes 0..3 are Drive0–Drive3 in silkscreen order. Motor IDs and node IDs are in `Fly_Micro4_addressing.md` |
+| Axis order | Drive0–Drive3 are local axes 0–3. The motor field is `board_id × 4 + axis`. Grid position 0–119 is a host map from `(flash_id, axis)` and is unknown to the board (`Fly_Micro4_addressing.md`) |
 | Sample | Absolute position at a timeline tick; no deltas in the baseline |
 | Playback | One cubic per message: `p0, v0, a0, j`. Integer Horner, §4.7 |
 | Step chunk | 2 ms, `|steps| ≤ 128`, `ticks ∈ [3200, 65535]` at 16 MHz |
