@@ -48,8 +48,23 @@
     #file-input input[type="file"] {
       color: #e0e0e0; font-size: 13px;
     }
+    #file-input .field {
+      margin-top: 12px; padding-top: 10px; border-top: 1px solid #2a2a3a;
+    }
+    #file-input select {
+      width: 100%; background: #2a2a3a; color: #e0e0e0;
+      border: 1px solid #4a4a5a; padding: 5px 8px; border-radius: 4px;
+      font-size: 13px;
+    }
+    #file-input .inline {
+      display: flex; align-items: center; gap: 6px; margin-top: 8px;
+      text-transform: none; letter-spacing: 0; font-size: 11px;
+      color: #8a8aaa;
+    }
+    #file-input .inline input { margin: 0; }
+    #pattern-status { margin-top: 6px; font-size: 11px; color: #8a8aaa; }
     #show-list {
-      position: absolute; top: 110px; left: 20px;
+      position: absolute; top: 220px; left: 20px;
       background: rgba(20, 20, 30, 0.9); padding: 12px;
       border-radius: 8px; pointer-events: all; max-width: 230px;
       backdrop-filter: blur(10px);
@@ -100,6 +115,17 @@
     <div id="file-input">
       <label>Load Pattern File</label>
       <input type="file" id="pattern-file" accept=".anim.json">
+      <div class="field">
+        <label>Project Patterns</label>
+        <select id="pattern-select">
+          <option value="">Connecting…</option>
+        </select>
+        <label class="inline">
+          <input type="checkbox" id="pattern-autoreload" checked>
+          Auto reload on save
+        </label>
+        <div id="pattern-status">Available on the Vite dev server</div>
+      </div>
     </div>
     <div id="show-list">
       <h3>Animations</h3>

@@ -452,14 +452,17 @@ Whitepaper §6.4, §6.6, §6.9. Headless. No browser.
   | `Δt` / `N` that push the bus to or above 60 % | violation (B4) |
   | A 2 ms chunk that would exceed 128 steps | violation (S4) |
 
-- [x] **A6** `.hbp` is written only when `violations` is empty. It is a
-  zip with `manifest.json` (grid, units, cadence, duration, calibration),
-  `trajectory.bin` (int32 µm, little-endian), and `sha256.txt` over those
-  members. A dirty report leaves no new zip, or leaves the previous zip
-  untouched.
-- [x] **A7** Unpacking `.hbp` and running `mc_eval` reproduces
-  `trajectory.bin`. Packing that trajectory with P1 or P2 reproduces the
-  wire bytes the manifest names.
+- [x] **A6** `.hbp` is written only when `violations` is empty. It is one
+  self-describing **HBP2** playback file: a JSON header (grid, cadence,
+  window, codec, calibration, SHA-256), a block table, and precomputed
+  8-byte wire frames in window-major order. Each block has a CRC32. A dirty
+  report leaves no new file and does not touch the previous file.
+- [x] **A7** Reading HBP2 returns the wire frames and metadata. Consecutive
+  frames join within one LSB: `p0` and `v0` match the previous frame
+  evaluated at the window end. Evaluating a frame with
+  `mc_segment_eval_um` reproduces the window-end trajectory sample within
+  one wire code.
+  Packing a frame with P1 and unpacking it returns the same four fields.
 - [x] **A8** `tests/fixtures/write_sine.py` writes a version-1 `.anim.json`.
   The test process may run that script. The checker accepts the JSON it
   wrote. The checker returns a parse error when its input path ends in

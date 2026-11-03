@@ -1056,17 +1056,27 @@ designer's request and can move a sphere the pattern did not name.
 
 ### 6.6 Export and live streaming
 
-**Installation export** (`.hbp`, a zip). The sim watches `.anim.json`, not this zip (§6.9). A clean report is what produces it:
+**Installation export** (`.hbp`, one HBP2 file). The sim watches
+`.anim.json`, not this file (§6.9). A clean report is what produces it:
 
 ```
-manifest.json      # version, grid, units, sample rate, duration, calibration
-trajectory.bin     # int32 µm, axis-major or frame-major, little-endian
-preview.png        # optional
-sha256.txt
+HBP2 header        # version, grid, cadence, window, codec, calibration, sha256
+block table        # block offsets, sizes and CRC32
+frames             # precomputed 8-byte cubic frames, window-major
 ```
+
+The body is already the wire stream: `p0:u16, v0:s16, a0:s16, j:s16`, one frame
+per motor per `N·Δt`. There is no raw 32-bit trajectory in the playback file.
+`duration_ms` is the authored take; `playback_ms` is a whole number of windows
+and may be up to one window longer. A short final window is padded to the full
+`N·Δt` and finishes at rest, so the master can stop without a jump.
+The block table makes the file streamable on the panel and allows a bad block
+to stop the show rather than corrupt it. The `codec` field is `none` today;
+a block codec can be added without changing the frame layout.
 
 Include the exact sample format, cadence, axis order and calibration so the
-file is self-describing.
+file is self-describing. The embedded master reads HBP2 blocks from SD into a
+PSRAM ring ahead of the window; it never fits or bakes motion.
 
 **Live streaming:** a local bridge process (Python or Node) owns the USB-CAN
 adapter; the web app talks to it over WebSocket. Do not try to drive a USB-CAN
@@ -1132,7 +1142,7 @@ updates the running preview.
 |------|------|
 | `patterns/<name>.anim.json` | Authoring source. Schema version 1, below. This is the file the sim watches |
 | `patterns/<name>.report.json` | Written on every bake: violations with ball, time, limit, measured value, allowed value. Empty `violations` means the take may be exported |
-| `patterns/<name>.hbp` | Baked export for the installation. Written only from a clean report |
+| `patterns/<name>.hbp` | One HBP2 playback file with precomputed wire frames. Written only from a clean report |
 | `patterns/<name>.py` | Optional generator. A person or an agent runs it; it writes the `.anim.json`. The checker and the sim read only the JSON |
 
 Version 1 is a JSON object. Every number is an integer. A missing required

@@ -57,6 +57,12 @@ target_include_directories(motion_core_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
+# Headless authoring tool: bake one file, write its report, optionally export.
+add_executable(pattern_check
+    "${CMAKE_CURRENT_SOURCE_DIR}/../tools/pattern_check.cpp"
+)
+target_link_libraries(pattern_check PRIVATE pattern_core)
+
 # H3: forbid float and double in the core directory.  The scan covers the
 # public headers and the sources; comments are stripped first.
 set(CORE_FILES "${MOTION_CORE_DIR}/include/motion_core.h")

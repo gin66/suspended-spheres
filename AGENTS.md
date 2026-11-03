@@ -29,6 +29,7 @@ Suspended_Spheres/
 │   ├── assert.h
 │   ├── test_runner.cpp
 │   └── abi_c.c
+├── tools/                      # Headless pattern checker (pattern_check)
 ├── wasm/                       # Native/Emscripten parity driver
 ├── webapp/                     # Vite + Three.js designer viewer
 ├── patterns/                   # .anim.json sources and the golden sine
@@ -73,6 +74,19 @@ All technical Markdown belongs in `doc/`. Only `README.md` and `AGENTS.md` sit a
   Without `emcc` the script builds the native side and reports that the WASM
   driver is absent. Rebuild the browser core, which is checked in so the viewer
   runs without Emscripten, with `./wasm/build_viewer.sh`.
+- **Pattern authoring loop.** Patterns live in `patterns/<name>.anim.json`;
+  schema and layer semantics are in the whitepaper §6.9. After editing or
+  generating one, run:
+  ```sh
+  cmake --build build
+  ./build/pattern_check patterns/<name>.anim.json
+  ```
+  It writes `patterns/<name>.report.json` and exits non-zero on violations.
+  Add `--hbp patterns/<name>.hbp` to export a clean take as one HBP2 playback
+  file. With `npm run dev`
+  in `webapp/`, the viewer lists the files in `patterns/`, watches the selected
+  one, and rebakes on save. The agent loop is: edit the JSON or generator, run
+  `pattern_check`, read the report, repeat until `violations` is empty.
 - **Markdown + SI units.** Use metres, seconds, kilograms, newtons, and watts. Keep tables aligned with the surrounding style.
 - **Source of truth:** requirements in `doc/system_requirements.md`; physics in `doc/mechanical_analysis.md`; platform and bus decisions in `doc/controller_analysis.md`; motion payloads in `doc/motion_streaming_whitepaper.md`; node identity and CAN-ID allocation in `doc/Fly_Micro4_addressing.md`; the host test plan in `doc/motion_streaming_tdd.md`; risks in `doc/RISK.md`.
 - **No duplicated calculations outside `doc/`.** `AGENTS.md` and `README.md` describe the project; they do not carry datasheets, torque tables, or protocol frames.

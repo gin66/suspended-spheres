@@ -208,6 +208,15 @@ static int test_a3_layers(void) {
         ASSERT(r.ok());
         for (int32_t s : t.samples)
             ASSERT(s >= 0 && s <= 2000000);
+        std::vector<mc_segment_t> frames;
+        int window_ms = 0;
+        std::string err;
+        if (!pc::make_wire_frames(f, t, &frames, &window_ms, &err)) {
+            fprintf(stderr, "layer op %d: %s\n", (int)op, err.c_str());
+            ASSERT(false);
+        }
+        ASSERT(window_ms == f.n * f.dt_ms);
+        ASSERT(!frames.empty());
     }
 
     /* The seeded walk repeats exactly and changes with the seed. */
@@ -417,19 +426,34 @@ static int test_a6_hbp(void) {
     ASSERT(pc::write_hbp(path, f, t, &err));
 
     std::vector<unsigned char> raw = read_bytes(path);
-    ASSERT(raw.size() > 22);
-    ASSERT(raw[0] == 'P' && raw[1] == 'K');
+    ASSERT(raw.size() > 16);
+    ASSERT(raw[0] == 'H' && raw[1] == 'B' && raw[2] == 'P' && raw[3] == '2');
     std::string raw_text((const char *)raw.data(), raw.size());
-    ASSERT(contains(raw_text, "manifest.json"));
-    ASSERT(contains(raw_text, "trajectory.bin"));
-    ASSERT(contains(raw_text, "sha256.txt"));
+    ASSERT(contains(raw_text, "\"wire\":\"p0u16_v0s16_a0s16_js16\""));
+    ASSERT(contains(raw_text, "\"codec\":\"none\""));
+    ASSERT(contains(raw_text, "\"layout\":\"window-major\""));
 
-    pc::AnimFile rf;
-    pc::Trajectory rt;
-    ASSERT(pc::read_hbp(path, &rf, &rt, &err));
-    ASSERT(rf.cols == f.cols && rf.rows == f.rows);
-    ASSERT(rf.dt_ms == f.dt_ms && rf.n == f.n);
-    ASSERT(rt.samples == t.samples);
+    pc::Playback pb;
+    ASSERT(pc::read_hbp(path, &pb, &err));
+    ASSERT(pb.file.cols == f.cols && pb.file.rows == f.rows);
+    ASSERT(pb.file.dt_ms == f.dt_ms && pb.file.n == f.n);
+    ASSERT(pb.window_ms == f.n * f.dt_ms);
+    ASSERT(pb.window_count > 0);
+    ASSERT(pb.frames.size() ==
+           (size_t)pb.window_count * f.cols * f.rows);
+    ASSERT(pb.codec == "none");
+
+    /* A corrupted block is rejected before the show can use it. */
+    std::vector<unsigned char> corrupt = raw;
+    corrupt.back() ^= 0xFF;
+    const std::string bad_path = "/tmp/suspended_spheres_corrupt.hbp";
+    {
+        std::ofstream out(bad_path, std::ios::binary);
+        out.write((const char *)corrupt.data(), (std::streamsize)corrupt.size());
+    }
+    pc::Playback bad;
+    ASSERT(!pc::read_hbp(bad_path, &bad, &err));
+    std::remove(bad_path.c_str());
 
     /* A dirty take must not replace the previous export. */
     pc::AnimFile dirty = f;
@@ -443,7 +467,7 @@ static int test_a6_hbp(void) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  A7 — .hbp replays through the core and packs with P1               */
+/*  A7 — HBP2 frames join and replay through the core                   */
 /* ------------------------------------------------------------------ */
 
 static int test_a7_hbp_replay(void) {
@@ -454,34 +478,44 @@ static int test_a7_hbp_replay(void) {
     std::string err;
     ASSERT(pc::write_hbp(path, f, t, &err));
 
-    pc::AnimFile rf;
-    pc::Trajectory rt;
-    ASSERT(pc::read_hbp(path, &rf, &rt, &err));
+    pc::Playback pb;
+    ASSERT(pc::read_hbp(path, &pb, &err));
+    ASSERT(pb.window_ms == f.n * f.dt_ms);
 
-    const int dt_us = rt.dt_ms * 1000;
-    for (int b = 0; b < rt.ball_count(); ++b) {
-        for (int fr = 0; fr < rt.frame_count; ++fr) {
-            int32_t p = rt.at(fr, b);
-            mc_segment_t seg = {mc_um_to_code(p), 0, 0, 0};
-            ASSERT(mc_segment_eval_um(&seg, 0) ==
-                   mc_code_to_um(mc_um_to_code(p)));
-
-            if (fr > 0) {
-                int32_t prev = rt.at(fr - 1, b);
-                int16_t v = mc_speed_encode(
-                    (int32_t)(((int64_t)p - prev) * 1000000 / dt_us));
-                mc_segment_t s = {mc_um_to_code(prev), v, 0, 0};
-                mc_core_reset();
-                ASSERT(mc_trajectory_push(0, 0, 0, dt_us, &s) == 0);
-                int32_t end = mc_eval(0, dt_us);
-                ASSERT(abs_i32(end - p) <= 15300);
-            }
+    const int balls = f.cols * f.rows;
+    const int64_t T = (int64_t)pb.window_ms * 1000;
+    for (int b = 0; b < balls; ++b) {
+        for (int w = 0; w < pb.window_count; ++w) {
+            const mc_segment_t &fr = pb.frames[(size_t)w * balls + b];
 
             uint8_t wire[8];
-            ASSERT(mc_pack_frame(0, &seg, wire) == 0);
+            ASSERT(mc_pack_frame(0, &fr, wire) == 0);
             mc_segment_t back;
             ASSERT(mc_unpack_frame(wire, 8, 0, &back) == 0);
-            ASSERT(back.p0 == mc_um_to_code(p));
+            ASSERT(back.p0 == fr.p0 && back.v0 == fr.v0);
+            ASSERT(back.a0 == fr.a0 && back.j == fr.j);
+
+            ASSERT(mc_code_to_um(fr.p0) >= 0);
+            ASSERT(mc_code_to_um(fr.p0) <= 2000000);
+
+            if (w > 0) {
+                const mc_segment_t &prev = pb.frames[(size_t)(w - 1) * balls + b];
+                const int32_t prev_end = mc_segment_eval_um(&prev, T);
+                const int32_t prev_speed = mc_segment_speed_um_s(&prev, T);
+                ASSERT(abs_i32((int32_t)fr.p0 -
+                               mc_um_to_code(prev_end)) <= 1);
+                ASSERT(abs_i32((int32_t)fr.v0 -
+                               mc_speed_encode(prev_speed)) <= 1);
+            }
+
+            const int end_frame = std::min((w + 1) * f.n, t.frame_count - 1);
+            const int32_t end_um = mc_segment_eval_um(&fr, T);
+            ASSERT(abs_i32(end_um - t.at(end_frame, b)) <= 30500);
+
+            const int32_t a0 = (int32_t)fr.a0 * 1000;
+            const int32_t a_end = a0 + (int32_t)fr.j * (int32_t)T;
+            ASSERT(a0 >= -9810000);
+            ASSERT(a_end >= -9810000);
         }
     }
     return 0;

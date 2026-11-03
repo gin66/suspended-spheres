@@ -60,6 +60,7 @@ Suspended_Spheres/
 │   ├── motion_core/            # Shared integer motion core (PC and firmware)
 │   └── pattern_core/           # Pattern bake, limits, report and .hbp export
 ├── tests/                      # Host-only harness (CMake; no hardware)
+├── tools/                      # Headless pattern checker
 ├── wasm/                       # Native/WASM parity driver
 ├── rp2040/                     # Fly-Micro4 firmware (PlatformIO)
 ├── webapp/                     # Designer 3D viewer (Vite + Three.js)
@@ -176,6 +177,123 @@ from a CDN, so an internet connection is required either way.
 | Blank page when opening `index.html` directly | Do not double-click the file; use `npm run dev` or the Python server above |
 | Address already in use | `npm run dev -- --port 5174`, or pick another Python port |
 | The 3D view does not load | Check the internet connection; Three.js comes from a CDN |
+
+---
+
+## Create and edit animations
+
+Patterns are plain `.anim.json` files in [`patterns/`](patterns/). The version-1
+schema and layer types are described in the whitepaper §6.9. An agent such as
+opencode can edit these files directly.
+
+The authoring loop is:
+
+1. Start the viewer with `npm run dev` in `webapp/`.
+2. Select a file under **Project Patterns**. The viewer watches it and reloads
+   automatically when the file is saved.
+3. Edit or generate `patterns/<name>.anim.json` with opencode, or ask opencode
+   to create a new one.
+4. Check it from the repository root:
+
+   ```sh
+   cmake --build build
+   ./build/pattern_check patterns/<name>.anim.json
+   ```
+
+   The checker writes `patterns/<name>.report.json` and exits non-zero if the
+   take breaks travel, speed, acceleration, step or bus limits.
+5. Read the report, adjust the JSON, and repeat until `violations` is empty.
+6. Optionally export a clean take:
+
+   ```sh
+   ./build/pattern_check patterns/<name>.anim.json \
+     --hbp patterns/<name>.hbp
+   ```
+
+   The `.hbp` file is a single HBP2 playback container with precomputed
+   8-byte wire frames and a block table, ready for the Waveshare SD card.
+
+For files loaded through the **Project Patterns** list, the viewer shows the
+same violations in its banner and writes the report when it rebakes. A file
+that does not parse keeps the last good animation on screen and shows the parse
+error in the pattern status line.
+
+---
+
+## Use opencode's free models
+
+opencode includes a rotating list of **free, limited-time models** served by
+OpenCode Console. You do not need Ollama, a separate provider, or a paid
+subscription to try them. Availability changes often, so `/models` inside
+opencode is the authoritative list.
+
+### 1. Install opencode
+
+```sh
+curl -fsSL https://opencode.ai/install | bash
+```
+
+Alternatives are `brew install anomalyco/tap/opencode` on macOS/Linux or
+`npm install -g opencode-ai` if Node.js is already installed.
+
+### 2. Connect the OpenCode provider
+
+1. Run `opencode` from this repository.
+2. Run `/connect` and choose **OpenCode** / **OpenCode Console**.
+3. Sign in at <https://opencode.ai/console>, create an API key if needed, and
+   paste it into opencode.
+4. Run `/models` and select a model whose name includes **Free**.
+
+The free models are under the `opencode/` provider. Current examples from the
+OpenCode Console catalogue (limited-time availability):
+
+| Model | Model selector |
+|-------|----------------|
+| GLM-5.3-Flash Free | `opencode/glm-5.3-flash-free` |
+| DeepSeek V4.1 Flash Free | `opencode/deepseek-v4.1-flash-free` |
+| MiMo-V2.6-Flash Free | `opencode/mimo-v2.6-flash-free` |
+| Nemotron 3 Ultra Free | `opencode/nemotron-3-ultra-free` |
+| Nemotron 3.5 Lightning Free | `opencode/nemotron-3.5-lightning-free` |
+| Nemotron 3.5 Super VL Free | `opencode/nemotron-3.5-super-vl-free` |
+| Big Pickle | `opencode/big-pickle` |
+| Pulse Alpha Free | `opencode/pulse-alpha-free` |
+| Beam Free | `opencode/beam-free` |
+| Flint 40B Free | `opencode/flint-40b-free` |
+| Jev 1.13 Free | `opencode/jev-1.13-free` |
+
+Some models are region-restricted. The list, limits, and privacy terms can
+change without notice; check `/models` and the OpenCode Console before relying
+on one.
+
+### 3. Optional: make one the default
+
+Select it once with `/models`, or put its exact selector in `opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "opencode/glm-5.3-flash-free"
+}
+```
+
+For a one-off run:
+
+```sh
+opencode run --model opencode/deepseek-v4.1-flash-free "Explain the motion core"
+```
+
+### If the free models do not appear
+
+- Make sure `/connect` finished and the OpenCode provider is signed in.
+- Remove `OPENCODE_DISABLE_FREE_MODELS` from the environment; setting it to `1`
+  hides free models.
+- Run `/models` again. A signed-out OpenCode provider is absent, so connecting
+  the account is what restores the catalogue.
+
+Do not commit API keys. opencode stores credentials in
+`~/.local/share/opencode/auth.json`; keep that file private. Some free models
+may use submitted data for training or feedback—check the Console privacy notes
+before using confidential material.
 
 ---
 

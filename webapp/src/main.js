@@ -112,6 +112,7 @@ function showFromHandle(name, handle) {
     layers,
     n_layers: nLayers,
     report: reportFromHandle(handle),
+    report_json: pc.report(handle),
   };
 }
 
@@ -327,6 +328,13 @@ let currentShowIndex = -1;
 let prevShow = null;
 let currentCycleMs = 5000;
 let currentReport = { count: 0, violations: [] };
+
+let patternNamesKey = null;
+let patternPollTimer = null;
+let selectedPatternName = '';
+let selectedPatternHash = '';
+let patternLoading = false;
+let autoReloadPatterns = true;
 
 let simTimeMs = 0;
 let lastFrameMs = null;
@@ -615,6 +623,156 @@ document.getElementById('timeline').addEventListener('click', (e) => {
 });
 
 // ---------------------------------------------------------------------------
+// Project pattern catalogue (Vite dev server)
+// ---------------------------------------------------------------------------
+
+function setPatternStatus(text) {
+  const el = document.getElementById('pattern-status');
+  if (el) el.textContent = text;
+}
+
+async function fetchPatternCatalog() {
+  const res = await fetch('/api/patterns', { cache: 'no-store' });
+  if (!res.ok) throw new Error('pattern API unavailable');
+  const data = await res.json();
+  return data.patterns || [];
+}
+
+function populatePatternSelect(patterns) {
+  const select = document.getElementById('pattern-select');
+  const key = patterns.map((p) => p.name).join('\n');
+  if (key === patternNamesKey) return;
+  patternNamesKey = key;
+
+  const keep = selectedPatternName || select.value;
+  select.innerHTML = '';
+  const blank = document.createElement('option');
+  blank.value = '';
+  blank.textContent = patterns.length ? 'Choose a pattern...' : 'No patterns found';
+  select.appendChild(blank);
+  for (const pattern of patterns) {
+    const option = document.createElement('option');
+    option.value = pattern.name;
+    option.textContent = pattern.name.replace(/\.anim\.json$/, '');
+    select.appendChild(option);
+  }
+  select.value = patterns.some((p) => p.name === keep) ? keep : '';
+}
+
+async function postReport(name, reportText) {
+  if (!reportText) return;
+  try {
+    await fetch('/api/report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, report: reportText }),
+    });
+  } catch {
+    /* the CLI can still write the report */
+  }
+}
+
+async function loadCatalogPattern(name, activate = true) {
+  if (!pc || patternLoading) return;
+  patternLoading = true;
+  try {
+    const res = await fetch(`/api/pattern?name=${encodeURIComponent(name)}`,
+                            { cache: 'no-store' });
+    if (!res.ok) {
+      setPatternStatus(`${name}: cannot read file`);
+      return;
+    }
+    const data = await res.json();
+    selectedPatternName = name;
+    selectedPatternHash = data.hash;
+
+    const handle = pc.load(data.text, 1);
+    if (!handle) {
+      setPatternStatus(`${name}: ${pc.lastError()}`);
+      return;
+    }
+
+    const show = showFromHandle(name.replace(/\.anim\.json$/, ''), handle);
+    show.sourceName = name;
+    const existing = shows.findIndex((s) => s.sourceName === name);
+    if (existing >= 0) {
+      shows[existing] = show;
+      if (activate || currentShowIndex === existing)
+        selectShow(existing, false);
+    } else {
+      shows.push(show);
+      if (activate || currentShowIndex < 0)
+        selectShow(shows.length - 1, false);
+    }
+
+    selectedPatternName = name;
+    document.getElementById('pattern-select').value = name;
+    localStorage.setItem('suspended-spheres-pattern', name);
+
+    const report = show.report;
+    setPatternStatus(report.count
+      ? `${name}: ${report.count} violation(s)`
+      : `${name}: clean`);
+    await postReport(name, show.report_json);
+  } catch (err) {
+    setPatternStatus(`${name}: ${err.message}`);
+  } finally {
+    patternLoading = false;
+  }
+}
+
+async function pollPatternCatalog() {
+  if (!autoReloadPatterns || !selectedPatternName || patternLoading) return;
+  try {
+    const patterns = await fetchPatternCatalog();
+    populatePatternSelect(patterns);
+    const entry = patterns.find((p) => p.name === selectedPatternName);
+    if (!entry) {
+      setPatternStatus(`${selectedPatternName}: removed`);
+      return;
+    }
+    if (entry.hash !== selectedPatternHash) {
+      setPatternStatus(`${selectedPatternName}: changed, reloading...`);
+      await loadCatalogPattern(selectedPatternName, false);
+    }
+  } catch {
+    /* the Vite API disappears in a production build */
+  }
+}
+
+async function initPatternBrowser() {
+  const select = document.getElementById('pattern-select');
+  const auto = document.getElementById('pattern-autoreload');
+
+  select.addEventListener('change', (e) => {
+    if (!e.target.value) return;
+    selectedPatternName = e.target.value;
+    loadCatalogPattern(e.target.value, true);
+  });
+  auto.addEventListener('change', (e) => {
+    autoReloadPatterns = e.target.checked;
+  });
+
+  try {
+    const patterns = await fetchPatternCatalog();
+    populatePatternSelect(patterns);
+    setPatternStatus(`${patterns.length} pattern(s) in patterns/`);
+
+    const saved = localStorage.getItem('suspended-spheres-pattern');
+    if (saved && patterns.some((p) => p.name === saved)) {
+      select.value = saved;
+      await loadCatalogPattern(saved, true);
+    }
+    patternPollTimer = setInterval(pollPatternCatalog, 500);
+  } catch {
+    select.innerHTML = '<option value="">Dev server only</option>';
+    select.disabled = true;
+    auto.disabled = true;
+    setPatternStatus('Run npm run dev to watch patterns/');
+  }
+}
+
+// ---------------------------------------------------------------------------
 // File loading (adds a show to the list)
 // ---------------------------------------------------------------------------
 
@@ -631,6 +789,11 @@ document.getElementById('pattern-file').addEventListener('change', async (event)
     const name = file.name.replace(/\.anim\.json$/, '').replace(/\.json$/, '') || 'Loaded';
     shows.push(showFromHandle(name, handle));
     selectShow(shows.length - 1);
+    selectedPatternName = '';
+    selectedPatternHash = '';
+    localStorage.removeItem('suspended-spheres-pattern');
+    document.getElementById('pattern-select').value = '';
+    setPatternStatus('Manual file loaded');
   } catch (err) {
     alert('Error loading pattern: ' + err.message);
   }
@@ -650,6 +813,7 @@ async function initViewer() {
   updateShowButtons();
   selectShow(1, false); // start on the X/Y showcase
   requestAnimationFrame(animate);
+  initPatternBrowser();
 }
 
 initViewer();

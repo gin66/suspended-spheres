@@ -35,9 +35,9 @@ project's heater bus.
 
 ## 2. What the panel does
 
-- Plays a baked pattern by calling `lib/motion_core` and sending the frames
-  that whitepaper defines: cubic motion, sync, and the ASK / DISC / ASSIGN
-  commissioning exchange.
+- Plays an HBP2 playback file from microSD: precomputed cubic frames, sync,
+  and the ASK / DISC / ASSIGN commissioning exchange. The panel does not
+  bake or fit motion.
 - Shows run / stop, the active pattern, grid health, and faults on the
   800 × 480 panel.
 - Stops the show on the panel when a node or the bus reports a fault. The
@@ -45,6 +45,38 @@ project's heater bus.
 
 The panel does not author patterns and does not draw the Three.js view.
 Those stay on the PC.
+
+---
+
+## 2.1 Storage and SD-card playback
+
+Authoring and baking stay on the PC. The panel reads one **HBP2** file from
+microSD (CH422G IO4 is the card-select line). The file is the single playback
+format:
+
+```
+HBP2 header      # grid, cadence, window, codec, calibration, sha256
+block table      # offsets, sizes, CRC32 per block
+frames           # 8-byte cubic wire frames, window-major
+```
+
+- The body is already the wire stream (`p0:u16, v0:s16, a0:s16, j:s16`), one
+  frame per motor per `N·Δt`. No trajectory fitting or pattern bake runs on
+  the panel.
+- The `show` task consumes a PSRAM ring buffer. A separate low-priority task
+  reads ahead from SD, checks each block CRC, and fills the ring. One second
+  of frames is about 32 KB at `N=3`, `Δt=10 ms`.
+- Missing SD, a corrupt block, a short read, or a SHA-256 mismatch stops the
+  show with a safe hold and a log entry. It never continues with stale or
+  partial frames.
+- `codec` is `none` in the first firmware. Compression, if added, is a
+  per-block codec: an 8–16 KB block decompresses independently, so one bad
+  block does not take down the file.
+- The panel verifies the header and block table at load time and shows the
+  pattern name, duration and codec on the Show screen.
+
+The PC still watches and bakes `.anim.json`; it only writes HBP2 when the
+report is clean.
 
 ---
 

@@ -1,72 +1,31 @@
-/* hbp.cpp — manifest, SHA-256, stored ZIP and .hbp export/import. */
+/* hbp.cpp — HBP2 playback container: precomputed wire frames for the
+ * installation master.  One file, block table, optional codec field. */
 
 #include "pattern_core/hbp.h"
 #include "json_internal.h"
 #include "pattern_core/limits.h"
-#include "motion_core.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <iterator>
 #include <sstream>
+#include <vector>
 
 namespace pc {
+namespace {
 
 using internal::JValue;
 using internal::JsonParser;
 using internal::get_int;
+using internal::get_string;
 
-namespace {
-
-/* ------------------------------------------------------------------ */
-
-std::string json_escape(const std::string &s) {
-    std::string out;
-    out.reserve(s.size() + 8);
-    for (char c : s) {
-        switch (c) {
-        case '"': out += "\\\""; break;
-        case '\\': out += "\\\\"; break;
-        case '\n': out += "\\n"; break;
-        case '\r': out += "\\r"; break;
-        case '\t': out += "\\t"; break;
-        default:
-            if ((unsigned char)c < 0x20) {
-                char buf[8];
-                std::snprintf(buf, sizeof(buf), "\\u%04x", (unsigned)c);
-                out += buf;
-            } else {
-                out.push_back(c);
-            }
-        }
-    }
-    return out;
-}
-
-std::string manifest_json(const AnimFile &file) {
-    std::ostringstream o;
-    o << "{"
-      << "\"version\":1,"
-      << "\"grid\":[" << file.cols << "," << file.rows << "],"
-      << "\"units\":\"um\","
-      << "\"sample_type\":\"int32\","
-      << "\"layout\":\"frame-major\","
-      << "\"axis_order\":\"ball\","
-      << "\"wire_format\":\"p0u16_v0s16_a0s16_js16\","
-      << "\"wire_stride\":8,"
-      << "\"cadence_ms\":" << file.dt_ms << ","
-      << "\"n\":" << file.n << ","
-      << "\"duration_ms\":" << file.duration_ms << ","
-      << "\"tier\":" << (int)file.tier << ","
-      << "\"calibration\":{\"steps_per_mm_q16\":"
-      << MC_STEPS_PER_MM_Q16 << "}"
-      << "}";
-    return o.str();
-}
+const int BLOCK_WINDOWS = 64;
+const size_t BLOCK_ENTRY_BYTES = 24;
 
 /* ------------------------------------------------------------------ */
-/*  CRC32, SHA-256 and a stored-only ZIP writer/reader                 */
+/*  SHA-256 and CRC32                                                 */
 /* ------------------------------------------------------------------ */
 
 uint32_t crc32_calc(const uint8_t *data, size_t len) {
@@ -87,7 +46,6 @@ uint32_t crc32_calc(const uint8_t *data, size_t len) {
     return c ^ 0xFFFFFFFFu;
 }
 
-/* SHA-256, FIPS 180-4. */
 struct Sha256 {
     uint32_t h[8] = {0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
                      0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u};
@@ -167,10 +125,9 @@ struct Sha256 {
     }
 };
 
-struct ZipMember {
-    std::string name;
-    std::vector<uint8_t> data;
-};
+/* ------------------------------------------------------------------ */
+/*  Little-endian helpers                                             */
+/* ------------------------------------------------------------------ */
 
 void put16(std::vector<uint8_t> &v, uint16_t x) {
     v.push_back((uint8_t)x);
@@ -190,130 +147,37 @@ uint32_t get32(const std::vector<uint8_t> &v, size_t p) {
            ((uint32_t)v[p+2] << 16) | ((uint32_t)v[p+3] << 24);
 }
 
-bool write_zip(const std::string &path, const std::vector<ZipMember> &members,
-               std::string *error) {
-    std::vector<uint8_t> out;
-    std::vector<uint32_t> offsets;
-    for (const auto &m : members) {
-        offsets.push_back((uint32_t)out.size());
-        uint32_t crc = crc32_calc(m.data.data(), m.data.size());
-        put32(out, 0x04034b50u);
-        put16(out, 20); put16(out, 0); put16(out, 0);
-        put16(out, 0); put16(out, 0);
-        put32(out, crc);
-        put32(out, (uint32_t)m.data.size());
-        put32(out, (uint32_t)m.data.size());
-        put16(out, (uint16_t)m.name.size());
-        put16(out, 0);
-        out.insert(out.end(), m.name.begin(), m.name.end());
-        out.insert(out.end(), m.data.begin(), m.data.end());
-    }
-    uint32_t cd_start = (uint32_t)out.size();
-    for (size_t i = 0; i < members.size(); ++i) {
-        const auto &m = members[i];
-        uint32_t crc = crc32_calc(m.data.data(), m.data.size());
-        put32(out, 0x02014b50u);
-        put16(out, 20); put16(out, 20); put16(out, 0); put16(out, 0);
-        put16(out, 0); put16(out, 0);
-        put32(out, crc);
-        put32(out, (uint32_t)m.data.size());
-        put32(out, (uint32_t)m.data.size());
-        put16(out, (uint16_t)m.name.size());
-        put16(out, 0); put16(out, 0);
-        put16(out, 0); put16(out, 0);
-        put32(out, 0);
-        put32(out, offsets[i]);
-        out.insert(out.end(), m.name.begin(), m.name.end());
-    }
-    uint32_t cd_size = (uint32_t)out.size() - cd_start;
-    put32(out, 0x06054b50u);
-    put16(out, 0); put16(out, 0);
-    put16(out, (uint16_t)members.size());
-    put16(out, (uint16_t)members.size());
-    put32(out, cd_size);
-    put32(out, cd_start);
-    put16(out, 0);
+/* ------------------------------------------------------------------ */
+/*  Frame planning                                                    */
+/* ------------------------------------------------------------------ */
 
-    std::ofstream f(path, std::ios::binary);
-    if (!f) {
-        if (error) *error = "cannot open output";
-        return false;
-    }
-    f.write((const char *)out.data(), (std::streamsize)out.size());
-    return (bool)f;
+int32_t velocity_um_s(const Trajectory &t, int frame, int ball) {
+    const int dt_us = t.dt_ms * 1000;
+    if (t.frame_count <= 1 || dt_us <= 0)
+        return 0;
+    if (frame <= 0)
+        return (int32_t)(((int64_t)t.at(1, ball) - t.at(0, ball)) *
+                         1000000 / dt_us);
+    if (frame >= t.frame_count - 1)
+        return (int32_t)(((int64_t)t.at(t.frame_count - 1, ball) -
+                          t.at(t.frame_count - 2, ball)) *
+                         1000000 / dt_us);
+    return (int32_t)(((int64_t)t.at(frame + 1, ball) -
+                      t.at(frame - 1, ball)) *
+                     1000000 / (2 * dt_us));
 }
 
-bool read_zip(const std::string &path, std::vector<ZipMember> *members,
-              std::string *error) {
-    std::ifstream f(path, std::ios::binary);
-    if (!f) {
-        if (error) *error = "cannot open zip";
+bool quantize_i16(double value, const char *name,
+                  int64_t min_value, int64_t max_value,
+                  std::string *error, int16_t *out) {
+    double rounded = std::round(value);
+    if (rounded < (double)min_value || rounded > (double)max_value) {
+        if (error) *error = std::string(name) + " out of wire range";
         return false;
     }
-    std::vector<uint8_t> buf((std::istreambuf_iterator<char>(f)),
-                             std::istreambuf_iterator<char>());
-    if (buf.size() < 22) {
-        if (error) *error = "zip too short";
-        return false;
-    }
-    size_t eocd = std::string::npos;
-    for (size_t i = buf.size() - 22 + 1; i-- > 0;) {
-        if (get32(buf, i) == 0x06054b50u) {
-            eocd = i;
-            break;
-        }
-    }
-    if (eocd == std::string::npos) {
-        if (error) *error = "no zip end record";
-        return false;
-    }
-    uint16_t count = get16(buf, eocd + 10);
-    uint32_t cd = get32(buf, eocd + 16);
-    size_t p = cd;
-    for (uint16_t i = 0; i < count; ++i) {
-        if (p + 46 > buf.size() || get32(buf, p) != 0x02014b50u) {
-            if (error) *error = "bad central directory";
-            return false;
-        }
-        uint16_t method = get16(buf, p + 10);
-        uint32_t crc = get32(buf, p + 16);
-        uint32_t csize = get32(buf, p + 20);
-        uint16_t nlen = get16(buf, p + 28);
-        uint16_t elen = get16(buf, p + 30);
-        uint16_t clen = get16(buf, p + 32);
-        uint32_t local = get32(buf, p + 42);
-        if (method != 0) {
-            if (error) *error = "compressed zip entry unsupported";
-            return false;
-        }
-        if (local + 30 > buf.size() || get32(buf, local) != 0x04034b50u) {
-            if (error) *error = "bad local header";
-            return false;
-        }
-        uint16_t lnlen = get16(buf, local + 26);
-        uint16_t lelen = get16(buf, local + 28);
-        size_t data_pos = (size_t)local + 30 + lnlen + lelen;
-        if (data_pos + csize > buf.size()) {
-            if (error) *error = "truncated zip entry";
-            return false;
-        }
-        ZipMember m;
-        m.name.assign((const char *)buf.data() + p + 46, nlen);
-        m.data.assign(buf.begin() + data_pos, buf.begin() + data_pos + csize);
-        if (crc32_calc(m.data.data(), m.data.size()) != crc) {
-            if (error) *error = "zip CRC mismatch";
-            return false;
-        }
-        members->push_back(std::move(m));
-        p += 46 + nlen + elen + clen;
-    }
+    *out = (int16_t)rounded;
     return true;
 }
-
-std::vector<uint8_t> to_bytes(const std::string &s) {
-    return std::vector<uint8_t>(s.begin(), s.end());
-}
-
 
 }  // namespace
 
@@ -331,6 +195,106 @@ std::string sha256_hex(const uint8_t *data, size_t size) {
     return out;
 }
 
+bool make_wire_frames(const AnimFile &file, const Trajectory &traj,
+                      std::vector<mc_segment_t> *frames, int *window_ms,
+                      std::string *error) {
+    if (error) error->clear();
+    if (!frames || !window_ms) {
+        if (error) *error = "null output";
+        return false;
+    }
+    frames->clear();
+
+    const int balls = file.cols * file.rows;
+    if (balls <= 0 || file.n <= 0 || file.dt_ms <= 0 || file.n > 120 ||
+        traj.frame_count < 2 ||
+        (int)traj.samples.size() < balls * traj.frame_count) {
+        if (error) *error = "trajectory does not match the file";
+        return false;
+    }
+
+    const int wms = file.n * file.dt_ms;
+    const int64_t t_us = (int64_t)wms * 1000;
+    const int windows = (traj.frame_count + file.n - 2) / file.n;
+    if (windows <= 0) {
+        if (error) *error = "empty trajectory";
+        return false;
+    }
+
+    std::vector<mc_segment_t> prev((size_t)balls);
+    frames->reserve((size_t)windows * balls);
+    const double T = (double)wms / 1000.0;
+
+    for (int w = 0; w < windows; ++w) {
+        const int start = w * file.n;
+        int end = start + file.n;
+        if (end >= traj.frame_count)
+            end = traj.frame_count - 1;
+
+        for (int b = 0; b < balls; ++b) {
+            int32_t p0_um;
+            int32_t v0_um_s;
+            if (w == 0) {
+                p0_um = traj.at(start, b);
+                v0_um_s = velocity_um_s(traj, start, b);
+            } else {
+                p0_um = mc_segment_eval_um(&prev[(size_t)b], t_us);
+                v0_um_s = mc_segment_speed_um_s(&prev[(size_t)b], t_us);
+            }
+            const bool partial = (end - start) < file.n;
+            const int32_t p1_um = traj.at(end, b);
+            /* A short final window still lasts N·Δt on the wire.  Finish
+             * that window at rest instead of forcing the interior velocity
+             * into a shorter distance. */
+            const int32_t v1_um_s = partial ? 0 : velocity_um_s(traj, end, b);
+            if (p0_um < 0 || p0_um > 2000000 ||
+                p1_um < 0 || p1_um > 2000000) {
+                if (error) *error = "frame leaves the travel";
+                return false;
+            }
+
+            const double dp = (double)p1_um - p0_um;
+            const double v0 = v0_um_s;
+            const double v1 = v1_um_s;
+            const double a0_um = 6.0 * dp / (T * T) - (4.0 * v0 + 2.0 * v1) / T;
+            const double j_um = 2.0 * ((v1 - v0) - a0_um * T) / (T * T);
+
+            mc_segment_t seg;
+            seg.p0 = mc_um_to_code(p0_um);
+            if (v0_um_s < -1310720 || v0_um_s > 1310719) {
+                if (error) *error = "speed out of wire range";
+                return false;
+            }
+            seg.v0 = mc_speed_encode(v0_um_s);
+            if (!quantize_i16(a0_um / 1000.0, "acceleration",
+                              -32768, 32767, error, &seg.a0))
+                return false;
+            if (!quantize_i16(j_um / 1000000.0, "jerk",
+                              -32768, 32767, error, &seg.j))
+                return false;
+
+            const int64_t a0_um_s2 = (int64_t)seg.a0 * 1000;
+            const int64_t a_end_um_s2 = a0_um_s2 + (int64_t)seg.j * t_us;
+            if (a0_um_s2 < -9810000 || a_end_um_s2 < -9810000) {
+                if (error) *error = "downward acceleration at window edge";
+                return false;
+            }
+
+            const int32_t p_end = mc_segment_eval_um(&seg, t_us);
+            if (p_end < 0 || p_end > 2000000) {
+                if (error) *error = "frame leaves the travel";
+                return false;
+            }
+
+            frames->push_back(seg);
+            prev[(size_t)b] = seg;
+        }
+    }
+
+    *window_ms = wms;
+    return true;
+}
+
 bool write_hbp(const std::string &path, const AnimFile &file,
                const Trajectory &traj, std::string *error) {
     CheckResult r = check(file, traj);
@@ -339,106 +303,222 @@ bool write_hbp(const std::string &path, const AnimFile &file,
         return false;
     }
 
-    std::string manifest = manifest_json(file);
-    std::vector<uint8_t> traj_bytes;
-    traj_bytes.reserve(traj.samples.size() * 4);
-    for (int32_t s : traj.samples) {
-        uint32_t u = (uint32_t)s;
-        traj_bytes.push_back((uint8_t)u);
-        traj_bytes.push_back((uint8_t)(u >> 8));
-        traj_bytes.push_back((uint8_t)(u >> 16));
-        traj_bytes.push_back((uint8_t)(u >> 24));
+    std::vector<mc_segment_t> frames;
+    int window_ms = 0;
+    if (!make_wire_frames(file, traj, &frames, &window_ms, error))
+        return false;
+
+    const int balls = file.cols * file.rows;
+    const int frame_count = (int)frames.size();
+    const int window_count = balls > 0 ? frame_count / balls : 0;
+    if (window_count <= 0) {
+        if (error) *error = "no playback windows";
+        return false;
     }
 
-    std::string sha_manifest = sha256_hex((const uint8_t *)manifest.data(),
-                                          manifest.size());
-    std::string sha_traj = sha256_hex(traj_bytes.data(), traj_bytes.size());
-    std::string sha = sha_manifest + "  manifest.json\n" +
-                      sha_traj + "  trajectory.bin\n";
+    std::vector<uint8_t> raw;
+    raw.reserve((size_t)frames.size() * 8);
+    for (const mc_segment_t &f : frames) {
+        put16(raw, f.p0);
+        put16(raw, (uint16_t)f.v0);
+        put16(raw, (uint16_t)f.a0);
+        put16(raw, (uint16_t)f.j);
+    }
+    const std::string sha = sha256_hex(raw.data(), raw.size());
 
-    std::vector<ZipMember> members;
-    members.push_back({"manifest.json", to_bytes(manifest)});
-    members.push_back({"trajectory.bin", traj_bytes});
-    members.push_back({"sha256.txt", to_bytes(sha)});
-    return write_zip(path, members, error);
+    const int block_count = (window_count + BLOCK_WINDOWS - 1) / BLOCK_WINDOWS;
+    std::ostringstream h;
+    h << "{"
+      << "\"version\":2,"
+      << "\"grid\":[" << file.cols << "," << file.rows << "],"
+      << "\"dt_ms\":" << file.dt_ms << ","
+      << "\"n\":" << file.n << ","
+      << "\"window_ms\":" << window_ms << ","
+      << "\"window_count\":" << window_count << ","
+      << "\"frame_count\":" << frame_count << ","
+      << "\"duration_ms\":" << file.duration_ms << ","
+      << "\"playback_ms\":" << window_count * window_ms << ","
+      << "\"tier\":" << (int)file.tier << ","
+      << "\"units\":\"wire\","
+      << "\"layout\":\"window-major\","
+      << "\"wire\":\"p0u16_v0s16_a0s16_js16\","
+      << "\"codec\":\"none\","
+      << "\"block_windows\":" << BLOCK_WINDOWS << ","
+      << "\"calibration\":{\"steps_per_mm_q16\":"
+      << MC_STEPS_PER_MM_Q16 << "},"
+      << "\"sha256\":\"" << sha << "\""
+      << "}";
+    const std::string header = h.str();
+    if (header.size() > 0xFFFF) {
+        if (error) *error = "header too large";
+        return false;
+    }
+
+    const size_t table_bytes = (size_t)block_count * BLOCK_ENTRY_BYTES;
+    const size_t data_start = 8 + header.size() + 4 + table_bytes;
+
+    std::vector<uint8_t> out;
+    out.reserve(data_start + raw.size());
+    out.push_back('H'); out.push_back('B'); out.push_back('P');
+    out.push_back('2');
+    put16(out, 2);
+    put16(out, (uint16_t)header.size());
+    out.insert(out.end(), header.begin(), header.end());
+    put32(out, (uint32_t)block_count);
+
+    size_t data_offset = data_start;
+    for (int b = 0; b < block_count; ++b) {
+        const int w0 = b * BLOCK_WINDOWS;
+        const int wc = std::min(BLOCK_WINDOWS, window_count - w0);
+        const uint32_t raw_size = (uint32_t)wc * balls * 8;
+        const uint32_t crc = crc32_calc(raw.data() + (size_t)w0 * balls * 8,
+                                        raw_size);
+        put32(out, (uint32_t)w0);
+        put32(out, (uint32_t)wc);
+        put32(out, raw_size);
+        put32(out, raw_size);          /* stored size (codec none) */
+        put32(out, crc);
+        put32(out, (uint32_t)data_offset);
+        data_offset += raw_size;
+    }
+    out.insert(out.end(), raw.begin(), raw.end());
+
+    std::ofstream f(path, std::ios::binary);
+    if (!f) {
+        if (error) *error = "cannot open output";
+        return false;
+    }
+    f.write((const char *)out.data(), (std::streamsize)out.size());
+    return (bool)f;
 }
 
-bool read_hbp(const std::string &path, AnimFile *file, Trajectory *traj,
+bool read_hbp(const std::string &path, Playback *playback,
               std::string *error) {
-    std::vector<ZipMember> members;
-    if (!read_zip(path, &members, error))
-        return false;
-
-    const ZipMember *manifest = nullptr;
-    const ZipMember *bin = nullptr;
-    const ZipMember *sha = nullptr;
-    for (const auto &m : members) {
-        if (m.name == "manifest.json") manifest = &m;
-        else if (m.name == "trajectory.bin") bin = &m;
-        else if (m.name == "sha256.txt") sha = &m;
-    }
-    if (!manifest || !bin || !sha) {
-        if (error) *error = "hbp is missing a member";
+    if (!playback) {
+        if (error) *error = "null playback";
         return false;
     }
+    std::ifstream f(path, std::ios::binary);
+    if (!f) {
+        if (error) *error = "cannot open hbp";
+        return false;
+    }
+    std::vector<uint8_t> buf((std::istreambuf_iterator<char>(f)),
+                             std::istreambuf_iterator<char>());
+    if (buf.size() < 16 || buf[0] != 'H' || buf[1] != 'B' ||
+        buf[2] != 'P' || buf[3] != '2') {
+        if (error) *error = "not an HBP2 file";
+        return false;
+    }
+    if (get16(buf, 4) != 2) {
+        if (error) *error = "unsupported hbp version";
+        return false;
+    }
+    const size_t header_len = get16(buf, 6);
+    if (8 + header_len + 4 > buf.size()) {
+        if (error) *error = "truncated hbp header";
+        return false;
+    }
 
-    std::string sha_text((const char *)sha->data.data(), sha->data.size());
-    std::string want_manifest = sha256_hex(manifest->data.data(),
-                                           manifest->data.size()) +
-                                "  manifest.json\n";
-    std::string want_traj = sha256_hex(bin->data.data(), bin->data.size()) +
-                            "  trajectory.bin\n";
-    if (sha_text != want_manifest + want_traj) {
+    std::string header((const char *)buf.data() + 8, header_len);
+    JValue root;
+    JsonParser p(header);
+    if (!p.parse_value(&root, 0) || !p.error.empty() ||
+        root.type != JValue::OBJ) {
+        if (error) *error = "bad hbp header";
+        return false;
+    }
+
+    int64_t version = 0, dt = 0, n = 0, window_ms = 0, window_count = 0;
+    int64_t frame_count = 0, duration = 0, tier = 0;
+    std::string codec, sha;
+    const JValue *grid = root.get("grid");
+    if (!grid || grid->type != JValue::ARR || grid->a.size() != 2 ||
+        !get_int(root, "version", &version, error, true) || version != 2 ||
+        !get_int(root, "dt_ms", &dt, error, true) ||
+        !get_int(root, "n", &n, error, true) ||
+        !get_int(root, "window_ms", &window_ms, error, true) ||
+        !get_int(root, "window_count", &window_count, error, true) ||
+        !get_int(root, "frame_count", &frame_count, error, true) ||
+        !get_int(root, "duration_ms", &duration, error, true) ||
+        !get_int(root, "tier", &tier, error, true) ||
+        !get_string(root, "codec", &codec, error, true) ||
+        !get_string(root, "sha256", &sha, error, true)) {
+        if (error && error->empty()) *error = "missing hbp field";
+        return false;
+    }
+    if (codec != "none") {
+        if (error) *error = "unsupported hbp codec";
+        return false;
+    }
+
+    const int cols = (int)grid->a[0].i;
+    const int rows = (int)grid->a[1].i;
+    const int balls = cols * rows;
+    if (balls <= 0 || window_count <= 0 ||
+        frame_count != window_count * balls) {
+        if (error) *error = "hbp geometry mismatch";
+        return false;
+    }
+
+    const size_t block_count_pos = 8 + header_len;
+    const uint32_t block_count = get32(buf, block_count_pos);
+    const size_t table_pos = block_count_pos + 4;
+    if (table_pos + (size_t)block_count * BLOCK_ENTRY_BYTES > buf.size()) {
+        if (error) *error = "truncated hbp table";
+        return false;
+    }
+
+    std::vector<uint8_t> raw;
+    raw.reserve((size_t)frame_count * 8);
+    for (uint32_t i = 0; i < block_count; ++i) {
+        const size_t e = table_pos + (size_t)i * BLOCK_ENTRY_BYTES;
+        const uint32_t raw_size = get32(buf, e + 8);
+        const uint32_t stored_size = get32(buf, e + 12);
+        const uint32_t crc = get32(buf, e + 16);
+        const uint32_t offset = get32(buf, e + 20);
+        if (stored_size != raw_size || offset + stored_size > buf.size()) {
+            if (error) *error = "bad hbp block";
+            return false;
+        }
+        if (crc32_calc(buf.data() + offset, stored_size) != crc) {
+            if (error) *error = "hbp block CRC mismatch";
+            return false;
+        }
+        raw.insert(raw.end(), buf.begin() + offset,
+                   buf.begin() + offset + stored_size);
+    }
+    if (raw.size() != (size_t)frame_count * 8) {
+        if (error) *error = "hbp frame count mismatch";
+        return false;
+    }
+    if (sha256_hex(raw.data(), raw.size()) != sha) {
         if (error) *error = "hbp sha256 mismatch";
         return false;
     }
 
-    std::string mtext((const char *)manifest->data.data(),
-                      manifest->data.size());
-    JValue root;
-    JsonParser p(mtext);
-    if (!p.parse_value(&root, 0) || !p.error.empty() ||
-        root.type != JValue::OBJ) {
-        if (error) *error = "bad manifest";
-        return false;
+    Playback out;
+    out.file.version = 2;
+    out.file.cols = cols;
+    out.file.rows = rows;
+    out.file.dt_ms = (int)dt;
+    out.file.n = (int)n;
+    out.file.duration_ms = (int)duration;
+    out.file.tier = (Tier)tier;
+    out.window_ms = (int)window_ms;
+    out.window_count = (int)window_count;
+    out.codec = codec;
+    out.frames.resize((size_t)frame_count);
+    for (size_t i = 0; i < out.frames.size(); ++i) {
+        const uint8_t *p = raw.data() + i * 8;
+        out.frames[i].p0 = (uint16_t)(p[0] | (p[1] << 8));
+        out.frames[i].v0 = (int16_t)(p[2] | (p[3] << 8));
+        out.frames[i].a0 = (int16_t)(p[4] | (p[5] << 8));
+        out.frames[i].j = (int16_t)(p[6] | (p[7] << 8));
     }
 
-    AnimFile f;
-    int64_t i = 0;
-    const JValue *grid = root.get("grid");
-    if (!grid || grid->type != JValue::ARR || grid->a.size() != 2)
-        return false;
-    f.cols = (int)grid->a[0].i;
-    f.rows = (int)grid->a[1].i;
-    if (get_int(root, "cadence_ms", &i, nullptr, false)) f.dt_ms = (int)i;
-    if (get_int(root, "n", &i, nullptr, false)) f.n = (int)i;
-    if (get_int(root, "duration_ms", &i, nullptr, false)) f.duration_ms = (int)i;
-    if (get_int(root, "tier", &i, nullptr, false)) f.tier = (Tier)i;
-
-    Trajectory t;
-    t.cols = f.cols;
-    t.rows = f.rows;
-    t.dt_ms = f.dt_ms;
-    t.n = f.n;
-    t.duration_ms = f.duration_ms;
-    t.tier = f.tier;
-    t.frame_count = f.duration_ms / f.dt_ms + 1;
-    size_t balls = (size_t)f.cols * f.rows;
-    size_t need = (size_t)t.frame_count * balls * 4;
-    if (bin->data.size() != need) {
-        if (error) *error = "trajectory.bin size mismatch";
-        return false;
-    }
-    t.samples.resize((size_t)t.frame_count * balls);
-    for (size_t k = 0; k < t.samples.size(); ++k) {
-        uint32_t u = get32(bin->data, k * 4);
-        t.samples[k] = (int32_t)u;
-    }
-
-    *file = f;
-    *traj = t;
+    *playback = std::move(out);
     return true;
 }
-
 
 }  // namespace pc
