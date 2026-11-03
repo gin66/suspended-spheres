@@ -104,9 +104,41 @@ static int test_b7_inverse_scale_property(void) {
     return 0;
 }
 
+/* B6 — the window starts 15–20 ms before T and finishes by T+Δt. */
+static int test_b6_window_plan(void) {
+    const int64_t T = 1000000;
+    const int64_t dt = 10000;
+    const int64_t busy = mc_bus_frames_time_us(120);   /* 15.6 ms */
+
+    ASSERT(mc_window_plan_ok(T - 20000, T - 20000 + busy, T, dt) == 1);
+    ASSERT(mc_window_plan_ok(T - 15000, T - 15000 + busy, T, dt) == 1);
+    ASSERT(mc_window_plan_ok(T - 25000, T - 25000 + busy, T, dt) == 0);
+    ASSERT(mc_window_plan_ok(T, T + busy, T, dt) == 0);
+    ASSERT(mc_window_plan_ok(T - 20000, T + dt + 1, T, dt) == 0);
+    return 0;
+}
+
+/* B8 — a cadence change is rejected in flight and accepted at a pattern
+ * boundary. */
+static int test_b8_cadence_change(void) {
+    int n = 3;
+    int dt = 10;
+
+    ASSERT(mc_cadence_change(4, 15, 1, 0, &n, &dt) == -1);
+    ASSERT(n == 3 && dt == 10);
+    ASSERT(mc_cadence_change(4, 15, 0, 0, &n, &dt) == -1);
+    ASSERT(n == 3 && dt == 10);
+    ASSERT(mc_cadence_change(5, 15, 0, 1, &n, &dt) == -1);
+    ASSERT(mc_cadence_change(4, 15, 0, 1, &n, &dt) == 0);
+    ASSERT(n == 4 && dt == 15);
+    return 0;
+}
+
 static int reg_b1 = add_test("B1", test_b1_frame_cost);
 static int reg_b2 = add_test("B2", test_b2_motion_rates);
 static int reg_b3 = add_test("B3", test_b3_with_sync_status);
 static int reg_b4 = add_test("B4", test_b4_over_budget);
 static int reg_b5 = add_test("B5", test_b5_window_time);
+static int reg_b6 = add_test("B6", test_b6_window_plan);
 static int reg_b7 = add_test("B7", test_b7_inverse_scale_property);
+static int reg_b8 = add_test("B8", test_b8_cadence_change);

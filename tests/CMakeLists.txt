@@ -27,9 +27,13 @@ add_executable(motion_core_tests
     test_runner.cpp
     test_identifiers.cpp
     test_payloads.cpp
+    test_protocol.cpp
     test_bus.cpp
     test_playback.cpp
     test_steps.cpp
+    test_clock.cpp
+    test_node.cpp
+    test_commission.cpp
     abi_c.c
 )
 

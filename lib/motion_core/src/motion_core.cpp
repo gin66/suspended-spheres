@@ -58,9 +58,9 @@ int mc_id_make(int field, int type) {
     if (field < 0 || field > 127)
         return -1;
     switch (type) {
-    case 0:   /* motion: motor 1…120 (I2) */
-        return (field >= 1 && field <= 120) ? ((field << 4) | type) : -1;
-    case 1:   /* reserved since the cubic segment frame; reject (I2) */
+    case 0:   /* motion: motor 0…119 (I2) */
+        return (field <= 119) ? ((field << 4) | type) : -1;
+    case 1:   /* reserved; reject (I2) */
         return -1;
     case 2:   /* sync: field 0 only (I3) */
         return (field == 0) ? 2 : -1;
@@ -68,14 +68,17 @@ int mc_id_make(int field, int type) {
     case 4:
     case 5:
     case 6:
-    case 7:   /* node frames: broadcast 0 or node 1…30 (I4) */
-        return (field <= 30) ? ((field << 4) | type) : -1;
-    case 8:
-    case 10:
-    case 11:  /* DISC / SET_ID A/B: field 0 only (I5) */
-        return (field == 0) ? type : -1;
-    case 9:   /* HELLO: short node ID 1…30 (I5) */
-        return (field >= 1 && field <= 30) ? ((field << 4) | 9) : -1;
+    case 7:   /* board frames: board 0…29, or 127 for all (I4) */
+        return (field <= 29 || field == MC_BOARD_ALL)
+                   ? ((field << 4) | type) : -1;
+    case 8:   /* DISC: field 0 only (I5) */
+        return (field == 0) ? 8 : -1;
+    case 9:   /* reserved (I5) */
+        return -1;
+    case 10:  /* ASSIGN: board 0…29 (I5) */
+        return (field <= 29) ? ((field << 4) | 10) : -1;
+    case 11:  /* ASK: field 0 only (I5) */
+        return (field == 0) ? 11 : -1;
     default:  /* types 12–15 reserved (I6) */
         return -1;
     }
@@ -102,88 +105,68 @@ int mc_id_type(int id) {
 int mc_id_motor(int id) {
     if (id < 0 || id > MC_ID_MAX)
         return -1;
-    int type = mc_id_type(id);
-    if (type != 0)
+    if (mc_id_type(id) != 0)
         return -1;
     int field = mc_id_field(id);
-    if (field < 1 || field > 120)
-        return -1;
-    return field;
+    return (field <= 119) ? field : -1;
 }
 
-int mc_id_node(int id) {
+int mc_id_board(int id) {
     if (id < 0 || id > MC_ID_MAX)
         return -1;
     int type = mc_id_type(id);
-    if ((type >= 3 && type <= 7) || type == 9)
+    if ((type >= 3 && type <= 7) || type == 10)
         return mc_id_field(id);
     return -1;
 }
 
-int mc_node_first_motor(int node) {
-    /* a table entry per short ID 0…31; the unassigned ends own nothing */
-    static const int first[32] = {
-        /*  0 */  0,
-        /*  1 */  4 * 1 - 3,   /* 1 */
-        /*  2 */  4 * 2 - 3,   /* 5 */
-        /*  3 */  4 * 3 - 3,   /* 9 */
-        /*  4 */  13,
-        /*  5 */  17,
-        /*  6 */  21,
-        /*  7 */  25,
-        /*  8 */  29,
-        /*  9 */  33,
-        /* 10 */  37,
-        /* 11 */  41,
-        /* 12 */  45,
-        /* 13 */  49,
-        /* 14 */  53,
-        /* 15 */  57,
-        /* 16 */  61,
-        /* 17 */  65,
-        /* 18 */  69,
-        /* 19 */  73,
-        /* 20 */  77,
-        /* 21 */  81,
-        /* 22 */  85,
-        /* 23 */  89,
-        /* 24 */  93,
-        /* 25 */  97,
-        /* 26 */ 101,
-        /* 27 */ 105,
-        /* 28 */ 109,
-        /* 29 */ 113,
-        /* 30 */ 117,
-        /* 31 */  0,
-    };
-    if (node < 0 || node > 31 || node == 0 || node == 31)
-        return -1;
-    return first[node];
+int mc_id_node(int id) {
+    return mc_id_board(id);
 }
 
-int mc_node_owns_motor(int node, int motor) {
-    int first = mc_node_first_motor(node);
-    if (first < 0 || motor < 1 || motor > 120)
+int mc_board_first_motor(int board) {
+    if (board < 0 || board >= MC_BOARD_COUNT)
+        return -1;
+    return board * MC_AXES_PER_NODE;
+}
+
+int mc_board_owns_motor(int board, int motor) {
+    int first = mc_board_first_motor(board);
+    if (first < 0 || motor < 0 || motor > 119)
         return 0;
     return (motor >= first && motor < first + MC_AXES_PER_NODE) ? 1 : 0;
 }
 
-int mc_node_accepts_id(int node, int id) {
+int mc_board_accepts_id(int board, int id) {
     if (mc_id_valid(id) <= 0)
         return 0;
-    if (node < 1 || node > MC_NODE_COUNT)
+    if (board < 0 || board >= MC_BOARD_COUNT)
         return 0;
 
     int type = mc_id_type(id);
     int field = mc_id_field(id);
 
     if (type == 0)                           /* motion for own motors */
-        return mc_node_owns_motor(node, field);
-    if (field == 0)                          /* any broadcast reaches us */
-        return 1;
-    if ((type >= 3 && type <= 7) || type == 9)
-        return field == node ? 1 : 0;        /* addressed to node n */
+        return mc_board_owns_motor(board, field);
+    if (type == 2 || type == 8 || type == 11)
+        return field == 0 ? 1 : 0;           /* system broadcasts */
+    if (type >= 3 && type <= 7)
+        return (field == board || field == MC_BOARD_ALL) ? 1 : 0;
+    if (type == 10)                          /* ASSIGN to this board */
+        return field == board ? 1 : 0;
     return 0;
+}
+
+int mc_node_first_motor(int node) {
+    return mc_board_first_motor(node);
+}
+
+int mc_node_owns_motor(int node, int motor) {
+    return mc_board_owns_motor(node, motor);
+}
+
+int mc_node_accepts_id(int node, int id) {
+    return mc_board_accepts_id(node, id);
 }
 
 /* ------------------------------------------------------------------ */
@@ -219,6 +202,128 @@ int mc_unpack_frame(const uint8_t buf[8], int len, int expect_type,
     tmp.a0 = (int16_t)get_u16le(buf + 4);
     tmp.j  = (int16_t)get_u16le(buf + 6);
     *seg = tmp;
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Sync, status and commissioning payloads (P4–P8; §4.5)              */
+/* ------------------------------------------------------------------ */
+
+static void put_u32le(uint8_t *p, uint32_t v) {
+    p[0] = (uint8_t)(v & 0xFFu);
+    p[1] = (uint8_t)((v >> 8) & 0xFFu);
+    p[2] = (uint8_t)((v >> 16) & 0xFFu);
+    p[3] = (uint8_t)((v >> 24) & 0xFFu);
+}
+
+static uint32_t get_u32le(const uint8_t *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+int mc_pack_sync(const mc_sync_t *s, uint8_t buf[8]) {
+    if (s == 0 || buf == 0)
+        return -1;
+    put_u32le(buf + 0, s->t_us_low);
+    put_u16le(buf + 4, s->dt_us);
+    buf[6] = s->n;
+    buf[7] = s->seq;
+    return 0;
+}
+
+int mc_unpack_sync(const uint8_t buf[8], mc_sync_t *s) {
+    if (buf == 0 || s == 0)
+        return -1;
+    mc_sync_t tmp;
+    tmp.t_us_low = get_u32le(buf + 0);
+    tmp.dt_us = get_u16le(buf + 4);
+    tmp.n = buf[6];
+    tmp.seq = buf[7];
+    *s = tmp;
+    return 0;
+}
+
+void mc_sync_time_reset(mc_sync_time_t *t) {
+    if (t == 0)
+        return;
+    t->last_low = 0;
+    t->high_us = 0;
+    t->valid = 0;
+}
+
+int64_t mc_sync_time_unwrap(mc_sync_time_t *t, uint32_t low) {
+    if (t == 0)
+        return -1;
+    if (!t->valid) {
+        t->valid = 1;
+        t->last_low = low;
+        return (int64_t)low;
+    }
+    if (low < t->last_low)
+        t->high_us += (int64_t)1 << 32;
+    t->last_low = low;
+    return t->high_us + (int64_t)low;
+}
+
+int mc_pack_status(const mc_status_t *s, uint8_t buf[8]) {
+    if (s == 0 || buf == 0)
+        return -1;
+    buf[0] = s->state;
+    buf[1] = s->fault_flags;
+    for (int i = 0; i < 4; ++i)
+        buf[2 + i] = s->following_error[i];
+    buf[6] = s->buffer_depth;
+    buf[7] = s->last_seq;
+    return 0;
+}
+
+int mc_unpack_status(const uint8_t buf[8], mc_status_t *s) {
+    if (buf == 0 || s == 0)
+        return -1;
+    mc_status_t tmp;
+    tmp.state = buf[0];
+    tmp.fault_flags = buf[1];
+    for (int i = 0; i < 4; ++i)
+        tmp.following_error[i] = buf[2 + i];
+    tmp.buffer_depth = buf[6];
+    tmp.last_seq = buf[7];
+    *s = tmp;
+    return 0;
+}
+
+int mc_pack_flash_id(const uint8_t flash_id[8], uint8_t buf[8]) {
+    if (flash_id == 0 || buf == 0)
+        return -1;
+    for (int i = 0; i < 8; ++i)
+        buf[i] = flash_id[i];
+    return 0;
+}
+
+int mc_unpack_flash_id(const uint8_t buf[8], uint8_t flash_id[8]) {
+    if (buf == 0 || flash_id == 0)
+        return -1;
+    for (int i = 0; i < 8; ++i)
+        flash_id[i] = buf[i];
+    return 0;
+}
+
+void mc_pack_ask(uint8_t buf[8]) {
+    if (buf == 0)
+        return;
+    for (int i = 0; i < 8; ++i)
+        buf[i] = 0;
+}
+
+int mc_assign_board(int *board_id, int field, const uint8_t payload[8],
+                    const uint8_t own_flash_id[8]) {
+    if (board_id == 0 || payload == 0 || own_flash_id == 0)
+        return -1;
+    if (field < 0 || field >= MC_BOARD_COUNT)
+        return -1;
+    for (int i = 0; i < 8; ++i)
+        if (payload[i] != own_flash_id[i])
+            return -1;
+    *board_id = field;
     return 0;
 }
 
@@ -274,6 +379,29 @@ int64_t mc_bus_frames_time_us(int64_t frames) {
     return frames * 130;
 }
 
+int mc_window_plan_ok(int64_t start_us, int64_t finish_us, int64_t T_us,
+                      int64_t dt_us) {
+    if (dt_us <= 0 || finish_us < start_us)
+        return 0;
+    int64_t lead = T_us - start_us;
+    if (lead < 15000 || lead > 20000)
+        return 0;
+    return finish_us <= T_us + dt_us ? 1 : 0;
+}
+
+int mc_cadence_change(int n, int dt_ms, int segment_in_flight,
+                      int at_boundary, int *cur_n, int *cur_dt_ms) {
+    if (cur_n == 0 || cur_dt_ms == 0)
+        return -1;
+    if ((n != 3 && n != 4) || (dt_ms != 10 && dt_ms != 11 && dt_ms != 15))
+        return -1;
+    if (segment_in_flight || !at_boundary)
+        return -1;
+    *cur_n = n;
+    *cur_dt_ms = dt_ms;
+    return 0;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Playback polynomial (C1–C10; whitepaper §4.7)                      */
 /* ------------------------------------------------------------------ */
@@ -323,6 +451,24 @@ static int64_t seg_speed_um_s(const mc_segment_t *s, int64_t tau_us) {
 static int32_t seg_accel_um_s2(const mc_segment_t *s, int64_t tau_us) {
     /* a(τ) = a0 + j·τ; with j in µm/s³ and τ in µs this is a0 + j_code·τ */
     return (int32_t)((int64_t)s->a0 * 1000 + (int64_t)s->j * tau_us);
+}
+
+int32_t mc_segment_eval_um(const mc_segment_t *seg, int64_t tau_us) {
+    if (seg == 0 || tau_us < 0)
+        return -1;
+    return (int32_t)seg_eval_um(seg, tau_us);
+}
+
+int32_t mc_segment_speed_um_s(const mc_segment_t *seg, int64_t tau_us) {
+    if (seg == 0 || tau_us < 0)
+        return -1;
+    return (int32_t)seg_speed_um_s(seg, tau_us);
+}
+
+int32_t mc_segment_accel_um_s2(const mc_segment_t *seg, int64_t tau_us) {
+    if (seg == 0 || tau_us < 0)
+        return -1;
+    return seg_accel_um_s2(seg, tau_us);
 }
 
 void mc_core_reset(void) {

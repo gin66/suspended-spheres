@@ -87,16 +87,14 @@ That session stops there. It does not add `PlaybackClock`, the identifier
 tests (§3), the frame codecs beyond the endian check in U7, the golden
 file, the Python fixture, or the WASM build.
 
-**Progress note (2026-11-03, third slice).** §1–§3, §4 (P1–P3, P10),
-§5 (B1–B5, B7), §6 (C1–C10) and §7 (S1–S10) are implemented and passing.
-The identifier rules follow the updated addressing document: type 0 is
-motion, type 1 is reserved and rejected. The retired `N=3` / `N=4` sample
-packer has been replaced by the four-field cubic frame (P1–P3, P10), and
-`mc_eval` / `mc_step_chunk` implement the §4.7 Horner playback and the
-per-axis fractional-step accumulator.
-Still open: node playback (§8), the remaining payloads P4–P9, B6/B8,
-commissioning (§9), the pattern bake and file state (§10–§11), and the
-golden file / WASM parity (§12).
+**Progress note (2026-11-03, fourth slice).** §1–§9 are implemented and
+passing except P9. The identifier rules now match the volatile
+board-ID model: motor fields 0–119, board IDs 0–29, field 127 for all
+boards, and `ASK` / `DISC` / `ASSIGN`. P4–P8 lock the sync, status and
+discovery payloads. The host node double in `tests/node_sim.h` covers
+N1–N14 with `PlaybackClock`, and `tests/commission_sim.h` covers M1–M7.
+Still open: the pattern bake and file state (§10–§11), and the golden
+file / WASM parity (§12). P9 is deferred above.
 
 Later byte layouts are the Markdown tables in the whitepaper §4.5 and in
 `Fly_Micro4_addressing.md` §3. There is no separate schema file. A test
@@ -106,7 +104,8 @@ copies those offsets.
 `set_crystal_ppm(35)` then `advance_us(100000)` returns `master_us() == 100000`
 and `local_us() == 100003`, with residual `500000`. `on_sync` does not read
 the crystal value. It sets `correction_ppm` from the measured intervals in
-the whitepaper §4.9. Implement that type with the §8 tests, not in this slice.
+the whitepaper §4.9. That type now lives in `tests/playback_clock.h` and is
+exercised by the §8 tests.
 
 ---
 
@@ -183,25 +182,24 @@ Whitepaper §3.2, §4.2, Appendix A.
 
 - [x] **I1** `id = (field << 4) | type`, and `id` is in `0 … 0x7FF`. A
   value above 0x7FF is rejected. There is no 29-bit encoder.
-- [ ] **I2** Type 0 carries a motor field in `0 … 119`. Motor 0 is legal.
+- [x] **I2** Type 0 carries a motor field in `0 … 119`. Motor 0 is legal.
   Type 1 is reserved and rejected. Motor fields `120 … 127` are rejected.
-  The checked implementation still rejects field 0; update it to this rule.
 - [x] **I3** Type 2 (sync) requires field 0.
-- [ ] **I4** Types 3–7 carry a board ID in `0 … 29`, or 127 for every board.
+- [x] **I4** Types 3–7 carry a board ID in `0 … 29`, or 127 for every board.
   Fields `30 … 126` are rejected. Field 0 is board 0.
-- [ ] **I5** Types 8 (`DISC`) and 11 (`ASK`) require field 0. Type 10
+- [x] **I5** Types 8 (`DISC`) and 11 (`ASK`) require field 0. Type 10
   (`ASSIGN`) carries the new board ID in the field. Type 9 is rejected.
 - [x] **I6** Types 12–15 are rejected.
 - [x] **I7** Motor 5 / type 0 and board 5 / type 3 produce different
   identifiers. The decoder reports a motor for type 0 and a board for
   types 3–7. Type 9 is rejected (I5).
-- [ ] **I8** Board *b* owns motors `4b … 4b+3`. Board 0 owns 0–3. Board 29
+- [x] **I8** Board *b* owns motors `4b … 4b+3`. Board 0 owns 0–3. Board 29
   owns 116–119. Board IDs outside 0–29 own nothing.
-- [ ] **I9** Board *b* accepts motion for those four motors, frames
+- [x] **I9** Board *b* accepts motion for those four motors, frames
   addressed to board *b*, field 127 on types 3–7, and field 0 on types
   2, 8 and 11. Any other motion frame is discarded before the payload is
   parsed. A table drives all 30 boards.
-- [ ] **I10** **Property.** For every motor in `0 … 119` (type 0), exactly
+- [x] **I10** **Property.** For every motor in `0 … 119` (type 0), exactly
   one board accepts the frame.
 
 ---
@@ -217,22 +215,24 @@ Whitepaper §4.2, §4.3, §4.5. Addressing §3.
 - [x] **P2** Type 1 is reserved; pack and unpack reject it. The retired
   `N=3` / `N=4` sample layouts are not motion frames.
 - [x] **P3** A payload shorter or longer than 8 bytes is rejected.
-- [ ] **P4** The sync frame matches the whitepaper §4.5 byte table. A sync
+- [x] **P4** The sync frame matches the whitepaper §4.5 byte table. A sync
   ID is field 0, type 2. After `t_us_low` wraps, the reconstructed `int64`
   time gains `2^32` µs.
-- [ ] **P5** The 10 Hz status frame matches the whitepaper §4.5 byte table.
+- [x] **P5** The 10 Hz status frame matches the whitepaper §4.5 byte table.
   It carries no position and no velocity.
-- [ ] **P6** Command, home, and parameter frames are types 4, 5, and 6.
+- [x] **P6** Command, home, and parameter frames are types 4, 5, and 6.
   A motion decoder ignores them. Homing bytes are not part of the motion
   sample buffer.
-- [ ] **P7** `DISC` and `ASSIGN` payloads are exactly the 8-byte flash ID,
+- [x] **P7** `DISC` and `ASSIGN` payloads are exactly the 8-byte flash ID,
   little-endian. `ASK` is 8 zero bytes.
-- [ ] **P8** `ASSIGN` is one frame, type 10, field = board ID 0–29, payload
+- [x] **P8** `ASSIGN` is one frame, type 10, field = board ID 0–29, payload
   = the flash ID. The board stores that field only when the payload matches
   its own flash ID. A second frame is not required.
 - [ ] **P9** The per-node alternate (four 16-bit positions, one frame per
   node) packs and unpacks. A flag on the unpacked frame says it is not the
-  per-motor baseline.
+  per-motor baseline. **Deferred:** it is not in the volatile board-ID
+  addressing document and is not needed for the host gate; the baseline is
+  the type-0 cubic frame.
 - [x] **P10** `mc_pack_frame` / `mc_unpack_frame` follow P1 and P2 for the
   motion variants in §6.3.
 
@@ -262,12 +262,12 @@ assumption fails here.
 - [x] **B4** A 10 ms *message* period (12 000 frames/s) is 156 % and is
   reported as over budget. The limit used by the pattern checker is 60 %.
 - [x] **B5** 120 motion frames occupy 15.6 ms of bus time.
-- [ ] **B6** The scheduler starts a window 15–20 ms before the nominal `T`
+- [x] **B6** The scheduler starts a window 15–20 ms before the nominal `T`
   and finishes before `T+Δt`. A plan that starts at `T` fails the test.
 - [x] **B7** **Property.** Load scales as `1/(N·Δt)` for `Δt` in
   {10, 11, 15} ms and `N` in {3, 4}. Frame count does not change when the
   step rate or the microstep setting changes (`FR-ARCH-002`).
-- [ ] **B8** `Δt` and `N` applied while a segment is in flight are
+- [x] **B8** `Δt` and `N` applied while a segment is in flight are
   rejected. The same change at a pattern boundary is accepted (§4.2).
 
 ---
@@ -344,44 +344,46 @@ Whitepaper §4.7, §5.3, §5.4, Appendix A.
 Whitepaper §4.8, §4.9, §5.5. One simulated node, four axes, a frame log,
 and a clock the test advances.
 
-- [ ] **N1** In the normal case the node keeps the current and the previous
-  message and evaluates on the sync timeline, not on the arrival time.
-- [ ] **N2** A missing message: at the end of the known segment the axis
-  decelerates within the configured acceleration and then holds. It does
-  not jump. At 1.2 m/s the jump that must not happen is 36 mm over a
-  30 ms gap and 72 mm over a 60 ms gap.
-- [ ] **N3** The next absolute message after N2 becomes the new anchor.
+- [x] **N1** In the normal case the node keeps the active and the next
+  segment and evaluates on the sync timeline, not on the arrival time.
+  The previous segment is consulted only for the join check (C6).
+- [x] **N2** A missing segment: at the end of the active segment the axis
+  decelerates to rest within the configured acceleration and then holds.
+  It does not jump. At 1.2 m/s the jump that must not happen is 36 mm
+  over a 30 ms gap and 72 mm over a 60 ms gap.
+- [x] **N3** The next absolute segment after N2 becomes the new anchor.
   Position error does not accumulate across the gap.
-- [ ] **N4** If the following message is still absent when the buffer
+- [x] **N4** If the following segment is still absent when the queue
   empties, the axis decelerates along its last velocity within the
   acceleration limit, holds, and raises a fault.
-- [ ] **N5** A sample outside `0 … 2 000 mm` is rejected. The axis holds
-  and raises a fault. The stored position is unchanged.
-- [ ] **N6** While sync frames arrive every 20–100 ms, a 35 ppm clock
+- [x] **N5** A segment whose `p0` or `p(Tseg)` is outside `0 … 2 000 mm`
+  is rejected. The axis holds and raises a fault. The stored position is
+  unchanged.
+- [x] **N6** While sync frames arrive every 20–100 ms, a 35 ppm clock
   error (0.7 µs per 20 ms, 3.5 µs per 100 ms) stays under 1 ms
   (`FR-SYNC-001`). The corrector changes the rate. It does not add a
   position step.
-- [ ] **N7** After the sync timeout the node holds. Free-running without
+- [x] **N7** After the sync timeout the node holds. Free-running without
   a timeout fails the test.
-- [ ] **N8** A CAN fault or a sample timeout decelerates to rest, holds,
+- [x] **N8** A CAN fault or a segment timeout decelerates to rest, holds,
   and reports. The simulated hardwired E-stop is a separate input; a
   type-7 CAN frame does not clear it and does not replace it.
-- [ ] **N9** The receive ring stores bytes and a timestamp. Parsing runs
+- [x] **N9** The receive ring stores bytes and a timestamp. Parsing runs
   in the motion task. A test producer fills the ring; the motion step
   observes no parse call inside the producer.
-- [ ] **N10** A frame for another node's motor never updates this node's
-  sample buffer (I9, applied to the live node).
-- [ ] **N11** A following-error injected on the step counter raises a
+- [x] **N10** A frame for another board's motor never updates this
+  board's segment buffer (I9, applied to the live node).
+- [x] **N11** A following-error injected on the step counter raises a
   fault and leaves the evaluated curve unchanged (C9).
-- [ ] **N12** One node at fault does not change the sample buffers of a
-  second simulated node (`NFR-REL-003`).
-- [ ] **N13** When the simulated master stops sending, each node
+- [x] **N12** One board at fault does not change the segment buffers of
+  a second simulated board (`NFR-REL-003`).
+- [x] **N13** When the simulated master stops sending, each board
   decelerates within its limit and keeps its step position. The test
-  does not require a re-home (`NFR-REL-006`). A simulated reset does
-  require a new prime before motion.
-- [ ] **N14** **Property.** Across 1 000 random dropouts of a single
+  does not require a re-home (`NFR-REL-006`). A simulated reset requires
+  a new segment before motion.
+- [x] **N14** **Property.** Across 1 000 random dropouts of a single
   motor's frame, position stays continuous and inside the travel, and
-  the following good frame restores the absolute sample.
+  the following good segment restores the absolute `p0`.
 
 ---
 
@@ -389,24 +391,24 @@ and a clock the test advances.
 
 Addressing §1–§3. No flash chip: the test supplies an 8-byte ID.
 
-- [ ] **M1** The host table is `(flash_id, axis 0–3) → position 0–119`,
+- [x] **M1** The host table is `(flash_id, axis 0–3) → position 0–119`,
   plus `flash_id → board_id`. Lookup of 30 entries is exact. The board
   under test has no position value.
-- [ ] **M2** A repeated advertisement of a known flash ID is assigned the
+- [x] **M2** A repeated advertisement of a known flash ID is assigned the
   same board ID. A second board claiming that board ID is not given it.
-- [ ] **M3** A board with no board ID answers `ASK` with one `DISC`. A
+- [x] **M3** A board with no board ID answers `ASK` with one `DISC`. A
   board that already has a board ID stays silent.
-- [ ] **M4** The advertise delay is `1 ms × (flash_id byte 0 mod 10)`,
+- [x] **M4** The advertise delay is `1 ms × (flash_id byte 0 mod 10)`,
   measured from the `ASK`. The same flash ID always waits the same
   amount, and the wait is under 10 ms. The `DISC` identifier is field 0,
   type 8.
-- [ ] **M5** `ASSIGN` is the single frame in P8. After a matching payload
+- [x] **M5** `ASSIGN` is the single frame in P8. After a matching payload
   the board's stored board ID equals the CAN field, and the next `ASK`
   draws no `DISC` from that board.
-- [ ] **M6** Clearing the board's RAM ID makes it unidentified. The next
+- [x] **M6** Clearing the board's RAM ID makes it unidentified. The next
   `ASK` produces a `DISC`, and the master assigns the board ID already
   stored for that flash ID. The host position map is unchanged.
-- [ ] **M7** The master sends `ASK` every 5 s, including while a pattern
+- [x] **M7** The master sends `ASK` every 5 s, including while a pattern
   is playing. Identified boards still do not answer. An `ASK` that
   receives no `DISC` ends the startup loop.
 
@@ -513,10 +515,10 @@ After that:
 1. Identifiers (§3).
 2. Motion payloads P1, P2, P3, P10 (§4) and the bus budget B1–B5, B7 (§5).
 3. Playback polynomial C1–C10 (§6) and steps S1–S10 (§7). **Done.**
-4. Node playback N1–N8, N13 (§8) and the remaining payloads P4, P5, P8.
-   Those byte tables are in the whitepaper §4.5 and the addressing note §3.
-5. Commissioning (§9) and the pattern bake (§10).
-6. Live file state (§11), then native/WASM parity (§12).
+4. Node playback N1–N14 (§8) and payloads P4–P8 (§4). **Done.**
+5. Commissioning M1–M7 (§9). **Done.**
+6. Pattern bake (§10), live file state (§11), then native/WASM parity
+   (§12).
 
 Phase 12 is the host gate named in roadmap W1: golden traces pass, and
 the worst-case chunk and tick asserts (S3–S5) pass. W0 and the scope

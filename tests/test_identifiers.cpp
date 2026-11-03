@@ -2,6 +2,7 @@
  *
  * Contract: Fly_Micro4_addressing.md §2 and §4.
  *   id = (field << 4) | type, 11-bit standard identifier only.
+ *   Motor fields 0–119, board IDs 0–29, field 127 addresses all boards.
  */
 
 #include "assert.h"
@@ -12,44 +13,41 @@
 
 /* I1 — id construction and the 0…0x7FF domain. */
 static int test_i1_make_and_range(void) {
-    for (int type = 0; type <= 15; ++type) {
-        int id = mc_id_make(0, type);
-        if (type >= 2 && type <= 11 && type != 9) {
-            /* field 0 is legal for the system/broadcast types (I3, I4, I5) */
-            ASSERT(id >= 0 && id <= 0x7FF);
-        } else {
-            /* motion types need a motor, HELLO needs a node, 12–15 reserved */
-            ASSERT(id == -1);
-        }
-    }
+    /* Field 0 is legal for motor 0 and for the system/broadcast types. */
+    for (int type : {0, 2, 3, 4, 5, 6, 7, 8, 10, 11})
+        ASSERT(mc_id_make(0, type) == type);
+    /* reserved types and motion fields above the motor range are rejected */
+    for (int type : {1, 9, 12, 13, 14, 15})
+        ASSERT(mc_id_make(0, type) == -1);
+
     ASSERT(mc_id_make(5, 0) == 80);          /* (5<<4)|0 */
-    ASSERT(mc_id_make(0, 2) == 2);
-    ASSERT(mc_id_make(120, 0) == 120 * 16);
-    ASSERT(mc_id_make(30, 7) == 30 * 16 + 7);
+    ASSERT(mc_id_make(119, 0) == 119 * 16);
+    ASSERT(mc_id_make(29, 3) == 29 * 16 + 3);
+    ASSERT(mc_id_make(127, 7) == 127 * 16 + 7);
+
     /* every constructed id stays in the 0…0x7FF 11-bit domain */
     for (int field = 0; field <= 127; field += 7)
-        for (int type = 0; type <= 11; ++type)
+        for (int type = 0; type <= 15; ++type)
             if (mc_id_make(field, type) >= 0)
                 ASSERT(mc_id_make(field, type) <= 0x7FF);
-    /* Decoder must reject anything above 0x7FF (no 29-bit encoder). */
+
     ASSERT(mc_id_valid(0x800) == 0);
     ASSERT(mc_id_valid(0xFFFFF) == 0);
     return 0;
 }
 
-/* I2 — motion type 0 carries motor ID 1…120; type 1 is reserved and
- * rejected; 121…127 rejected; field 0 rejected for motion. */
+/* I2 — type 0 carries a motor field 0…119; motor 0 is legal; type 1 is
+ * reserved; 120…127 are rejected. */
 static int test_i2_motion_field_rules(void) {
-    ASSERT(mc_id_valid(0x00) == 0);          /* field 0, type 0 → invalid */
-    ASSERT(mc_id_make(0, 0) == -1);
+    ASSERT(mc_id_make(0, 0) == 0x00);
+    ASSERT(mc_id_valid(0x00) == 1);
     ASSERT(mc_id_make(1, 0) == 0x10);
-    ASSERT(mc_id_valid(mc_id_make(1, 0)) == 1);
-    ASSERT(mc_id_valid(mc_id_make(120, 0)) == 1);
-    ASSERT(mc_id_make(1, 1) == -1);          /* type 1 reserved */
-    ASSERT(mc_id_make(120, 1) == -1);
-    ASSERT(mc_id_valid(0x11) == 0);
-    ASSERT(mc_id_make(121, 0) == -1);
+    ASSERT(mc_id_valid(mc_id_make(119, 0)) == 1);
+    ASSERT(mc_id_make(120, 0) == -1);
     ASSERT(mc_id_make(127, 0) == -1);
+    ASSERT(mc_id_make(0, 1) == -1);
+    ASSERT(mc_id_make(5, 1) == -1);
+    ASSERT(mc_id_valid(0x11) == 0);          /* motor 1, reserved type */
     return 0;
 }
 
@@ -62,30 +60,33 @@ static int test_i3_sync_field_zero(void) {
     return 0;
 }
 
-/* I4 — types 3–7 carry node 1…30 or 0 broadcast; 31 rejected. */
-static int test_i4_node_types(void) {
+/* I4 — types 3–7 carry board 0…29 or 127 for every board. */
+static int test_i4_board_types(void) {
     for (int type = 3; type <= 7; ++type) {
-        ASSERT(mc_id_valid(mc_id_make(0, type)) == 1);   /* broadcast */
-        ASSERT(mc_id_valid(mc_id_make(30, type)) == 1);  /* node 30 */
-        ASSERT(mc_id_make(31, type) == -1);              /* rejected */
-        ASSERT(mc_id_make(-1, type) == -1);
+        ASSERT(mc_id_valid(mc_id_make(0, type)) == 1);     /* board 0 */
+        ASSERT(mc_id_valid(mc_id_make(29, type)) == 1);    /* board 29 */
+        ASSERT(mc_id_valid(mc_id_make(127, type)) == 1);   /* all boards */
+        ASSERT(mc_id_make(30, type) == -1);
+        ASSERT(mc_id_make(126, type) == -1);
     }
     return 0;
 }
 
-/* I5 — DISC (8), SET_ID A (10), SET_ID B (11) require field 0.
- * HELLO (9) carries the short node ID 1…30. */
+/* I5 — DISC/ASK require field 0; ASSIGN carries board 0…29; type 9 is
+ * reserved. */
 static int test_i5_commissioning_types(void) {
-    for (int type : {8, 10, 11}) {
-        ASSERT(mc_id_make(0, type) == (type));
-        ASSERT(mc_id_valid(type) == 1);
-        ASSERT(mc_id_make(1, type) == -1);
-        ASSERT(mc_id_make(30, type) == -1);
-    }
-    ASSERT(mc_id_make(0, 9) == -1);      /* HELLO needs a real short ID */
-    ASSERT(mc_id_make(1, 9) == (0x10 | 9));
-    ASSERT(mc_id_valid(mc_id_make(30, 9)) == 1);
-    ASSERT(mc_id_make(31, 9) == -1);
+    ASSERT(mc_id_make(0, 8) == 8);
+    ASSERT(mc_id_make(0, 11) == 11);
+    ASSERT(mc_id_make(1, 8) == -1);
+    ASSERT(mc_id_make(1, 11) == -1);
+
+    ASSERT(mc_id_make(0, 10) == 10);
+    ASSERT(mc_id_valid(mc_id_make(29, 10)) == 1);
+    ASSERT(mc_id_make(30, 10) == -1);
+    ASSERT(mc_id_make(127, 10) == -1);
+
+    ASSERT(mc_id_make(0, 9) == -1);
+    ASSERT(mc_id_make(5, 9) == -1);
     return 0;
 }
 
@@ -98,98 +99,90 @@ static int test_i6_reserved_types(void) {
     return 0;
 }
 
-/* I7 — motor 5/type 0 and node 5/type 3 are different identifiers, and the
- * decoder reports the right entity kind for each type class. */
+/* I7 — motor 5/type 0 and board 5/type 3 are different identifiers; the
+ * decoder reports the right entity kind. */
 static int test_i7_decoder_entities(void) {
     int motor_id = mc_id_make(5, 0);
-    int node_id = mc_id_make(5, 3);
-    ASSERT(motor_id != node_id);
-    ASSERT(motor_id >= 0 && node_id >= 0);
+    int board_id = mc_id_make(5, 3);
+    ASSERT(motor_id != board_id);
 
-    /* motion type 0 reports a motor; type 1 is reserved */
-    ASSERT(mc_id_motor(mc_id_make(5, 0)) == 5);
-    ASSERT(mc_id_motor(mc_id_make(120, 0)) == 120);
-    ASSERT(mc_id_motor(mc_id_make(5, 1)) == -1);
-    ASSERT(mc_id_motor(mc_id_make(5, 3)) == -1);
+    ASSERT(mc_id_motor(motor_id) == 5);
+    ASSERT(mc_id_motor(mc_id_make(0, 0)) == 0);
+    ASSERT(mc_id_motor(mc_id_make(119, 0)) == 119);
+    ASSERT(mc_id_motor(board_id) == -1);
 
-    /* node types 3–7 and 9 report a node */
-    ASSERT(mc_id_node(mc_id_make(5, 3)) == 5);
-    ASSERT(mc_id_node(mc_id_make(30, 7)) == 30);
-    ASSERT(mc_id_node(mc_id_make(0, 4)) == 0);   /* broadcast */
-    ASSERT(mc_id_node(mc_id_make(7, 9)) == 7);
-    ASSERT(mc_id_node(mc_id_make(5, 0)) == -1);
+    ASSERT(mc_id_board(board_id) == 5);
+    ASSERT(mc_id_board(mc_id_make(29, 7)) == 29);
+    ASSERT(mc_id_board(mc_id_make(127, 4)) == 127);
+    ASSERT(mc_id_board(mc_id_make(5, 10)) == 5);
+    ASSERT(mc_id_board(motor_id) == -1);
+    ASSERT(mc_id_board(mc_id_make(5, 9)) == -1);
+    ASSERT(mc_id_node(board_id) == 5);
     return 0;
 }
 
-/* I8 — node n owns motors 4(n−1)+1 … 4(n−1)+4. Nodes 0 and 31 own nothing. */
+/* I8 — board b owns motors 4b … 4b+3. Boards outside 0–29 own nothing. */
 static int test_i8_ownership_table(void) {
-    for (int node = 1; node <= 30; ++node) {
-        int first = 4 * (node - 1) + 1;
-        ASSERT(mc_node_first_motor(node) == first);
-        for (int m = 1; m <= 120; ++m) {
+    for (int board = 0; board < 30; ++board) {
+        int first = 4 * board;
+        ASSERT(mc_board_first_motor(board) == first);
+        for (int m = 0; m <= 119; ++m) {
             int expect = (m >= first && m <= first + 3) ? 1 : 0;
-            ASSERT(mc_node_owns_motor(node, m) == expect);
+            ASSERT(mc_board_owns_motor(board, m) == expect);
         }
     }
-    ASSERT(mc_node_owns_motor(1, 1) == 1);
-    ASSERT(mc_node_owns_motor(1, 4) == 1);
-    ASSERT(mc_node_owns_motor(1, 5) == 0);
-    ASSERT(mc_node_owns_motor(30, 117) == 1);
-    ASSERT(mc_node_owns_motor(30, 120) == 1);
-    /* the unassigned short IDs own nothing */
-    for (int m = 0; m <= 120; ++m) {
-        ASSERT(mc_node_owns_motor(0, m) == 0);
-        ASSERT(mc_node_owns_motor(31, m) == 0);
-    }
+    ASSERT(mc_board_first_motor(-1) == -1);
+    ASSERT(mc_board_first_motor(30) == -1);
+    ASSERT(mc_board_owns_motor(30, 0) == 0);
+    ASSERT(mc_board_first_motor(0) == 0);
+    ASSERT(mc_board_first_motor(29) == 116);
+    ASSERT(mc_node_first_motor(0) == 0);
+    ASSERT(mc_node_owns_motor(29, 119) == 1);
     return 0;
 }
 
-/* I9 — a node accepts motion for its four motors, frames addressed to its
- * own node ID, and field 0. Every other motion frame is discarded without
- * parsing the payload. */
+/* I9 — board b accepts motion for its four motors, frames addressed to
+ * board b, field 127 on types 3–7, and field 0 on types 2, 8 and 11. */
 static int test_i9_acceptance(void) {
-    const int node = 3;
-    const int first = 4 * 2 + 1;              /* 9, 10, 11, 12 */
+    const int board = 3;
+    const int first = 4 * board;             /* 12, 13, 14, 15 */
 
-    /* own motors accepted (type 0 motion) */
-    for (int m = first; m < first + 4; ++m)
-        ASSERT(mc_node_accepts_id(node, mc_id_make(m, 0)) == 1);
-    /* a motion frame for any other motor (node 7's motors) discarded */
-    for (int m = 1; m <= 120; ++m) {
+    for (int m = 0; m <= 119; ++m) {
         int expect = (m >= first && m < first + 4) ? 1 : 0;
-        ASSERT(mc_node_accepts_id(node, mc_id_make(m, 0)) == expect);
+        ASSERT(mc_board_accepts_id(board, mc_id_make(m, 0)) == expect);
     }
-    /* reserved type 1 never reaches a node */
-    ASSERT(mc_node_accepts_id(node, mc_id_make(first, 1)) == 0);
+    ASSERT(mc_board_accepts_id(board, mc_id_make(12, 1)) == 0);
 
     for (int type = 3; type <= 7; ++type) {
-        ASSERT(mc_node_accepts_id(node, mc_id_make(node, type)) == 1);
-        ASSERT(mc_node_accepts_id(node, mc_id_make(0, type)) == 1);  /* field 0 */
-        ASSERT(mc_node_accepts_id(node, mc_id_make(node + 1, type)) == 0);
-        ASSERT(mc_node_accepts_id(node, mc_id_make(node - 1, type)) == 0);
+        ASSERT(mc_board_accepts_id(board, mc_id_make(board, type)) == 1);
+        ASSERT(mc_board_accepts_id(board, mc_id_make(127, type)) == 1);
+        ASSERT(mc_board_accepts_id(board, mc_id_make(board + 1, type)) == 0);
+        ASSERT(mc_board_accepts_id(board, mc_id_make(0, type)) ==
+               (board == 0 ? 1 : 0));
     }
 
-    /* broadcast/system types with field 0 reach every node */
-    ASSERT(mc_node_accepts_id(node, mc_id_make(0, 2)) == 1);
-    ASSERT(mc_node_accepts_id(node, mc_id_make(0, 8)) == 1);
-    ASSERT(mc_node_accepts_id(node, mc_id_make(0, 10)) == 1);
-    ASSERT(mc_node_accepts_id(node, mc_id_make(0, 11)) == 1);
+    for (int type : {2, 8, 11})
+        ASSERT(mc_board_accepts_id(board, mc_id_make(0, type)) == 1);
+    ASSERT(mc_board_accepts_id(board, mc_id_make(1, 2)) == 0);
 
-    /* invalid and out-of-range identifiers are never accepted */
-    ASSERT(mc_node_accepts_id(node, 0x800) == 0);
-    ASSERT(mc_node_accepts_id(node, mc_id_make(0, 0)) == 0);
-    ASSERT(mc_node_accepts_id(node, mc_id_make(31, 4)) == 0);
+    ASSERT(mc_board_accepts_id(board, mc_id_make(board, 10)) == 1);
+    ASSERT(mc_board_accepts_id(board, mc_id_make(board + 1, 10)) == 0);
+
+    ASSERT(mc_board_accepts_id(board, 0x800) == 0);
+    ASSERT(mc_board_accepts_id(board, mc_id_make(5, 1)) == 0);
+    ASSERT(mc_board_accepts_id(board, mc_id_make(30, 4)) == 0);
+    ASSERT(mc_node_accepts_id(board, mc_id_make(first, 0)) == 1);
     return 0;
 }
 
-/* I10 — property: for every motor 1…120 (type 0 motion) exactly one node
- * in 1…30 accepts the frame. */
+/* I10 — property: for every motor 0…119 (type 0) exactly one board
+ * accepts the frame. */
 static int test_i10_unique_acceptor_property(void) {
-    for (int motor = 1; motor <= 120; ++motor) {
+    for (int motor = 0; motor <= 119; ++motor) {
         int id = mc_id_make(motor, 0);
         int acceptors = 0;
-        for (int node = 1; node <= 30; ++node)
-            if (mc_node_accepts_id(node, id))
+        for (int board = 0; board < 30; ++board)
+            if (mc_board_accepts_id(board, id))
                 ++acceptors;
         ASSERT(acceptors == 1);
     }
@@ -199,7 +192,7 @@ static int test_i10_unique_acceptor_property(void) {
 static int reg_i1 = add_test("I1", test_i1_make_and_range);
 static int reg_i2 = add_test("I2", test_i2_motion_field_rules);
 static int reg_i3 = add_test("I3", test_i3_sync_field_zero);
-static int reg_i4 = add_test("I4", test_i4_node_types);
+static int reg_i4 = add_test("I4", test_i4_board_types);
 static int reg_i5 = add_test("I5", test_i5_commissioning_types);
 static int reg_i6 = add_test("I6", test_i6_reserved_types);
 static int reg_i7 = add_test("I7", test_i7_decoder_entities);

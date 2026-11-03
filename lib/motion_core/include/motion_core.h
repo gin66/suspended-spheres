@@ -48,17 +48,21 @@ int mc_um_in_range(int32_t um);
 /*  11-bit identifiers (§3 of the TDD list, addressing doc §2/§4)      */
 /* ------------------------------------------------------------------ */
 
-#define MC_ID_MAX      0x7FF  /* 11-bit standard identifier only */
-#define MC_NODE_COUNT  30     /* short node ID 1…30              */
+#define MC_ID_MAX       0x7FF  /* 11-bit standard identifier only */
+#define MC_BOARD_COUNT  30     /* board IDs 0…29                 */
+#define MC_BOARD_ALL    127    /* broadcast on status/command    */
+#define MC_NODE_COUNT   30     /* legacy alias for MC_BOARD_COUNT */
 #define MC_AXES_PER_NODE 4
 
 /* id = (field << 4) | type; -1 on any invalid combination:
- *   type 0     motion        field = motor 1…120     (I2)
+ *   type 0     motion        field = motor 0…119     (I2)
  *   type 1     reserved      rejected                (I2)
  *   type 2     sync          field = 0               (I3)
- *   type 3–7   node frames   field = node 0…30       (I4)
- *   type 8,10,11 commission  field = 0               (I5)
- *   type 9     HELLO         field = node 1…30       (I5)
+ *   type 3–7   board frames  field = board 0…29 or 127 (I4)
+ *   type 8     DISC          field = 0               (I5)
+ *   type 9     reserved      rejected                (I5)
+ *   type 10    ASSIGN        field = board 0…29      (I5)
+ *   type 11    ASK           field = 0               (I5)
  *   type 12–15 reserved       rejected               (I6)
  */
 int mc_id_make(int field, int type);
@@ -68,20 +72,24 @@ int mc_id_valid(int id);
 int mc_id_field(int id);   /* 0…127 for any id ≤ 0x7FF */
 int mc_id_type(int id);    /* 0…15 for any id ≤ 0x7FF */
 
-/* Entity decode (I7): the field is a motor for type 0, a node for
- * types 3–7 and 9. The other kinds return -1. */
+/* Entity decode (I7): the field is a motor for type 0, a board for
+ * types 3–7 and 10. The other kinds return -1. */
 int mc_id_motor(int id);
-int mc_id_node(int id);
+int mc_id_board(int id);
+int mc_id_node(int id);    /* legacy alias for mc_id_board */
 
-/* Ownership (I8): node n owns motors 4(n−1)+1 … 4(n−1)+4.
- * Node 0 and node 31 own nothing. */
-int mc_node_first_motor(int node);        /* -1 for node 0/31 */
+/* Ownership (I8): board b owns motors 4b … 4b+3. Board 0 owns 0–3.
+ * Board 29 owns 116–119. Board IDs outside 0–29 own nothing. */
+int mc_board_first_motor(int board);      /* -1 outside 0…29 */
+int mc_board_owns_motor(int board, int motor);
+int mc_node_first_motor(int node);        /* legacy aliases */
 int mc_node_owns_motor(int node, int motor);
 
-/* Accept filter (I9): a node accepts motion (type 0) for its four motors,
- * node frames addressed to itself, and field 0. A table drives all 30
- * nodes. */
-int mc_node_accepts_id(int node, int id);
+/* Accept filter (I9): a board accepts motion (type 0) for its four
+ * motors, frames addressed to it, field 127 on types 3–7, and field 0 on
+ * types 2, 8 and 11. A table drives all 30 boards. */
+int mc_board_accepts_id(int board, int id);
+int mc_node_accepts_id(int node, int id); /* legacy alias */
 
 /* ------------------------------------------------------------------ */
 /*  Motion frame: one cubic segment per motor (whitepaper §4.2)        */
@@ -104,6 +112,75 @@ typedef struct {
 int mc_pack_frame(int type, const mc_segment_t *seg, uint8_t buf[8]);
 int mc_unpack_frame(const uint8_t buf[8], int len, int expect_type,
                     mc_segment_t *seg);
+
+/* Pure segment evaluation, shared by the stateful playback API and the
+ * host node tests. τ is microseconds since the segment start. */
+int32_t mc_segment_eval_um(const mc_segment_t *seg, int64_t tau_us);
+int32_t mc_segment_speed_um_s(const mc_segment_t *seg, int64_t tau_us);
+int32_t mc_segment_accel_um_s2(const mc_segment_t *seg, int64_t tau_us);
+
+/* ------------------------------------------------------------------ */
+/*  Sync, status and commissioning payloads (§4.5; TDD P4–P8)          */
+/* ------------------------------------------------------------------ */
+
+/* Sync / window header, type 2, field 0, exactly 8 bytes, little-endian:
+ *   [0..3] t_us_low (u32) [4..5] dt_us (u16) [6] n [7] seq */
+typedef struct {
+    uint32_t t_us_low;
+    uint16_t dt_us;
+    uint8_t  n;
+    uint8_t  seq;
+} mc_sync_t;
+
+int mc_pack_sync(const mc_sync_t *s, uint8_t buf[8]);
+int mc_unpack_sync(const uint8_t buf[8], mc_sync_t *s);
+
+/* Reconstruct the int64 timeline from a sequence of t_us_low values. */
+typedef struct {
+    uint32_t last_low;
+    int64_t  high_us;
+    int      valid;
+} mc_sync_time_t;
+
+void mc_sync_time_reset(mc_sync_time_t *t);
+int64_t mc_sync_time_unwrap(mc_sync_time_t *t, uint32_t low);
+
+/* Status frame, type 3, exactly 8 bytes, little-endian. */
+#define MC_STATUS_IDLE     0
+#define MC_STATUS_HOMING   1
+#define MC_STATUS_PRIMED   2
+#define MC_STATUS_PLAYING  3
+#define MC_STATUS_HOLDING  4
+#define MC_STATUS_FAULT    5
+
+#define MC_STATUS_FAULT_SAMPLE_TIMEOUT  (1u << 0)
+#define MC_STATUS_FAULT_SYNC_LOST       (1u << 1)
+#define MC_STATUS_FAULT_OUT_OF_RANGE    (1u << 2)
+#define MC_STATUS_FAULT_ACCEL           (1u << 3)
+#define MC_STATUS_FAULT_UNDERRUN        (1u << 4)
+#define MC_STATUS_FAULT_FOLLOWING       (1u << 5)
+#define MC_STATUS_FAULT_RESET           (1u << 6)
+
+typedef struct {
+    uint8_t state;
+    uint8_t fault_flags;
+    uint8_t following_error[4];   /* steps, saturated at 255 */
+    uint8_t buffer_depth;
+    uint8_t last_seq;
+} mc_status_t;
+
+int mc_pack_status(const mc_status_t *s, uint8_t buf[8]);
+int mc_unpack_status(const uint8_t buf[8], mc_status_t *s);
+
+/* DISC and ASSIGN carry the 64-bit flash ID; ASK is eight zero bytes. */
+int mc_pack_flash_id(const uint8_t flash_id[8], uint8_t buf[8]);
+int mc_unpack_flash_id(const uint8_t buf[8], uint8_t flash_id[8]);
+void mc_pack_ask(uint8_t buf[8]);
+
+/* ASSIGN acceptance: store field (board 0…29) only when the payload is
+ * this board's own flash ID. *board_id is -1 while unidentified. */
+int mc_assign_board(int *board_id, int field, const uint8_t payload[8],
+                    const uint8_t own_flash_id[8]);
 
 /* ------------------------------------------------------------------ */
 /*  Bus budget (§5 B1–B5/B7, whitepaper §3.3, §4.6, Appendix A)        */
@@ -131,6 +208,15 @@ int mc_bus_budget_percent(void);
 
 /* Time a frame count occupies on the bus, in µs (B5). */
 int64_t mc_bus_frames_time_us(int64_t frames);
+
+/* Window plan check (B6): start 15–20 ms before T and finish by T+Δt. */
+int mc_window_plan_ok(int64_t start_us, int64_t finish_us, int64_t T_us,
+                      int64_t dt_us);
+
+/* Cadence change (B8): reject while a segment is in flight or away from a
+ * pattern boundary; update *cur_n / *cur_dt_ms on success. */
+int mc_cadence_change(int n, int dt_ms, int segment_in_flight,
+                      int at_boundary, int *cur_n, int *cur_dt_ms);
 
 /* ------------------------------------------------------------------ */
 /*  Playback polynomial (whitepaper §4.7; TDD §6)                      */
