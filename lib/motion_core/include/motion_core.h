@@ -53,7 +53,8 @@ int mc_um_in_range(int32_t um);
 #define MC_AXES_PER_NODE 4
 
 /* id = (field << 4) | type; -1 on any invalid combination:
- *   type 0,1   motion        field = motor 1…120     (I2)
+ *   type 0     motion        field = motor 1…120     (I2)
+ *   type 1     reserved      rejected                (I2)
  *   type 2     sync          field = 0               (I3)
  *   type 3–7   node frames   field = node 0…30       (I4)
  *   type 8,10,11 commission  field = 0               (I5)
@@ -67,7 +68,7 @@ int mc_id_valid(int id);
 int mc_id_field(int id);   /* 0…127 for any id ≤ 0x7FF */
 int mc_id_type(int id);    /* 0…15 for any id ≤ 0x7FF */
 
-/* Entity decode (I7): the field is a motor for types 0–1, a node for
+/* Entity decode (I7): the field is a motor for type 0, a node for
  * types 3–7 and 9. The other kinds return -1. */
 int mc_id_motor(int id);
 int mc_id_node(int id);
@@ -77,25 +78,32 @@ int mc_id_node(int id);
 int mc_node_first_motor(int node);        /* -1 for node 0/31 */
 int mc_node_owns_motor(int node, int motor);
 
-/* Accept filter (I9): a node accepts motion for its four motors, node
- * frames addressed to itself, and field 0. A table drives all 30 nodes. */
+/* Accept filter (I9): a node accepts motion (type 0) for its four motors,
+ * node frames addressed to itself, and field 0. A table drives all 30
+ * nodes. */
 int mc_node_accepts_id(int node, int id);
 
 /* ------------------------------------------------------------------ */
-/*  Motion payload (§4 P1/P2/P3/P10, whitepaper §4.2)                  */
+/*  Motion frame: one cubic segment per motor (whitepaper §4.2)        */
 /* ------------------------------------------------------------------ */
 
-/* Pack a motion payload into exactly 8 bytes, little-endian.
- *   n == 3: [p1:16][p2:16][p3:16][v3:s16]
- *   n == 4: [p1:16][p2:16][p3:16][p4:16]
- * Returns 0 on success, -1 on error. */
-int mc_pack_frame(int n, const uint16_t pos[4], int16_t speed,
-                  uint8_t *buf);
+/* Wire layout, exactly 8 bytes, little-endian:
+ *   [ p0 : u16 ][ v0 : s16 ][ a0 : s16 ][ j : s16 ]
+ *   p0  absolute position code (0 = 0 mm, 65535 = 2 000 mm)
+ *   v0  speed, 0.04 mm/s units
+ *   a0  acceleration, 1 mm/s² units
+ *   j   constant jerk, 1 m/s³ units
+ * Type 0 is the motion type. Type 1 is reserved and rejected. */
+typedef struct {
+    uint16_t p0;
+    int16_t  v0;
+    int16_t  a0;
+    int16_t  j;
+} mc_segment_t;
 
-/* Unpack a motion payload. len must be 8 (P3); expect_n must match the
- * variant on the wire. Returns 0 or -1; outputs untouched on error. */
-int mc_unpack_frame(const uint8_t *buf, int len, int expect_n,
-                    uint16_t pos[4], int16_t *speed);
+int mc_pack_frame(int type, const mc_segment_t *seg, uint8_t buf[8]);
+int mc_unpack_frame(const uint8_t buf[8], int len, int expect_type,
+                    mc_segment_t *seg);
 
 /* ------------------------------------------------------------------ */
 /*  Bus budget (§5 B1–B5/B7, whitepaper §3.3, §4.6, Appendix A)        */
@@ -125,21 +133,57 @@ int mc_bus_budget_percent(void);
 int64_t mc_bus_frames_time_us(int64_t frames);
 
 /* ------------------------------------------------------------------ */
-/*  Public C ABI stubs — implemented in later TDD slices (§6.3)        */
+/*  Playback polynomial (whitepaper §4.7; TDD §6)                      */
 /* ------------------------------------------------------------------ */
 
-/* Push a motion sample onto the trajectory buffer for one axis.
- * Returns 0 on success, -1 if rejected. */
-int mc_trajectory_push(int axis_id, int64_t t_us,
-                       uint16_t pos_code, int16_t speed_code);
+#define MC_AXIS_COUNT 4
 
-/* Evaluate the interpolated position for one axis at a timeline tick.
- * Returns the position in micrometres (int32_t), -1 if not primed. */
+enum {
+    MC_AXIS_IDLE = 0,
+    MC_AXIS_PLAYING = 1,
+    MC_AXIS_HOLD = 2
+};
+
+#define MC_FAULT_TYPE   (1u << 0)
+#define MC_FAULT_RANGE  (1u << 1)
+#define MC_FAULT_ACCEL  (1u << 2)
+#define MC_FAULT_JOIN   (1u << 3)
+#define MC_FAULT_CHUNK  (1u << 4)
+
+/* Submit one complete segment for one axis. tseg_us is the segment length.
+ * Returns 0 when accepted, -1 when rejected (type, range, thread, join).
+ * An accepted segment does not consult the previous message. */
+int mc_trajectory_push(int axis_id, int type, int64_t t_start_us,
+                       int64_t tseg_us, const mc_segment_t *seg);
+
+/* Evaluate the active segment at a timeline tick. Returns micrometres,
+ * -1 while the axis has no accepted segment. */
 int32_t mc_eval(int axis_id, int64_t t_us);
 
-/* Compute step deltas for a 2 ms chunk at a given timeline tick.
- * Returns 0 on success, -1 if rejected. */
-int mc_step_chunk(int16_t steps[4], uint16_t *ticks, int64_t t_us);
+/* Axis state and the last held position (for join and fault tests). */
+int mc_axis_state(int axis_id);
+int mc_axis_fault_flags(int axis_id);
+int32_t mc_axis_held_um(int axis_id);
+
+/* Clear all axis state and step accumulators. */
+void mc_core_reset(void);
+
+/* ------------------------------------------------------------------ */
+/*  Steps and chunks (whitepaper §4.7, §5.3, §5.4; TDD §7)             */
+/* ------------------------------------------------------------------ */
+
+/* Q16.16 steps/mm for a 40 mm drum, 200 steps/rev, 1/16 microstepping. */
+#define MC_STEPS_PER_MM_Q16 1668861
+int32_t mc_steps_per_mm_q16(void);
+
+/* Round a micrometre position to the nearest whole step. */
+int32_t mc_um_to_steps(int32_t um);
+
+/* Compute one timed chunk ending at t_us. The tick count is
+ * chunk_us × 16. Returns 0 on success, -1 when the chunk is outside the
+ * FasTimed limits or a per-axis delta exceeds MC_MAX_STEPS_PER_CHUNK. */
+int mc_step_chunk(int16_t steps[4], uint16_t *ticks, int64_t t_us,
+                  int32_t chunk_us);
 
 #ifdef __cplusplus
 }

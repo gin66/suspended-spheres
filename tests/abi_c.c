@@ -8,18 +8,17 @@
 #include "motion_core.h"
 
 int mc_abi_probe(void) {
-    uint16_t pos[4] = {1, 2, 3, 4};
-    uint16_t out_pos[4] = {0};
+    mc_segment_t seg = {1, 2, 3, 4};
+    mc_segment_t out_seg = {0, 0, 0, 0};
     uint8_t frame[8] = {0};
     int16_t steps[4] = {0};
     uint16_t ticks = 0;
-    int16_t speed = 0;
 
-    (void)mc_trajectory_push(0, 0, pos[0], 0);
+    (void)mc_pack_frame(0, &seg, frame);
+    (void)mc_unpack_frame(frame, 8, 0, &out_seg);
+    (void)mc_trajectory_push(0, 0, 0, 1000, &seg);
     (void)mc_eval(0, 0);
-    (void)mc_step_chunk(steps, &ticks, 0);
-    (void)mc_pack_frame(3, pos, 0, frame);
-    (void)mc_unpack_frame(frame, 8, 3, out_pos, &speed);
+    (void)mc_step_chunk(steps, &ticks, 0, 2000);
 
     return 0;
 }

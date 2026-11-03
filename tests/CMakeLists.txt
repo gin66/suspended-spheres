@@ -28,6 +28,8 @@ add_executable(motion_core_tests
     test_identifiers.cpp
     test_payloads.cpp
     test_bus.cpp
+    test_playback.cpp
+    test_steps.cpp
     abi_c.c
 )
 

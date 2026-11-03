@@ -28,13 +28,13 @@ it has a hard bandwidth limit.
    (**~52 / 47 / 35 %** load); `N=4` → 3,000 / 2,727 / 2,000 frames/s
    (**~39 / 35 / 26 %**). The familiar 30/40 ms cases are `Δt=10 ms`. All fit;
    a 10 ms *message* rate would not (156 %).
-2. **The format is viable; `Δt`, `N` and the units are design parameters.** Three
-   positions plus a speed is exactly 8 B, and four positions is also exactly
-   8 B. Use a **16-bit full-range position**: code 0 = 0 mm, code 65535 =
-   2000 mm (LSB 0.0305 mm at 2 m), and **0.04 mm/s** speed units (int16,
-   ±1310 mm/s) so the optional 1.2 m/s tier is covered. The node buffers the current and previous
-   message (`N·Δt` of future plus the previous segment's start state) and
-   interpolates the `Δt` samples locally.
+2. **The frame carries the cubic, not samples of it.** Four int16 fields —
+   position, speed, acceleration, jerk at the start of the segment — are
+   exactly 8 B. The segment lasts `N·Δt`. The node evaluates that polynomial.
+   It does not fit a Hermite or Catmull-Rom curve, and it does not need the
+   previous message to learn the tangent. Position is **16-bit full-range**
+   (code 0 = 0 mm, code 65535 = 2000 mm). Speed is **0.04 mm/s** (int16,
+   ±1310 mm/s).
 3. **Absolute positions, not deltas, are the robust choice.** A lost message
    leaves a bounded gap; the next message's absolute values re-anchor without
    accumulated error, and the node can decelerate/hold and resume cleanly.
@@ -42,9 +42,10 @@ it has a hard bandwidth limit.
    unless a re-anchor protocol is added.
 4. **The node should play back a trajectory, not plan one.** The designer tool
    owns the artistic and kinematic profile (including S-curves/jerk limits).
-   The node interpolates the streamed position-vs-time curve and feeds the step
-   generator. Do not use `moveTo()`/the ramp generator at 10 ms sample
-   intervals; restarting a ramp at every sample is the wrong abstraction.
+   The node evaluates the streamed polynomial and feeds the step generator.
+   Do not use `moveTo()` or the FastAccelStepper ramp at each segment;
+   restarting a ramp there plans a new rest-to-rest move instead of playing
+   the curve the master already computed.
 5. **FastAccelStepper is a good fit at the queue level.** Use its Pico PIO
    driver plus `FasTimed` (multi-axis timed chunks). Do **not** use `FasNAxis`
    for the grid: the balls are independent 1-D axes, not a coordinated
@@ -74,9 +75,9 @@ it has a hard bandwidth limit.
 | Node | **Selected:** Mellow Fly-Micro4 V1.0, RP2040, 4 × TMC2209, can2040 |
 | CAN | Classic CAN 2.0B, 1 Mbit/s, 120 Ω at the two physical ends only |
 | Sample interval | `Δt` configurable: 10, 11, 15 ms (default 10 ms) |
-| Wire format | 1 frame per motor: 3 × 16-bit position + 16-bit speed, or 4 × 16-bit position; message period `N·Δt` |
-| Lookahead | `N·Δt` from the current message; the previous message supplies the start state; buffered span `2·N·Δt` |
-| Node interpolation | Cubic Hermite / Catmull-Rom, monotone-limited, integer |
+| Wire format | 1 frame per motor: position, speed, acceleration, jerk at the segment start; message period `N·Δt` |
+| Lookahead | One segment of length `N·Δt`. The message carries the whole polynomial |
+| Node playback | Integer Horner of that polynomial. No curve fit on the node |
 | Step generation | FastAccelStepper Pico PIO + `FasTimed`, 2 ms chunks |
 | Microstepping | 1/16 with TMC2209 MicroPlyer interpolation |
 | Sync | Absolute timeline in a periodic sync frame; 20–100 ms is ample |
@@ -142,6 +143,10 @@ player.
 ---
 
 ## 3. Analysis of the proposed message
+
+This section is the sample-message study. The bus-rate numbers still apply:
+one 8-byte frame per motor per `N·Δt`. The payload those frames carry is the
+coefficient layout in §4.2, not the position samples analysed here.
 
 ### 3.1 The message as stated
 
@@ -288,52 +293,57 @@ command rate. It does **not** prescribe the payload format. `FR-ARCH-002`
 requires the command load to be independent of the local control/step rate;
 `NFR-REL-006` covers master/network loss.
 
-Both formats meet those outcomes:
-
-- **`N=3` + speed:** the previous `P(T), V(T)` and the current
-  `P(T+3Δt), V(T+3Δt)` define one cubic Hermite segment; the interior
-  positions are checkpoints. This is a compact local parameterization and is
-  preferred because the end speed makes the boundary C1.
-- **`N=4`:** a Catmull-Rom sample set with derived tangents; lower message
-  rate, but the boundary is less clean than the explicit speed field.
-- The node evaluates either at its own rate (1 kHz, or 2 ms chunks). The
-  network rate is `1/(N·Δt)` per motor and is independent of the control rate.
-- On message loss, the node decelerates/holds and retains its step position;
-  the next absolute message re-anchors (`NFR-REL-006`).
+The sample layouts studied in §3 meet those outcomes, and so does the
+coefficient frame in §4.2. The coefficient frame is the baseline. The node
+evaluates it at its own rate (1 kHz, or 2 ms chunks). The network rate is
+`1/(N·Δt)` per motor and is independent of the control rate. On message loss,
+the node decelerates, holds, and keeps its step position; the next absolute
+`p0` re-anchors (`NFR-REL-006`).
 
 The payload format is a design choice; the requirements constrain the
 outcomes, not the encoding.
 
-### 4.2 Baseline wire format — one message per motor, period `N·Δt`
+### 4.2 Baseline wire format — one cubic segment per motor
 
-One classic CAN data frame per motor per message period. `Δt` and `N` are
-persistent configuration; a change is applied at a pattern boundary or a
-controlled stop, not mid-segment.
+One classic CAN data frame per motor per segment. The segment length is
+`N·Δt` from the sync frame. `Δt` and `N` change only at a pattern boundary,
+not mid-segment. CAN ID type 0 (`Fly_Micro4_addressing.md`). Little-endian:
 
 ```
-N=3 + speed (8 B):  [ p1 : 16 ][ p2 : 16 ][ p3 : 16 ][ v3 : 16 ]
-N=4 (8 B):          [ p1 : 16 ][ p2 : 16 ][ p3 : 16 ][ p4 : 16 ]
+[ p0 : u16 ][ v0 : s16 ][ a0 : s16 ][ j : s16 ]
 ```
 
-The 11-bit CAN ID that names the motor and the frame type is defined in
-`Fly_Micro4_addressing.md`. This payload has no header of its own.
+| Field | Meaning at τ = 0 | Unit |
+|-------|------------------|------|
+| `p0` | absolute position | full-range code, 0 = 0 mm, 65535 = 2000 mm |
+| `v0` | speed | 0.04 mm/s, ±1310 mm/s |
+| `a0` | acceleration | 1 mm/s², ±32 767 mm/s² |
+| `j` | jerk, constant over the segment | 1 m/s³, ±32 767 m/s³ |
 
-- `pK` is an unsigned 16-bit **full-range position**: code 0 = 0 mm, code
-  65 535 = 2000 mm, at `T + K·Δt`. The physical value is
-  `z = pK / 65 535 × 2000 mm` (LSB 0.0305 mm at 2 m). Convert with the exact
-  ratio `2 000 000 µm / 65 535`, not a rounded 0.0305, to avoid scale drift.
-- `v3` is a signed 16-bit speed at `T + 3·Δt` in **0.04 mm/s** units
-  (`±1310 mm/s`), covering the optional 1.2 m/s tier.
-- All values little-endian.
-- The message applies to the global timeline tick `T` carried by the sync
-  frame in §4.5. The node must know which `T` a message belongs to and the
-  current `Δt`/`N`. The CAN ID does not carry a tick. Identifiers are 11-bit
-  only (`Fly_Micro4_addressing.md`).
+`τ` is microseconds since the segment start `T`. The polynomial is
+
+```
+p(τ) = p0 + v0·τ + a0·τ²/2 + j·τ³/6
+```
+
+Positive position, speed, and acceleration are upward. The node converts
+`p0` with `code × 2 000 000 / 65 535` and the other three fields by their
+LSBs, then evaluates with the integer Horner form in §4.7.
+
+A lost frame is still a bounded gap: the next message carries an absolute
+`p0`, not a delta from the previous sample. The master chooses `p0`, `v0`,
+and `a0` so the join matches the end of the previous segment. Matching `a0`
+to `a0 + j·Tseg` makes the join C2. The node checks the join; it does not
+invent the coefficients.
+
+§3 records the earlier idea of shipping three or four position samples and
+fitting a cubic on the node. That fit is retired; `lib/motion_core` packs
+and evaluates the four-field frame in §4.7.
 
 **Resolution check:** one full-range code step is 0.0305 mm = 30.5 µm at 2 m,
 finer than the 39.3 µm microstep and well under the 50 µm requirement
-(quantization ±15.3 µm). The node's interpolation supplies the sub-step values
-that the TMC2209 MicroPlyer then smooths.
+(quantization ±15.3 µm). The polynomial evaluation supplies the positions
+between the 2 ms chunks; the TMC2209 MicroPlyer smooths the steps.
 
 **Range check:** the coordinate is exactly the usable **0–2000 mm** travel.
 The home position and safe offset must lie inside it. Homing may search
@@ -342,16 +352,8 @@ coordinate is for normal playback only. There is no spare range in the field,
 so normal motion must not exceed 2000 mm; a longer mechanical travel would
 need a re-based coordinate or a coarser LSB.
 
-**Why the speed field in `N=3`:** the node keeps the previous message, so it
-has `P(T), V(T)` and `P(T+3Δt), V(T+3Δt)`. The speed at the end of one message
-is the start derivative of the next, which makes the boundary C1 even if the
-next message is delayed. In the `N=4` mode the fourth position supplies the
-boundary; the derivative is derived (Catmull-Rom) and the next message refines
-it when it arrives.
-
-**Changing `Δt` at runtime:** the node recomputes nothing in its step engine;
-it uses the new interval for the next segment and re-primes with the current
-message. The master must not change `Δt` while a segment is in flight. Because
+**Changing `Δt` at runtime:** the node uses the new interval for the next
+segment. The master must not change `Δt` while a segment is in flight. Because
 `Δt` is a timeline property, the sync/window header or the persistent
 configuration must identify the active value.
 
@@ -449,61 +451,56 @@ gaps, the window slips into the first sample. An embedded master with a
 hardware CAN controller (or an RP2040 running can2040) is the safer production
 choice; the PC is best for authoring and bench work.
 
-### 4.7 Node interpolation
+### 4.7 Node playback
 
-Given absolute samples `P0 … P3` at times `t0 … t3`, evaluate the segment
-`[t1, t2]` with a cubic Hermite:
+The node does not fit a curve. One message is one polynomial. With `τ` in
+microseconds and the coefficients converted to µm, µm/s, µm/s², and µm/s³:
 
 ```
-h  = t2 - t1
-s  = (t - t1) / h
-m1 = slope at t1 (from samples or from an explicit speed)
-m2 = slope at t2
-P(s) = h00(s)·P1 + h10(s)·h·m1 + h01(s)·P2 + h11(s)·h·m2
+x = j * τ / 6 / 1_000_000 + a / 2
+x = x * τ / 1_000_000 + v
+x = x * τ / 1_000_000 + p
 ```
 
-- **N=3 + speed:** use cubic Hermite over `[T, T+3Δt]` with `m1 = V(T)` from
-  the previous message's `v3` and `m2 = V(T+3Δt)` from the current message's
-  `v3`. The intermediate `p2` and `p3` validate the curve and expose a bad
-  sample; they do not redefine the endpoints.
-- **N=4:** use Catmull-Rom over `P(T)` from the previous message and
-  `P(T+Δt) … P(T+4Δt)` from the current one. The boundary tangent at `T+4Δt`
-  uses the next message's `p1` when it arrives; until then use the
-  `p3–p4` chord. The 16-bit full-range quantization (0.0305 mm at 2 m) makes
-  this tangent noisier
-  than the `N=3` speed field, which is why `N=3` is the preferred mode.
-- **If deriving a tangent anyway:** use the last three positions; a longer
-  averaging window is possible in the per-node alternative where samples are
-  buffered at 10/20 ms.
-- **Monotone limiting:** clamp tangents (Fritsch–Carlson or a simple
-  `|m| ≤ 3·|ΔP|/h` rule) so the cubic does not overshoot the endpoints. Near a
-  direction reversal, overshoot creates a spurious reversal, a DIR pause, and
-  possible thread slack. This is a correctness requirement, not a polish item.
-- **Acceleration/jerk check:** the master should already bound the profile.
-  The node should still reject or clamp a sample that would exceed the
-  configured acceleration; a fault is better than a visible jerk.
-- **Priming:** the current message plus the previous one are needed before the
-  node has both endpoints. After homing, the node knows `P(T)` and `V=0`; the
-  first message supplies the future samples. Alternatively, the master sends
-  one priming message before playback. Do not start interpolation on a single
-  message.
-- **Step conversion:** convert the full-range code to µm with
-  `z = code × 2 000 000 / 65 535`, then to step counts with a fixed-point
-  `steps_per_m`; keep the fractional remainder (Bresenham). Do not round each
-  chunk independently, or the average speed drifts.
-- **Chunking:** sample the interpolated curve at chunk boundaries (2 ms) and
-  feed the per-axis step delta to `FasTimed`. The chunker must guarantee
-  `|steps| ≤ 128` and `ticks ∈ [MIN_CMD_TICKS, 65535]` (see §5.4).
+All intermediates are `int64_t`. Division truncates toward zero. This is the
+only evaluator. Do not implement a Hermite basis, a Catmull-Rom tangent, or
+a monotone limiter on the node: the master already chose the shape, including
+any limit that keeps the sphere from reversing inside the segment.
 
-The result is C1-continuous position. The constant-rate chunk approximation at
-2 ms (500 Hz) is far above the mechanical bandwidth and is inaudible.
+`j * τ` at the int16 rails and `τ = 30 ms` stays inside int64. Divide before
+the next multiply, in the order above.
 
-**S-curves (`FR-MOT-006`).** The cubic is C1, not C2: acceleration is
-continuous within a segment but may step at the `N·Δt` boundary. A
-master-generated S-curve is approximated by the sampled segments. At this
-slow motion, verify visually (`T-SMOOTH-001`); if C2 continuity at every
-boundary is required, shorten `Δt` or use a higher-order parameterization,
-which costs bandwidth.
+- **Range.** Reject the segment if `p(0)` or `p(Tseg)` is outside
+  0–2 000 000 µm, or if `|v0|`, `|a0|`, or `|j|` exceeds its int16 range.
+  Do not clamp.
+- **Thread.** Acceleration along the segment is `a0 + j·τ`, linear in time.
+  Positive is upward. Reject the segment if either endpoint is below
+  −9.81 m/s².
+- **Join.** If the axis is already playing, the new `p0` and `v0` must match
+  `p(Tseg)` and `v(Tseg)` of the previous segment within one LSB. Otherwise
+  hold and fault. After a hold, the next `p0` must match the held position
+  within one position code.
+- **One message is enough.** The four coefficients define the segment. There
+  is no priming message and no stored tangent from the previous frame.
+- **Step conversion.** Map the evaluated micrometres to steps with the
+  Q16.16 `steps_per_mm` factor. Keep the fractional remainder. Do not round
+  each chunk independently.
+- **Chunking.** Evaluate at 2 ms boundaries and feed the per-axis step delta
+  to `FasTimed`. `|steps| ≤ 128` and `ticks ∈ [MIN_CMD_TICKS, 65535]`.
+
+**Why this is not FastAccelStepper `log2`.** `src/log2/Log2Representation.cpp`
+stores a positive magnitude as `x = 2^(xi/512)`. Multiply is an add, and a
+square root is a divide by two. Zero and negative numbers are outside the
+representation. `RampCalculator` uses that to answer a different question:
+how many ticks a rest-to-rest ramp needs for a positive step count. Playback
+speed and acceleration are signed and are often near zero, so the logarithmic
+form does not apply. Leave `log2` inside FastAccelStepper for homing and for
+a fault stop. The playback hot path is the Horner form above.
+
+**S-curves (`FR-MOT-006`).** Jerk is constant inside the segment, so
+acceleration is continuous there. At the boundary, acceleration is continuous
+only when the master sets the next `a0` to `a0 + j·Tseg`. The node plays the
+coefficients it is given.
 
 ### 4.8 Timing, buffering and failure
 
@@ -964,7 +961,7 @@ motion_core/
     units.h          # µm, µs, Q16.16 helpers
     sample.h         # Sample { t_us, pos_um }
     trajectory.h     # per-axis ring of absolute samples
-    interpolator.h   # cubic Hermite, monotone limits
+    playback.h       # Horner evaluation of p0, v0, a0, j
     step_planner.h   # µm -> step deltas, fractional accumulator
     protocol.h       # CAN frame pack/unpack
     limits.h         # travel, velocity, accel, step rate
@@ -975,12 +972,14 @@ motion_core/
 Expose a small C ABI for WASM:
 
 ```c
-int  mc_trajectory_push(mc_trajectory*, int axis, int64_t t_us, int32_t pos_um);
-int  mc_eval(const mc_trajectory*, int64_t t_us, int32_t out_um[4]);
-int  mc_step_chunk(const mc_trajectory*, int64_t t_us, int16_t out_steps[4],
-                   uint16_t* ticks);
-int  mc_pack_frame(const int32_t pos_um[4], uint8_t out[8], int variant);
-int  mc_unpack_frame(const uint8_t in[8], int32_t pos_um[4], int variant);
+int  mc_trajectory_push(int axis, int type, int64_t t_start_us,
+                        int64_t tseg_us, const mc_segment_t* seg);
+int  mc_eval(int axis, int64_t t_us);            /* µm, -1 while idle */
+int  mc_step_chunk(int16_t out_steps[4], uint16_t* ticks,
+                   int64_t t_us, int32_t chunk_us);
+int  mc_pack_frame(int type, const mc_segment_t* seg, uint8_t out[8]);
+int  mc_unpack_frame(const uint8_t in[8], int len, int expect_type,
+                     mc_segment_t* seg);
 ```
 
 The firmware links the same sources. The simulation calls `mc_eval` for
@@ -1215,7 +1214,7 @@ shows the result while it is running. The agent is another editor of the file.
 | Position | int32 µm in the core; wire format is 16-bit full-range (0–2000 mm; 65535 = 2000 mm; LSB 0.0305 mm) |
 | Axis order | Local axes 0..3 are Drive0–Drive3 in silkscreen order. Motor IDs and node IDs are in `Fly_Micro4_addressing.md` |
 | Sample | Absolute position at a timeline tick; no deltas in the baseline |
-| Interpolation | C1 cubic Hermite with monotone-limited tangents |
+| Playback | One cubic per message: `p0, v0, a0, j`. Integer Horner, §4.7 |
 | Step chunk | 2 ms, `|steps| ≤ 128`, `ticks ∈ [3200, 65535]` at 16 MHz |
 | Fault | Hold/decelerate, report, never jump; E-stop is hardware |
 | Identity/addressing | `Fly_Micro4_addressing.md` |
@@ -1264,9 +1263,9 @@ shared core, the host tests and this table together.
    termination resistors, DIAG routing.
 2. Order one USB-CAN adapter (slcan preferred for cross-platform) and a logic
    analyser.
-3. Decide `N=3` + speed vs `N=4` and the `Δt` (10/11/15 ms) by a bench
-   quantization and jitter test on one ball at the slowest intended speed; keep the per-node
-   A (10 ms / 16-bit full-range) packing as an alternate.
+3. Keep the cubic coefficient frame in §4.2. Choose the segment length
+   `N·Δt` (Δt of 10, 11, or 15 ms) by a bench quantization and jitter test
+   on one ball at the slowest intended speed.
 4. Stand up the shared core and the host tests in `motion_streaming_tdd.md`
    before writing firmware. That list is the work that needs no board.
 5. Prototype the web viewer with a synthetic 120-ball sine field; add the WASM

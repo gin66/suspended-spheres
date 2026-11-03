@@ -86,15 +86,16 @@ That session stops there. It does not add `PlaybackClock`, the identifier
 tests (§3), the frame codecs beyond the endian check in U7, the golden
 file, the Python fixture, or the WASM build.
 
-**Progress note (2026-11-03, second slice).** §3 (I1–I10), §4
-(P1, P2, P3, P10) and §5 (B1–B5, B7) are now implemented and passing; the
-identifier and bus-budget APIs are in `lib/motion_core`, and the payload
-pack/unpack proved out the exact §4.2 byte layout. One clarification from
-that slice: `mc_unpack_frame` takes the expected variant (`3` or `4`) from
-the caller — the N=3 and N=4 payloads are byte-indistinguishable, so the
-variant cannot come from the wire, matching §6.3.
-Still open: interpolation (C1–C9), steps and chunks (§7), node playback
-(§8), the remaining payloads P4–P9, B6/B8, and the golden file.
+**Progress note (2026-11-03, third slice).** §1–§3, §4 (P1–P3, P10),
+§5 (B1–B5, B7), §6 (C1–C10) and §7 (S1–S10) are implemented and passing.
+The identifier rules follow the updated addressing document: type 0 is
+motion, type 1 is reserved and rejected. The retired `N=3` / `N=4` sample
+packer has been replaced by the four-field cubic frame (P1–P3, P10), and
+`mc_eval` / `mc_step_chunk` implement the §4.7 Horner playback and the
+per-axis fractional-step accumulator.
+Still open: node playback (§8), the remaining payloads P4–P9, B6/B8,
+commissioning (§9), the pattern bake and file state (§10–§11), and the
+golden file / WASM parity (§12).
 
 Later byte layouts are the Markdown tables in the whitepaper §4.5 and in
 `Fly_Micro4_addressing.md` §3. There is no separate schema file. A test
@@ -136,17 +137,17 @@ thermals.
 
 ## 1. Harness
 
-- [ ] **H1** The host target builds the core and the tests with no Pico SDK,
+- [x] **H1** The host target builds the core and the tests with no Pico SDK,
   no PIO headers, and no CAN socket. The test binary exits 0 when every
   assertion holds.
-- [ ] **H2** A compile-time check fails if `TICKS_PER_S` is not 16 000 000,
+- [x] **H2** A compile-time check fails if `TICKS_PER_S` is not 16 000 000,
   `MIN_CMD_TICKS` is not 3 200, or the per-chunk step limit is not 128.
   These are the `FasTimed` limits from §5.3, copied as constants the host
   can see.
-- [ ] **H3** A source check fails if the core directory contains a `float`
+- [x] **H3** A source check fails if the core directory contains a `float`
   or `double` type. Conversion to floating point is allowed only in the
   renderer and in test printers.
-- [ ] **H4** The public C ABI in §6.3 (`mc_trajectory_push`, `mc_eval`,
+- [x] **H4** The public C ABI in §6.3 (`mc_trajectory_push`, `mc_eval`,
   `mc_step_chunk`, `mc_pack_frame`, `mc_unpack_frame`) links from a C
   caller. Names and integer widths match the header.
 
@@ -156,21 +157,21 @@ thermals.
 
 Whitepaper §3.2, §4.2, Appendix A.
 
-- [ ] **U1** Code 0 converts to 0 µm. Code 65 535 converts to 2 000 000 µm.
-- [ ] **U2** Conversion uses `code × 2 000 000 / 65 535` in integer
+- [x] **U1** Code 0 converts to 0 µm. Code 65 535 converts to 2 000 000 µm.
+- [x] **U2** Conversion uses `code × 2 000 000 / 65 535` in integer
   arithmetic. A test that instead multiplies by 0.0305 mm diverges from
   the integer result across the travel; the core matches the integer form.
-- [ ] **U3** `code = round(z / 2 000 mm × 65 535)` round-trips every code
+- [x] **U3** `code = round(z / 2 000 mm × 65 535)` round-trips every code
   in `0 … 65 535` back to itself.
-- [ ] **U4** One code step is 30.5 µm at 2 m, which is below the 50 µm
+- [x] **U4** One code step is 30.5 µm at 2 m, which is below the 50 µm
   visual limit (`FR-MOT-002`) and below the 39.3 µm microstep.
-- [ ] **U5** Speed unit is 0.04 mm/s, signed 16-bit. +32 767 encodes
+- [x] **U5** Speed unit is 0.04 mm/s, signed 16-bit. +32 767 encodes
   +1 310.68 mm/s. −32 768 is the negative rail. 1.2 m/s encodes as 30 000.
   A value past ±1 310 mm/s is rejected, not wrapped.
-- [ ] **U6** A 0.02 mm/s LSB does not cover 1.2 m/s (the core's speed unit
+- [x] **U6** A 0.02 mm/s LSB does not cover 1.2 m/s (the core's speed unit
   is 0.04 mm/s). This locks the §3.2 recommendation.
-- [ ] **U7** Positions and speeds in a frame are little-endian.
-- [ ] **U8** Position domain in the core is `0 … 2 500 000` µm. A sample
+- [x] **U7** Positions and speeds in a frame are little-endian.
+- [x] **U8** Position domain in the core is `0 … 2 500 000` µm. A sample
   outside `0 … 2 000 000` µm is out of the wire range (§4.2).
 
 ---
@@ -181,8 +182,9 @@ Whitepaper §3.2, §4.2, Appendix A.
 
 - [x] **I1** `id = (field << 4) | type`, and `id` is in `0 … 0x7FF`. A
   value above 0x7FF is rejected. There is no 29-bit encoder.
-- [x] **I2** Type 0 and type 1 carry a motor ID in `1 … 120`. Field 0 with
-  either motion type is rejected. Motor IDs `121 … 127` are rejected.
+- [x] **I2** Type 0 carries a motor ID in `1 … 120`. Type 1 is reserved and
+  rejected. Field 0 with type 0 is rejected. Motor IDs `121 … 127` are
+  rejected.
 - [x] **I3** Type 2 (sync) requires field 0.
 - [x] **I4** Types 3–7 carry a node ID in `1 … 30`, or 0 for a broadcast.
   Node ID 31 is rejected.
@@ -190,15 +192,15 @@ Whitepaper §3.2, §4.2, Appendix A.
   Type 9 (`HELLO`) carries the short node ID.
 - [x] **I6** Types 12–15 are rejected.
 - [x] **I7** Motor 5 / type 0 and node 5 / type 3 produce different
-  identifiers. The decoder reports a motor for types 0–1 and a node for
+  identifiers. The decoder reports a motor for type 0 and a node for
   types 3–7 and 9.
 - [x] **I8** Node *n* owns motors `4(n−1)+1 … 4(n−1)+4`. Node 1 owns 1–4.
   Node 30 owns 117–120. Node 0 and node 31 own nothing.
-- [x] **I9** Node *n* accepts motion for its four motors, frames addressed
-  to node *n*, and field 0. A motion frame for any other motor is discarded
-  before the payload is parsed. A table drives all 30 nodes.
-- [x] **I10** **Property.** For every motor in `1 … 120` and both motion
-  types, exactly one node accepts the frame.
+- [x] **I9** Node *n* accepts motion (type 0) for its four motors, frames
+  addressed to node *n*, and field 0. A motion frame for any other motor is
+  discarded before the payload is parsed. A table drives all 30 nodes.
+- [x] **I10** **Property.** For every motor in `1 … 120` (type 0), exactly
+  one node accepts the frame.
 
 ---
 
@@ -206,11 +208,12 @@ Whitepaper §3.2, §4.2, Appendix A.
 
 Whitepaper §4.2, §4.3, §4.5. Addressing §3.
 
-- [x] **P1** An `N=3` motion payload is exactly 8 bytes: three unsigned
-  16-bit positions and one signed 16-bit speed, little-endian. Pack and
-  unpack are inverses, including a negative speed.
-- [x] **P2** An `N=4` motion payload is exactly 8 bytes: four unsigned
-  16-bit positions. Pack and unpack are inverses.
+- [x] **P1** A type-0 motion payload is exactly 8 bytes: one unsigned
+  16-bit position and three signed 16-bit coefficients (`p0, v0, a0, j`),
+  little-endian. Pack and unpack are inverses, including negative
+  coefficients.
+- [x] **P2** Type 1 is reserved; pack and unpack reject it. The retired
+  `N=3` / `N=4` sample layouts are not motion frames.
 - [x] **P3** A payload shorter or longer than 8 bytes is rejected.
 - [ ] **P4** The sync frame matches the whitepaper §4.5 byte table. A sync
   ID is field 0, type 2. After `t_us_low` wraps, the reconstructed `int64`
@@ -229,7 +232,7 @@ Whitepaper §4.2, §4.3, §4.5. Addressing §3.
   node) packs and unpacks. A flag on the unpacked frame says it is not the
   per-motor baseline.
 - [x] **P10** `mc_pack_frame` / `mc_unpack_frame` follow P1 and P2 for the
-  variants in §6.3.
+  motion variants in §6.3.
 
 ---
 
@@ -267,42 +270,36 @@ assumption fails here.
 
 ---
 
-## 6. Interpolation
+## 6. Playback polynomial
 
-Whitepaper §3.4, §4.7.
+Whitepaper §4.2 and §4.7. The node evaluates coefficients. It does not fit
+samples. The four-field frame replaced the retired sample packer in
+`lib/motion_core` in this slice.
 
-- [ ] **C1** With one message and no previous message, `mc_eval` returns
-  "not primed". Playback does not start.
-- [ ] **C2** After a home state `P(T)`, `V = 0`, the first future message
-  primes the axis. A second message is the other legal way to prime.
-- [ ] **C3** `N=3`: the cubic on `[T, T+3Δt]` uses `V(T)` from the previous
-  message's `v3` and `V(T+3Δt)` from the current `v3`. Endpoints match
-  those positions in µm. Interior `p2` and `p3` are checkpoints: a cubic
-  that misses a checkpoint by more than one code step is a fault, and the
-  checkpoints do not move the endpoints.
-- [ ] **C4** At a message boundary the outgoing speed equals the next
-  message's incoming speed when both `v3` values agree. Sampled velocity
-  on either side of `T+3Δt` agrees within one speed LSB.
-- [ ] **C5** `N=4`: Catmull-Rom uses `P(T)` from the previous message and
-  `P(T+Δt) … P(T+4Δt)` from the current one. Before the next message
-  arrives, the tangent at `T+4Δt` is the `p3–p4` chord. When the next
-  message arrives, the tangent becomes its `p1`.
-- [ ] **C6** Monotone limit: for a non-decreasing pair of endpoints the
-  cubic does not go below the lower endpoint or above the upper one.
-  The tangent bound is `|m| ≤ 3·|ΔP|/h`.
-- [ ] **C7** A direction reversal that would overshoot is limited so the
-  position does not reverse twice inside the segment.
-- [ ] **C8** A segment whose implied acceleration exceeds the configured
-  limit (1.5 m/s² nominal, 4 m/s² optional) is rejected. The axis holds.
-  The core does not clamp the sample into range.
-- [ ] **C9** Evaluation is a pure function of the timeline. Calling
-  `mc_eval` twice at the same `t_us` returns the same µm. Injecting a
-  different step-counter value does not change the result (`§3.4`,
-  open loop).
-- [ ] **C10** **Property.** Random monotone keyframes inside the travel
-  stay inside their endpoints at 100 query times per segment. All
-  arithmetic uses `int64_t` intermediates; the test compares against an
-  independent integer implementation, not against `float`.
+- [x] **C1** `mc_eval` of `p0, v0=0, a0=0, j=0` returns `p0` at every `τ`
+  inside the segment, in micrometres.
+- [x] **C2** Constant speed: `a0 = 0`, `j = 0`. At `τ` the result is
+  `p0 + v0·τ`, using the Horner order in §4.7. One speed LSB over 30 ms
+  moves 1.2 µm.
+- [x] **C3** Constant acceleration and constant jerk match
+  `p + vτ + aτ²/2 + jτ³/6` at `τ = 0`, at 2 ms, and at `Tseg`. The test
+  computes that polynomial with the same divide-before-multiply order, in
+  `int64_t`.
+- [x] **C4** A second call at the same `τ` returns the same micrometres.
+  A different step-counter value does not change the result.
+- [x] **C5** One message is a complete segment. No previous message is
+  consulted. Type 1 is rejected.
+- [x] **C6** While playing, the next `p0` and `v0` must match the previous
+  segment's end position and end speed within one LSB. A larger position
+  gap holds and faults.
+- [x] **C7** After a hold, a segment whose `p0` matches the held position
+  within one position code is accepted.
+- [x] **C8** A segment whose acceleration at either endpoint is below
+  −9.81 m/s² is rejected. The stored position is unchanged.
+- [x] **C9** `p(Tseg)` outside 0–2 000 000 µm is rejected.
+- [x] **C10** **Property.** 100 random int16 coefficient sets, seed
+  `0x12345678`. Each accepted segment matches the independent Horner
+  implementation at 20 times. No `float` in either implementation.
 
 ---
 
@@ -310,28 +307,28 @@ Whitepaper §3.4, §4.7.
 
 Whitepaper §4.7, §5.3, §5.4, Appendix A.
 
-- [ ] **S1** The Q16.16 steps/mm constant represents
+- [x] **S1** The Q16.16 steps/mm constant represents
   `3200 / (π × 40 mm) = 25.4648 steps/mm`. Full-scale 2 000 mm converts
   to a step count within 1 step of `round(2 000 × 25.4648)`.
-- [ ] **S2** A fractional-step accumulator is kept per axis. Summing chunk
+- [x] **S2** A fractional-step accumulator is kept per axis. Summing chunk
   deltas across 2 000 mm equals the net step count from S1. Rounding each
   chunk on its own is the failing control: that sum drifts by more than
   one step.
-- [ ] **S3** At 1.2 m/s a 2 ms chunk is 61 steps. At 0.6 m/s it is 31
+- [x] **S3** At 1.2 m/s a 2 ms chunk is 61 steps. At 0.6 m/s it is 31
   steps. Both are inside `[-128, +128]`.
-- [ ] **S4** A requested 5 ms chunk at 1.2 m/s (153 steps) is rejected.
+- [x] **S4** A requested 5 ms chunk at 1.2 m/s (153 steps) is rejected.
   A 10 ms chunk (306 steps) is rejected. A 2 ms chunk is accepted.
-- [ ] **S5** A 2 ms chunk at 16 MHz is 32 000 ticks. Ticks lie in
+- [x] **S5** A 2 ms chunk at 16 MHz is 32 000 ticks. Ticks lie in
   `[3 200, 65 535]`. A chunk shorter than 200 µs is rejected.
-- [ ] **S6** For `Δt` of 11 ms and 15 ms, chunk boundaries stay on the
+- [x] **S6** For `Δt` of 11 ms and 15 ms, chunk boundaries stay on the
   2 ms grid. The evaluator is queried at those boundaries, not at `Δt`.
-- [ ] **S7** Four axes in one timed chunk share one tick count. A reversal
+- [x] **S7** Four axes in one timed chunk share one tick count. A reversal
   on axis 0 does not change the step delta of axes 1–3.
-- [ ] **S8** `mc_step_chunk` returns per-axis steps and the tick count for
+- [x] **S8** `mc_step_chunk` returns per-axis steps and the tick count for
   a 2 ms boundary. Steps match S3 for a constant-speed segment.
-- [ ] **S9** An underrun flag, once set by the simulated feeder, stays set
+- [x] **S9** An underrun flag, once set by the simulated feeder, stays set
   until an explicit clear and is reported as a fault.
-- [ ] **S10** The chunk feeder's host double is a queue of `(steps, ticks)`
+- [x] **S10** The chunk feeder's host double is a queue of `(steps, ticks)`
   with the §5.3 horizon of 8. `add` returns rejected when the horizon is
   full; after `pump` frees a slot, `add` succeeds. This double is not
   `FasTimed` and does not touch PIO. A later test may compare it with
@@ -511,7 +508,7 @@ After that:
 
 1. Identifiers (§3).
 2. Motion payloads P1, P2, P3, P10 (§4) and the bus budget B1–B5, B7 (§5).
-3. Interpolation C1–C8 (§6) and steps S1–S8 (§7).
+3. Playback polynomial C1–C10 (§6) and steps S1–S10 (§7). **Done.**
 4. Node playback N1–N8, N13 (§8) and the remaining payloads P4, P5, P8.
    Those byte tables are in the whitepaper §4.5 and the addressing note §3.
 5. Commissioning (§9) and the pattern bake (§10).

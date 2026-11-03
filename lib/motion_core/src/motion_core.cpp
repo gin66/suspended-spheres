@@ -58,9 +58,10 @@ int mc_id_make(int field, int type) {
     if (field < 0 || field > 127)
         return -1;
     switch (type) {
-    case 0:
-    case 1:   /* motion: motor 1…120 (I2) */
+    case 0:   /* motion: motor 1…120 (I2) */
         return (field >= 1 && field <= 120) ? ((field << 4) | type) : -1;
+    case 1:   /* reserved since the cubic segment frame; reject (I2) */
+        return -1;
     case 2:   /* sync: field 0 only (I3) */
         return (field == 0) ? 2 : -1;
     case 3:
@@ -102,7 +103,7 @@ int mc_id_motor(int id) {
     if (id < 0 || id > MC_ID_MAX)
         return -1;
     int type = mc_id_type(id);
-    if (type != 0 && type != 1)
+    if (type != 0)
         return -1;
     int field = mc_id_field(id);
     if (field < 1 || field > 120)
@@ -176,7 +177,7 @@ int mc_node_accepts_id(int node, int id) {
     int type = mc_id_type(id);
     int field = mc_id_field(id);
 
-    if (type == 0 || type == 1)             /* motion for own motors */
+    if (type == 0)                           /* motion for own motors */
         return mc_node_owns_motor(node, field);
     if (field == 0)                          /* any broadcast reaches us */
         return 1;
@@ -186,7 +187,7 @@ int mc_node_accepts_id(int node, int id) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Motion payload (P1, P2, P3, P10; whitepaper §4.2)                  */
+/*  Motion frame: one cubic segment per motor (P1–P3, P10; §4.2)       */
 /* ------------------------------------------------------------------ */
 
 static void put_u16le(uint8_t *p, uint16_t v) {
@@ -198,48 +199,26 @@ static uint16_t get_u16le(const uint8_t *p) {
     return (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
 }
 
-int mc_pack_frame(int n, const uint16_t pos[4], int16_t speed,
-                  uint8_t *buf) {
-    if (pos == 0 || buf == 0)
+int mc_pack_frame(int type, const mc_segment_t *seg, uint8_t buf[8]) {
+    if (seg == 0 || buf == 0 || type != 0)
         return -1;
-    if (n == 3) {
-        put_u16le(buf + 0, pos[0]);
-        put_u16le(buf + 2, pos[1]);
-        put_u16le(buf + 4, pos[2]);
-        put_u16le(buf + 6, (uint16_t)speed);
-        return 0;
-    }
-    if (n == 4) {
-        put_u16le(buf + 0, pos[0]);
-        put_u16le(buf + 2, pos[1]);
-        put_u16le(buf + 4, pos[2]);
-        put_u16le(buf + 6, pos[3]);
-        return 0;
-    }
-    return -1;
+    put_u16le(buf + 0, seg->p0);
+    put_u16le(buf + 2, (uint16_t)seg->v0);
+    put_u16le(buf + 4, (uint16_t)seg->a0);
+    put_u16le(buf + 6, (uint16_t)seg->j);
+    return 0;
 }
 
-int mc_unpack_frame(const uint8_t *buf, int len, int expect_n,
-                    uint16_t pos[4], int16_t *speed) {
-    if (buf == 0 || len != 8)
+int mc_unpack_frame(const uint8_t buf[8], int len, int expect_type,
+                    mc_segment_t *seg) {
+    if (buf == 0 || len != 8 || expect_type != 0 || seg == 0)
         return -1;
-    if (expect_n != 3 && expect_n != 4)
-        return -1;
-    /* fill nothing until the inputs are known-good */
-    uint16_t tmp[4];
-    tmp[0] = get_u16le(buf + 0);
-    tmp[1] = get_u16le(buf + 2);
-    tmp[2] = get_u16le(buf + 4);
-    tmp[3] = get_u16le(buf + 6);
-    pos[0] = tmp[0];
-    pos[1] = tmp[1];
-    pos[2] = tmp[2];
-    if (expect_n == 3) {
-        if (speed != 0)
-            *speed = (int16_t)tmp[3];
-    } else {
-        pos[3] = tmp[3];
-    }
+    mc_segment_t tmp;
+    tmp.p0 = get_u16le(buf + 0);
+    tmp.v0 = (int16_t)get_u16le(buf + 2);
+    tmp.a0 = (int16_t)get_u16le(buf + 4);
+    tmp.j  = (int16_t)get_u16le(buf + 6);
+    *seg = tmp;
     return 0;
 }
 
@@ -296,21 +275,231 @@ int64_t mc_bus_frames_time_us(int64_t frames) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Public C ABI stubs — later slices (§6.3 whitepaper)                */
+/*  Playback polynomial (C1–C10; whitepaper §4.7)                      */
 /* ------------------------------------------------------------------ */
 
-int mc_trajectory_push(int axis_id, int64_t t_us,
-                       uint16_t pos_code, int16_t speed_code) {
-    (void)axis_id; (void)t_us; (void)pos_code; (void)speed_code;
-    return -1; /* stub */
+#define MC_UM_PER_M       1000000
+#define MC_ACCEL_FLOOR_UM (-9810000)   /* −9.81 m/s² in µm/s² */
+
+typedef struct {
+    mc_segment_t seg;
+    int64_t start_us;
+    int64_t tseg_us;
+    int state;
+    int fault;
+    int32_t held_um;
+    int32_t step_pos;
+} mc_axis_t;
+
+static mc_axis_t g_axes[MC_AXIS_COUNT];
+
+static int32_t abs_i32(int32_t v) {
+    return v < 0 ? -v : v;
+}
+
+/* Integer Horner form, whitepaper §4.7. Division truncates toward zero. */
+static int64_t seg_eval_um(const mc_segment_t *s, int64_t tau_us) {
+    int64_t p = mc_code_to_um(s->p0);
+    int64_t v = (int64_t)s->v0 * 40;                 /* µm/s          */
+    int64_t a = (int64_t)s->a0 * 1000;               /* µm/s²         */
+    int64_t j = (int64_t)s->j * MC_UM_PER_M;         /* µm/s³         */
+
+    int64_t x = j * tau_us / 6 / MC_UM_PER_M + a / 2;
+    x = x * tau_us / MC_UM_PER_M + v;
+    x = x * tau_us / MC_UM_PER_M + p;
+    return x;
+}
+
+static int64_t seg_speed_um_s(const mc_segment_t *s, int64_t tau_us) {
+    int64_t v = (int64_t)s->v0 * 40;                 /* µm/s          */
+    int64_t a = (int64_t)s->a0 * 1000;               /* µm/s²         */
+    int64_t j = (int64_t)s->j * MC_UM_PER_M;         /* µm/s³         */
+
+    /* v(τ) = v0 + a·τ/1e6 + j·τ²/(2·1e12) */
+    return v + a * tau_us / MC_UM_PER_M
+             + j * tau_us / MC_UM_PER_M * tau_us / 2 / MC_UM_PER_M;
+}
+
+static int32_t seg_accel_um_s2(const mc_segment_t *s, int64_t tau_us) {
+    /* a(τ) = a0 + j·τ; with j in µm/s³ and τ in µs this is a0 + j_code·τ */
+    return (int32_t)((int64_t)s->a0 * 1000 + (int64_t)s->j * tau_us);
+}
+
+void mc_core_reset(void) {
+    for (int i = 0; i < MC_AXIS_COUNT; ++i) {
+        g_axes[i].seg.p0 = 0;
+        g_axes[i].seg.v0 = 0;
+        g_axes[i].seg.a0 = 0;
+        g_axes[i].seg.j  = 0;
+        g_axes[i].start_us = 0;
+        g_axes[i].tseg_us = 0;
+        g_axes[i].state = MC_AXIS_IDLE;
+        g_axes[i].fault = 0;
+        g_axes[i].held_um = 0;
+        g_axes[i].step_pos = 0;
+    }
+}
+
+int mc_trajectory_push(int axis_id, int type, int64_t t_start_us,
+                       int64_t tseg_us, const mc_segment_t *seg) {
+    if (axis_id < 0 || axis_id >= MC_AXIS_COUNT || seg == 0 || tseg_us <= 0)
+        return -1;
+
+    mc_axis_t *ax = &g_axes[axis_id];
+
+    if (type != 0) {
+        ax->fault |= MC_FAULT_TYPE;
+        return -1;
+    }
+
+    int32_t p0_um = mc_code_to_um(seg->p0);
+    int64_t p_end = seg_eval_um(seg, tseg_us);
+    int32_t a0_um = seg_accel_um_s2(seg, 0);
+    int32_t a_end_um = seg_accel_um_s2(seg, tseg_us);
+
+    if (mc_um_in_range(p0_um) == 0 || p_end < 0 || p_end > 2000000) {
+        ax->fault |= MC_FAULT_RANGE;
+        ax->state = MC_AXIS_HOLD;
+        return -1;
+    }
+    if (a0_um < MC_ACCEL_FLOOR_UM || a_end_um < MC_ACCEL_FLOOR_UM) {
+        ax->fault |= MC_FAULT_ACCEL;
+        ax->state = MC_AXIS_HOLD;
+        return -1;
+    }
+
+    if (ax->state == MC_AXIS_PLAYING) {
+        int64_t prev_end = seg_eval_um(&ax->seg, ax->tseg_us);
+        int32_t prev_end_code = mc_um_to_code((int32_t)prev_end);
+        int32_t prev_v_code =
+            mc_speed_encode((int32_t)seg_speed_um_s(&ax->seg, ax->tseg_us));
+        int32_t p_gap = (int32_t)seg->p0 - prev_end_code;
+        int32_t v_gap = (int32_t)seg->v0 - prev_v_code;
+
+        if (abs_i32(p_gap) > 1 || abs_i32(v_gap) > 1) {
+            ax->state = MC_AXIS_HOLD;
+            ax->fault |= MC_FAULT_JOIN;
+            ax->held_um = (int32_t)prev_end;
+            return -1;
+        }
+    } else if (ax->state == MC_AXIS_HOLD) {
+        int32_t held_code = mc_um_to_code(ax->held_um);
+        int32_t p_gap = (int32_t)seg->p0 - held_code;
+        if (abs_i32(p_gap) > 1) {
+            ax->fault |= MC_FAULT_JOIN;
+            return -1;
+        }
+    }
+
+    ax->seg = *seg;
+    ax->start_us = t_start_us;
+    ax->tseg_us = tseg_us;
+    ax->state = MC_AXIS_PLAYING;
+    ax->fault = 0;
+    ax->held_um = (int32_t)p_end;
+    ax->step_pos = mc_um_to_steps(p0_um);
+    return 0;
 }
 
 int32_t mc_eval(int axis_id, int64_t t_us) {
-    (void)axis_id; (void)t_us;
-    return -1; /* stub */
+    if (axis_id < 0 || axis_id >= MC_AXIS_COUNT)
+        return -1;
+
+    mc_axis_t *ax = &g_axes[axis_id];
+    if (ax->state == MC_AXIS_PLAYING) {
+        int64_t tau = t_us - ax->start_us;
+        if (tau < 0)
+            tau = 0;
+        if (tau > ax->tseg_us)
+            tau = ax->tseg_us;
+        return (int32_t)seg_eval_um(&ax->seg, tau);
+    }
+    if (ax->state == MC_AXIS_HOLD)
+        return ax->held_um;
+    return -1;
 }
 
-int mc_step_chunk(int16_t steps[4], uint16_t *ticks, int64_t t_us) {
-    (void)steps; (void)ticks; (void)t_us;
-    return -1; /* stub */
+int mc_axis_state(int axis_id) {
+    if (axis_id < 0 || axis_id >= MC_AXIS_COUNT)
+        return -1;
+    return g_axes[axis_id].state;
+}
+
+int mc_axis_fault_flags(int axis_id) {
+    if (axis_id < 0 || axis_id >= MC_AXIS_COUNT)
+        return 0;
+    return g_axes[axis_id].fault;
+}
+
+int32_t mc_axis_held_um(int axis_id) {
+    if (axis_id < 0 || axis_id >= MC_AXIS_COUNT)
+        return -1;
+    return g_axes[axis_id].held_um;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Steps and chunks (S1–S8; whitepaper §4.7, §5.3, §5.4)              */
+/* ------------------------------------------------------------------ */
+
+int32_t mc_steps_per_mm_q16(void) {
+    return MC_STEPS_PER_MM_Q16;
+}
+
+static int64_t round_div(int64_t num, int64_t den) {
+    if (num >= 0)
+        return (num + den / 2) / den;
+    return -((-num + den / 2) / den);
+}
+
+int32_t mc_um_to_steps(int32_t um) {
+    /* steps = round(um / 1000 mm × steps_per_mm_q16 / 65536) */
+    return (int32_t)round_div((int64_t)um * MC_STEPS_PER_MM_Q16,
+                              1000LL * 65536LL);
+}
+
+int mc_step_chunk(int16_t steps[4], uint16_t *ticks, int64_t t_us,
+                  int32_t chunk_us) {
+    if (steps == 0 || ticks == 0 || chunk_us <= 0)
+        return -1;
+
+    int64_t tick64 = (int64_t)chunk_us * MC_TICKS_PER_S / 1000000;
+    if (tick64 < MC_MIN_CMD_TICKS || tick64 > 65535)
+        return -1;
+
+    int16_t out[MC_AXIS_COUNT];
+    int32_t next[MC_AXIS_COUNT];
+
+    for (int i = 0; i < MC_AXIS_COUNT; ++i) {
+        mc_axis_t *ax = &g_axes[i];
+        if (ax->state != MC_AXIS_PLAYING) {
+            out[i] = 0;
+            next[i] = ax->step_pos;
+            continue;
+        }
+
+        int32_t um = mc_eval(i, t_us);
+        if (um < 0) {
+            ax->state = MC_AXIS_HOLD;
+            ax->fault |= MC_FAULT_RANGE;
+            return -1;
+        }
+
+        int32_t target = mc_um_to_steps(um);
+        int32_t delta = target - ax->step_pos;
+        if (delta > MC_MAX_STEPS_PER_CHUNK || delta < -MC_MAX_STEPS_PER_CHUNK) {
+            ax->state = MC_AXIS_HOLD;
+            ax->fault |= MC_FAULT_CHUNK;
+            ax->held_um = um;
+            return -1;
+        }
+        out[i] = (int16_t)delta;
+        next[i] = target;
+    }
+
+    for (int i = 0; i < MC_AXIS_COUNT; ++i) {
+        g_axes[i].step_pos = next[i];
+        steps[i] = out[i];
+    }
+    *ticks = (uint16_t)tick64;
+    return 0;
 }

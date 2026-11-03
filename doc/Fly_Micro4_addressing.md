@@ -85,8 +85,8 @@ not by the identifier.
 
 | Type | Meaning |
 |------|---------|
-| 0 | motion, `N=3` (3 positions + speed) |
-| 1 | motion, `N=4` (4 positions) |
+| 0 | motion: cubic segment `p0, v0, a0, j` (whitepaper §4.2) |
+| 1 | reserved (was four position samples; do not send) |
 | 2 | sync / window header |
 | 3 | status |
 | 4 | command |
@@ -102,13 +102,16 @@ The 7-bit field is a motor ID, a node ID, or zero. The type says which:
 
 | Types | Field |
 |-------|--------|
-| 0, 1 (motion) | motor ID, 1–120 |
+| 0 (motion) | motor ID, 1–120 |
+| 1 | reserved; reject |
 | 2 (sync) | 0, broadcast |
 | 3–7 (status, command, home, parameter, fault) | node ID 1–30, or 0 when the master addresses every node |
 | 8, 10, 11 (`DISC`, `SET_ID` A/B) | 0 |
 | 9 (`HELLO`) | the node's short ID |
 
-- Motion types 0 and 1 never carry a node ID. A node-level type never carries a motor ID. The same numeric field can therefore be motor 5 or node 5 without a collision.
+- Type 0 carries a motor ID, never a node ID. Type 1 is reserved and is
+  rejected. A node-level type never carries a motor ID. The same numeric
+  field can therefore be motor 5 or node 5 without a collision.
 - Field 0 is the system/broadcast field. `DISC` and `SET_ID` always use it. A fault or command with field 0 is a broadcast; the hardwired E-stop is still the safety stop.
 - Node *n* accepts motion for motor IDs `4(n−1)+1 … 4(n−1)+4`, frames addressed to node *n*, and field 0. Every other motion frame is discarded before the payload is parsed. The receive-path timing is in `motion_streaming_whitepaper.md` §5.5.
 - Types 12–15 are reserved.

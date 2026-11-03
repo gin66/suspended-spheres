@@ -104,14 +104,14 @@ static int test_u6_lsb_check(void) {
 
 static int test_u7_little_endian(void) {
     uint8_t buf[8] = {0};
-    uint16_t pos[4] = {0x0102, 0x0304, 0x0506, 0};
+    mc_segment_t seg = {0x0102, -2, 0x0304, 0x0506};
     const uint8_t expected[8] = {
-        0x02, 0x01,  /* p1 */
-        0x04, 0x03,  /* p2 */
-        0x06, 0x05,  /* p3 */
-        0x08, 0x07,  /* v3 */
+        0x02, 0x01,  /* p0 */
+        0xFE, 0xFF,  /* v0 = −2 */
+        0x04, 0x03,  /* a0 */
+        0x06, 0x05,  /* j */
     };
-    ASSERT(mc_pack_frame(3, pos, 0x0708, buf) == 0);
+    ASSERT(mc_pack_frame(0, &seg, buf) == 0);
     for (int i = 0; i < 8; ++i) {
         ASSERT(buf[i] == expected[i]);
     }

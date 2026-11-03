@@ -24,7 +24,7 @@ static int test_i1_make_and_range(void) {
     }
     ASSERT(mc_id_make(5, 0) == 80);          /* (5<<4)|0 */
     ASSERT(mc_id_make(0, 2) == 2);
-    ASSERT(mc_id_make(120, 1) == 120 * 16 + 1);
+    ASSERT(mc_id_make(120, 0) == 120 * 16);
     ASSERT(mc_id_make(30, 7) == 30 * 16 + 7);
     /* every constructed id stays in the 0…0x7FF 11-bit domain */
     for (int field = 0; field <= 127; field += 7)
@@ -37,17 +37,19 @@ static int test_i1_make_and_range(void) {
     return 0;
 }
 
-/* I2 — motion types 0/1 carry motor ID 1…120; 121…127 rejected; field 0
- * rejected for motion types. */
+/* I2 — motion type 0 carries motor ID 1…120; type 1 is reserved and
+ * rejected; 121…127 rejected; field 0 rejected for motion. */
 static int test_i2_motion_field_rules(void) {
     ASSERT(mc_id_valid(0x00) == 0);          /* field 0, type 0 → invalid */
     ASSERT(mc_id_make(0, 0) == -1);
-    ASSERT(mc_id_make(0, 1) == -1);
+    ASSERT(mc_id_make(1, 0) == 0x10);
     ASSERT(mc_id_valid(mc_id_make(1, 0)) == 1);
-    ASSERT(mc_id_valid(mc_id_make(120, 1)) == 1);
-    ASSERT(mc_id_valid(mc_id_make(121, 0)) == 0);
+    ASSERT(mc_id_valid(mc_id_make(120, 0)) == 1);
+    ASSERT(mc_id_make(1, 1) == -1);          /* type 1 reserved */
+    ASSERT(mc_id_make(120, 1) == -1);
+    ASSERT(mc_id_valid(0x11) == 0);
     ASSERT(mc_id_make(121, 0) == -1);
-    ASSERT(mc_id_make(127, 1) == -1);
+    ASSERT(mc_id_make(127, 0) == -1);
     return 0;
 }
 
@@ -81,7 +83,7 @@ static int test_i5_commissioning_types(void) {
         ASSERT(mc_id_make(30, type) == -1);
     }
     ASSERT(mc_id_make(0, 9) == -1);      /* HELLO needs a real short ID */
-    ASSERT(mc_id_make(1, 9) == 0x10 | 9);
+    ASSERT(mc_id_make(1, 9) == (0x10 | 9));
     ASSERT(mc_id_valid(mc_id_make(30, 9)) == 1);
     ASSERT(mc_id_make(31, 9) == -1);
     return 0;
@@ -104,9 +106,10 @@ static int test_i7_decoder_entities(void) {
     ASSERT(motor_id != node_id);
     ASSERT(motor_id >= 0 && node_id >= 0);
 
-    /* motion types 0–1 report a motor */
+    /* motion type 0 reports a motor; type 1 is reserved */
     ASSERT(mc_id_motor(mc_id_make(5, 0)) == 5);
-    ASSERT(mc_id_motor(mc_id_make(120, 1)) == 120);
+    ASSERT(mc_id_motor(mc_id_make(120, 0)) == 120);
+    ASSERT(mc_id_motor(mc_id_make(5, 1)) == -1);
     ASSERT(mc_id_motor(mc_id_make(5, 3)) == -1);
 
     /* node types 3–7 and 9 report a node */
@@ -148,16 +151,16 @@ static int test_i9_acceptance(void) {
     const int node = 3;
     const int first = 4 * 2 + 1;              /* 9, 10, 11, 12 */
 
-    for (int type : {0, 1}) {
-        /* own motors accepted */
-        for (int m = first; m < first + 4; ++m)
-            ASSERT(mc_node_accepts_id(node, mc_id_make(m, type)) == 1);
-        /* a motion frame for any other motor (node 7's motors) discarded */
-        for (int m = 1; m <= 120; ++m) {
-            int expect = (m >= first && m < first + 4) ? 1 : 0;
-            ASSERT(mc_node_accepts_id(node, mc_id_make(m, type)) == expect);
-        }
+    /* own motors accepted (type 0 motion) */
+    for (int m = first; m < first + 4; ++m)
+        ASSERT(mc_node_accepts_id(node, mc_id_make(m, 0)) == 1);
+    /* a motion frame for any other motor (node 7's motors) discarded */
+    for (int m = 1; m <= 120; ++m) {
+        int expect = (m >= first && m < first + 4) ? 1 : 0;
+        ASSERT(mc_node_accepts_id(node, mc_id_make(m, 0)) == expect);
     }
+    /* reserved type 1 never reaches a node */
+    ASSERT(mc_node_accepts_id(node, mc_id_make(first, 1)) == 0);
 
     for (int type = 3; type <= 7; ++type) {
         ASSERT(mc_node_accepts_id(node, mc_id_make(node, type)) == 1);
@@ -179,18 +182,16 @@ static int test_i9_acceptance(void) {
     return 0;
 }
 
-/* I10 — property: for every motor 1…120 and both motion types exactly one
- * node in 1…30 accepts the frame. */
+/* I10 — property: for every motor 1…120 (type 0 motion) exactly one node
+ * in 1…30 accepts the frame. */
 static int test_i10_unique_acceptor_property(void) {
     for (int motor = 1; motor <= 120; ++motor) {
-        for (int type : {0, 1}) {
-            int id = mc_id_make(motor, type);
-            int acceptors = 0;
-            for (int node = 1; node <= 30; ++node)
-                if (mc_node_accepts_id(node, id))
-                    ++acceptors;
-            ASSERT(acceptors == 1);
-        }
+        int id = mc_id_make(motor, 0);
+        int acceptors = 0;
+        for (int node = 1; node <= 30; ++node)
+            if (mc_node_accepts_id(node, id))
+                ++acceptors;
+        ASSERT(acceptors == 1);
     }
     return 0;
 }
