@@ -112,6 +112,9 @@
         <option value="wire">Wire (16-bit)</option>
         <option value="steps">Steps (microstep)</option>
       </select>
+      <label title="Quantization is below a pixel at true scale; amplify it to see the wire code and microstep grid.">
+        <input type="checkbox" id="fidelity-exaggerate" checked> ×1000 error
+      </label>
     </div>
     <div id="info-panel">
       <h3>Pattern Info</h3>
@@ -119,6 +122,7 @@
       <div class="stat">Balls: <span id="ball-count">-</span></div>
       <div class="stat">Duration: <span id="duration-info">-</span></div>
       <div class="stat">Layer: <span id="layer-info">-</span></div>
+      <div class="stat">Fidelity: <span id="fidelity-info">-</span></div>
       <div class="stat">Bus Load: <span id="bus-load">-</span></div>
       <div class="stat">Violations: <span id="violation-count">0</span></div>
     </div>

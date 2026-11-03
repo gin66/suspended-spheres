@@ -235,8 +235,8 @@ function check_limits(tr, tier) {
 }
 
 // Motion core conversions (from motion_core.h)
-function mc_code_to_um(code) { return (code * 2000000) / 65535; }
-function mc_um_to_code(um) { return (um * 65535 + 1000000) / 2000000; }
+function mc_code_to_um(code) { return Math.round((code * 2000000) / 65535); }
+function mc_um_to_code(um) { return Math.round((um * 65535) / 2000000); }
 function mc_um_to_steps(um) { return Math.round((um * 1668861) / (1000 * 65536)); }
 function mc_steps_to_um(steps) { return Math.round((steps * 1000 * 65536) / 1668861); }
 
@@ -437,6 +437,8 @@ let isPlaying = true;
 let isLooping = true;
 let playSpeed = 1.0;
 let currentFidelity = 'ideal';
+let fidelityExaggerate = true;
+const FIDELITY_ERROR_SCALE = 1000;
 
 let blendStartWall = 0;
 const BLEND_MS = 1600;
@@ -497,10 +499,14 @@ function updateSpherePositions(time_ms, now_ms) {
       um = umOld * (1 - ease) + um * ease;
     }
 
-    if (currentFidelity === 'wire') {
-      um = mc_code_to_um(mc_um_to_code(um));
-    } else if (currentFidelity === 'steps') {
-      um = mc_steps_to_um(mc_um_to_steps(um));
+    if (currentFidelity !== 'ideal') {
+      const exactUm = um;
+      const quantizedUm = currentFidelity === 'wire'
+        ? mc_code_to_um(mc_um_to_code(um))
+        : mc_steps_to_um(mc_um_to_steps(um));
+      um = fidelityExaggerate
+        ? exactUm + (quantizedUm - exactUm) * FIDELITY_ERROR_SCALE
+        : quantizedUm;
     }
 
     const heightM = (um / 2000000) * BOX_H;
@@ -554,6 +560,10 @@ function updateInfoPanel() {
   document.getElementById('ball-count').textContent = show.grid_cols * show.grid_rows;
   document.getElementById('duration-info').textContent = formatDuration(currentCycleMs);
   document.getElementById('layer-info').textContent = layerSummary(show);
+  const fidelityText = currentFidelity === 'ideal'
+    ? 'ideal'
+    : `${currentFidelity}${fidelityExaggerate ? ' (error ×1000)' : ' (true scale)'}`;
+  document.getElementById('fidelity-info').textContent = fidelityText;
 
   const frames_s = Math.round(120000 / (show.n * show.dt_ms));
   const load = Math.round((frames_s + 350) * 130 / 10000);
@@ -678,6 +688,13 @@ document.getElementById('speed-slider').addEventListener('input', (e) => {
 
 document.getElementById('fidelity-select').addEventListener('change', (e) => {
   currentFidelity = e.target.value;
+  updateInfoPanel();
+  updateSpherePositions(simTimeMs, performance.now());
+});
+
+document.getElementById('fidelity-exaggerate').addEventListener('change', (e) => {
+  fidelityExaggerate = e.target.checked;
+  updateInfoPanel();
   updateSpherePositions(simTimeMs, performance.now());
 });
 
