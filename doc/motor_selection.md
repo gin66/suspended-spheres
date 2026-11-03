@@ -9,6 +9,11 @@
 > indicative and fluctuate; shipping and import treatment are noted
 > separately in §7. Datasheet values are typical ranges, not guaranteed
 > minima.
+>
+> **Drive:** the stepper shaft is the spool. There is no gearbox. RPM and
+> step rate in §1.2 are shaft figures (`mechanical_analysis.md` §4). The
+> geared rows below are rejected candidates, kept so the comparison stays
+> on the page.
 
 ---
 
@@ -34,7 +39,7 @@ torque:
 | 40 mm | 20 mm | 0.0098 Nm | **0.020 Nm** | 0.022 Nm |
 
 Even at the largest drum this is tiny. Every candidate below exceeds it;
-**torque is not the discriminator** — speed, backlash, and noise are.
+**torque is not the discriminator** — speed, noise, and integration are.
 
 ### 1.2 Speed
 
@@ -48,16 +53,17 @@ Even at the largest drum this is tiny. Every candidate below exceeds it;
 The 40 mm drum keeps the optional tier below 600 RPM; the 20 mm drum needs
 1,146 RPM, where torque and noise must be verified.
 
-### 1.3 Position / backlash
+### 1.3 Position
 
-The position-scale limit is 50 µm per ~300 mm grid pitch (`NFR-PHYS-007`).
-At a 20 mm drum, 50 µm corresponds to an angle of:
+The spool is on the stepper shaft, so position error at the ball is shaft
+angle times drum radius. The scale limit is 50 µm per ~300 mm grid pitch
+(`NFR-PHYS-007`). At a 20 mm drum, 50 µm is an angle of:
 ```
 θ = 50 µm / 10 mm = 0.005 rad ≈ 0.29°
 ```
-Any gearbox backlash larger than ≈0.3° creates a visible dead band at
-direction reversals. This is the key discriminator between geared and
-direct-drive motors.
+A gearbox with 1–2° of output backlash would show as a dead band at
+reversals. That, and output speed, is why the geared candidates in §4 are
+rejected. The motors that remain have the spool on the shaft.
 
 ### 1.4 Power-off behaviour
 
@@ -67,9 +73,9 @@ pass/fail.
 
 ### 1.5 Noise
 
-Cumulative motor noise is a significant risk (`RISK.md` #2). Direct-drive
-motors with microstepping at slow speed are quietest; geared motors whine and
-add backlash.
+Cumulative motor noise is a significant risk (`RISK.md` #2). With the spool
+on the shaft, microstepping at slow speed is the quiet case. Gear whine is
+one reason the geared candidates were rejected.
 
 ---
 
@@ -104,7 +110,8 @@ Beyond the three motors you listed, the search turned up:
 - **24BYG48** — a smaller geared motor like the 28BYJ-48; same backlash and
   speed problem.
 - **NEMA-11 variants** — planetary-geared (~24 €), with brake (~33 €), hollow
-  shaft (~27 €); all dearer and mostly unnecessary here.
+  shaft (~27 €). A planetary gear is out: the spool is on the stepper shaft.
+  The brake and hollow-shaft versions are dearer and unused here.
 - **NEMA-8** — surprisingly expensive per unit (12–22 €) and only
   12–30 mN·m; poor value for this duty.
 
@@ -199,20 +206,22 @@ Rating: 5 = excellent, 1 = unsuitable. "Speed" is scored against the nominal
 | 40 mm | 0.020 Nm | 286 / 573 | ≈ 20 | ≈ 10 mm |
 
 A **40 mm drum** is the best fit for the fuller envelope: it keeps the optional
-1.2 m/s tier at 573 RPM, narrows the winding to ~10 mm, and still meets the
-50 µm resolution at 1/16 (39.3 µm). A 25–30 mm drum is the fallback if a smaller
-spool is preferred; 30 mm at 1/16 covers 2 m in ~3 s comfortably, and 2 s is
-marginal. A 20 mm drum needs 1/8 microstepping to reach 1.2 m/s within the
-40 kHz step-rate ceiling, at 1,146 RPM.
+1.2 m/s tier at 573 RPM and narrows the winding to ~10 mm. Microstepping is
+TBD. In the 1/16 worked case the linear step is 39.3 µm and 1.2 m/s is
+30.6 kstep/s (`mechanical_analysis.md` §4). The Fly-Micro4 step generator
+tops out at 200 kstep/s; a 2 ms playback chunk tops out at 64 kstep/s. At
+1/16 a 30 mm drum also covers 1.2 m/s (40.7 kstep/s), and a 20 mm drum
+covers the step rate at 1,146 RPM.
 
-The geared motors are speed-limited at every drum size.
+28BYJ-48 and 24BYG48 stay rejected. Their geared output is far below 0.6 m/s
+at every drum size, and this drive has the spool on the stepper shaft.
 
 ---
 
 ## 6. Recommendation
 
-1. **Shortlist:** NEMA-14, NEMA-11, and NEMA-17 pancake. All are direct
-   drive and 6–9 €/unit.
+1. **Shortlist:** NEMA-14, NEMA-11, and NEMA-17 pancake, spool on the shaft,
+   6–9 €/unit.
 2. **Best value:** NEMA-17 pancake (~6.6–7 €, 16 N·cm) if the listing's
    speed and detent check out.
 3. **Cheapest direct drive:** NEMA-14 (3.5–9 €), verifying the small/weak
@@ -220,21 +229,26 @@ The geared motors are speed-limited at every drum size.
 4. **NEMA-11** remains the safe, widely available baseline at ~6–7 €
    generic, but verify ~900 RPM torque/noise before using it for the 1.2 m/s
    tier.
-5. **Drum:** 40 mm with 1/16 microstepping is the baseline for the full
-   envelope (39.3 µm, 30.6 kHz at 1.2 m/s, 573 RPM). A 30 mm drum at 1/16
-   covers 2–3 s effects with better resolution margin but misses 1.2 m/s by
-   ~2 %; a 20 mm drum needs 1/8 for 1.2 m/s and runs at 1,146 RPM.
+5. **Drum:** 40 mm is the working diameter (573 RPM at 1.2 m/s, ~10 mm
+   winding). **Microstepping is TBD.** The 1/16 worked case is 39.3 µm and
+   30.6 kstep/s at 1.2 m/s. The PIO ceiling is 200 kstep/s; a 2 ms chunk
+   caps playback at 64 kstep/s. At 1/16 a 30 mm drum also covers 1.2 m/s
+   (40.7 kstep/s); a 20 mm drum covers the step rate at 1,146 RPM.
 6. **NEMA-17 full-size:** over-specified and the most expensive; keep only
    as a fallback.
-7. **28BYJ-48 / 24BYG48:** reject (speed and backlash).
+7. **28BYJ-48 / 24BYG48, and any planetary-geared NEMA-11:** reject. The
+   spool is on the stepper shaft.
 8. **NEMA-8:** poor value (price close to NEMA-17, torque much lower).
 9. Revisit **BLDC + FOC** only if measured noise from a direct-drive stepper
    is unacceptable.
 
 > Before committing, buy one of each shortlisted type and test at the chosen
-> drum: achievable speed at 1.2 m/s, step rate against the 40 kHz ceiling,
-> backlash at reversals, audible noise, and detent hold with a 50 g load.
-> Those five measurements decide the final choice.
+> drum: achievable speed at 1.2 m/s (30.6 kstep/s on a 40 mm drum at the
+> 1/16 worked case; microstepping is TBD),
+> play between shaft and spool at reversals, audible noise, and detent
+> hold with a 50 g load.
+> Those measurements decide the final choice. The step-rate ceilings are
+> 200 kstep/s (PIO) and 64 kstep/s (2 ms chunk), both above this point.
 
 ---
 

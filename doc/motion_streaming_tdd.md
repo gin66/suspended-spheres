@@ -312,6 +312,8 @@ Whitepaper §4.7, §5.3, §5.4, Appendix A.
 - [x] **S1** The Q16.16 steps/mm constant represents
   `3200 / (π × 40 mm) = 25.4648 steps/mm`. Full-scale 2 000 mm converts
   to a step count within 1 step of `round(2 000 × 25.4648)`.
+  Microstepping is TBD; this constant is the 1/16 worked case until the
+  count is chosen.
 - [x] **S2** A fractional-step accumulator is kept per axis. Summing chunk
   deltas across 2 000 mm equals the net step count from S1. Rounding each
   chunk on its own is the failing control: that sum drifts by more than

@@ -79,7 +79,7 @@ it has a hard bandwidth limit.
 | Lookahead | One segment of length `N·Δt`. The message carries the whole polynomial |
 | Node playback | Integer Horner of that polynomial. No curve fit on the node |
 | Step generation | FastAccelStepper Pico PIO + `FasTimed`, 2 ms chunks |
-| Microstepping | 1/16 with TMC2209 MicroPlyer interpolation |
+| Microstepping | **TBD.** Figures that quote 25.46 steps/mm or 39.3 µm are the 1/16 worked case at 40 mm |
 | Sync | Absolute timeline in a periodic sync frame; 20–100 ms is ample |
 | PC tool | Shared C++ core → WASM; live view of an animation file; Three.js 3-D view |
 | Authoring | Human or agent edits the animation file, or a Python script that writes it |
@@ -98,8 +98,9 @@ The rest of this paper justifies these choices and defines the interfaces.
 - Motion must look smooth and stay synchronized within 1 ms
   (`FR-SYNC-001`). Position quantization at the drum should be ≤ 50 µm
   (`FR-MOT-002`).
-- 40 mm drum, 200-step motors, 1/16 microstepping: **25.46 steps/mm**,
-  **39.3 µm per microstep**. At 1.2 m/s that is **30.6 kstep/s per axis**
+- 40 mm drum on the stepper shaft (no gear), 200-step motors.
+  Microstepping is **TBD**. The 1/16 worked case is **25.46 steps/mm**,
+  **39.3 µm per microstep**, and **30.6 kstep/s** at 1.2 m/s
   (`mechanical_analysis.md` §4).
 - 4 axes per Fly-Micro4 → **30 nodes** for 120 balls.
 
@@ -172,7 +173,7 @@ motor per `N·Δt`.
 
 | Field | Proposed | Issue | Recommendation |
 |-------|----------|-------|----------------|
-| Position | 0.1 mm (100 µm) | Coarser than the 39.3 µm microstep and equal to the 50 µm visual threshold; leaves no margin for winding/scale error | **16-bit full-range 0–2000 mm** (code 65535 = 2000 mm; LSB 0.0305 mm) |
+| Position | 0.1 mm (100 µm) | Coarser than a 1/16 step at 40 mm (39.3 µm; microstep count still TBD) and equal to the 50 µm visual threshold; leaves no margin for winding/scale error | **16-bit full-range 0–2000 mm** (code 65535 = 2000 mm; LSB 0.0305 mm) |
 | Position range | 0.1 mm × 16 bit = 6.55 m | Fine, but coarse | 16-bit full-range = 2.000 m |
 | Speed | 0.02 mm/s × int16 = ±655 mm/s | Does **not** cover the optional 1.2 m/s tier | **0.04 mm/s** LSB (±1310 mm/s) or 0.05 (±1638 mm/s) |
 | Speed resolution | 0.02 mm/s | Fine, but only if the range is fixed | 0.04 mm/s still resolves slow motion well |
@@ -193,7 +194,8 @@ tier; a 0.03 mm/s LSB would span only ±983 mm/s. A 0.02 mm position LSB would
 span only 1.31 m.
 
 The position encoding is the most consequential choice. The 16-bit full-range
-code gives a 0.0305 mm LSB at 2 m, finer than the 39.3 µm microstep; the node's
+code gives a 0.0305 mm LSB at 2 m, finer than a 1/16 step at 40 mm
+(39.3 µm; the microstep count is still TBD); the node's
 interpolation supplies sub-step values and the TMC2209 MicroPlyer smooths them.
 A 0.01 mm grid would need 20 bits per position and no longer fits three
 positions plus a speed in 8 B; the 16-bit full-range encoding is the limit.
@@ -341,9 +343,11 @@ fitting a cubic on the node. That fit is retired; `lib/motion_core` packs
 and evaluates the four-field frame in §4.7.
 
 **Resolution check:** one full-range code step is 0.0305 mm = 30.5 µm at 2 m,
-finer than the 39.3 µm microstep and well under the 50 µm requirement
-(quantization ±15.3 µm). The polynomial evaluation supplies the positions
-between the 2 ms chunks; the TMC2209 MicroPlyer smooths the steps.
+finer than a 1/16 step at 40 mm (39.3 µm) and well under the 50 µm
+requirement (quantization ±15.3 µm). The microstep count is still TBD: a
+1/32 step at 40 mm is 19.6 µm, smaller than this LSB. The polynomial
+evaluation supplies the positions between the 2 ms chunks; the TMC2209
+MicroPlyer can smooth the steps once the input microstep count is chosen.
 
 **Range check:** the coordinate is exactly the usable **0–2000 mm** travel.
 The home position and safe offset must lie inside it. Homing may search
@@ -649,7 +653,8 @@ On the Pico configuration (`src/pd_pico/pd_config.h`):
 | Steps per call | `[-128, +128]` per axis | Maximum displacement per chunk |
 | Horizon | 8 chunks (default) | Stream: add until `Rejected`, pump, add again |
 
-At 40 mm / 1/16 / 1.2 m/s:
+At 40 mm and the 1/16 worked case, 1.2 m/s is the following. The microstep
+count is TBD, so the step counts scale with that choice:
 
 | Chunk | Steps/axis | Fits `FasTimed`? |
 |-------|------------|------------------|
@@ -664,9 +669,8 @@ At 40 mm / 1/16 / 1.2 m/s:
 at each 2 ms boundary. At 0.6 m/s that is 31 steps per chunk; at 1.2 m/s, 61.
 The `Δt` samples are interpolated, not fed directly.
 
-If 1/32 microstepping is ever used, double the counts: 1.2 m/s is 122 steps per
-2 ms (still fine) but 244 per 4 ms (not fine). Keep 2 ms chunks or stay at
-1/16.
+Step counts scale with the microstep setting. At 1/32 the same 1.2 m/s move
+is 122 steps per 2 ms (inside 128) and 244 per 4 ms (over 128).
 
 `FasTimed` emits one or two `addQueueEntry` commands per axis whose tick sums
 are equal; `pump()` feeds the queue. Check `TimedStatus::Underrun` and
@@ -696,8 +700,9 @@ The RP2040 has no FPU. Define the core units once:
   is only ~4,000 evaluations/s — negligible against 133 MHz.
 - Keep a fractional-step accumulator per axis. The position→step conversion
   must not accumulate rounding error.
-- The steps/mm factor is the Q16.16 integer for `3200 / (π × 40 mm)` that
-  makes 1.2 m/s over 2 ms equal 61 steps. Position codes use
+- The steps/mm factor is the Q16.16 integer for `3200 / (π × 40 mm)`, the
+  1/16 worked case while microstepping is TBD. It makes 1.2 m/s over 2 ms
+  equal 61 steps. Position codes use
   `code × 2 000 000 / 65 535`. Both are integer divisions, truncating toward
   zero except where a test names `round`.
 - The host/WASM build uses the same integer types. The shared core has no
@@ -743,10 +748,9 @@ Housekeeping (10–50 Hz)
 
 ### 5.6 TMC2209 configuration
 
-- **Microstepping:** 1/16, with **MicroPlyer interpolation enabled** (the
-  `intpol` bit). The driver then generates 1/256 internal microsteps from the
-  1/16 input, smoothing the command grid. This is the main reason 1/16 is
-  sufficient.
+- **Microstepping:** TBD. Until the count is chosen, the host constant
+  `MC_STEPS_PER_MM_Q16` and the chunk examples use the 1/16 worked case.
+  MicroPlyer (`intpol`) can then interpolate that input toward 1/256.
 - **Chopper:** StealthChop for the slow/quiet programme. Verify it does not
   lose steps at the 1.2 m/s / 4 m/s² effects; if it does, switch to SpreadCycle
   for the fast tier or reduce the acceleration. The duty is tiny (0.25–0.3 A
@@ -1276,7 +1280,8 @@ shared core, the host tests and this table together.
 ## 10. Appendix A — formulas and numbers
 
 ```
-Steps/mm (40 mm drum, 200 steps/rev, 1/16):
+Steps/mm (40 mm drum on the stepper shaft, ratio 1, 200 steps/rev).
+Microstepping is TBD; this block is the 1/16 worked case:
   3200 / (π × 40 mm) = 25.4648 steps/mm
   step = 39.27 µm
 

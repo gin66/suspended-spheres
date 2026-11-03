@@ -279,6 +279,11 @@ Only 24 V and the motor harness connect to the board. WiFi carries commands, tim
 
 ## 8. Stepping Resolution Analysis: 1/16 µ-Step vs. I2S Mux (4 µs Frame, 40 kHz Ceiling)
 
+> **Superseded for the selected node.** This section is the ESP32 I2S mux
+> study (40 kHz per stepper). The Fly-Micro4 uses the RP2040 PIO at
+> 200 kstep/s. Microstepping on that node is TBD; the drum table is in
+> `mechanical_analysis.md` §4.
+
 This section answers a critical design question: **is 1/16 microstepping sufficient**, or do we need finer resolution, given that the I2S multiplexing approach has 4 µs frame granularity?
 
 > The I2S mux ceiling is **40 kHz per stepper**, not the ~416 kHz implied by an 80 MHz shift-register calculation. The figures below use the FastAccelStepper implementation (ESP-IDF ≥ 5.3): 250 kHz sample rate, 32-bit frame = 4 µs, 25 µs minimum step period. The 40 mm drum at 1/16 is the baseline: 15.3 kHz at the 0.6 m/s nominal tier and 30.6 kHz at the 1.2 m/s optional tier.
@@ -556,7 +561,7 @@ Each controller must generate its own trajectory from parameters, not consume pe
 
 **Critical design rule:** The master sends motion **parameters** (target position + profile), not position samples. Each controller generates the trajectory locally. This is what makes the network load trivial.
 
-> Step-rate note: at 1/16 microstep and a 40 mm drum, 1.2 m/s is about 30.6 kHz per motor — inside the 40 kHz I2S mux ceiling of §8.5 by 1.31×. That is the binding real-time constraint, not the network.
+> Step-rate note from the ESP32 I2S study: at 1/16 microstep and a 40 mm drum, 1.2 m/s is about 30.6 kHz per motor — inside the 40 kHz I2S mux ceiling of §8.5 by 1.31×. On the Fly-Micro4 the ceiling is 200 kstep/s (`mechanical_analysis.md` §4).
 
 ---
 
