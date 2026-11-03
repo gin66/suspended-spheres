@@ -67,13 +67,17 @@ Suspended_Spheres/
 ├── patterns/                   # .anim.json example patterns
 ├── esp32gui/                   # Show controller and LVGL UI (PlatformIO + host PNGs)
 ├── boards/
-│   ├── Fly_Micro4_pinmap.md         # Pin reference for the vendor files
-│   ├── Fly_Micro4_klipper_reference.cfg
-│   └── Fly-Micro4/
-│       ├── Fly-Micro4.h            # GPIO map for firmware
-│       ├── Fly-Micro4-schematic.pdf
-│       ├── Fly-Micro4.step
-│       └── pin.webp                # Connector pinout
+│   ├── Fly-Micro4/
+│   │   ├── Fly_Micro4_pinmap.md    # Pin reference for the vendor files
+│   │   ├── Fly_Micro4_klipper_reference.cfg
+│   │   ├── Fly-Micro4.h            # GPIO map for firmware
+│   │   ├── Fly-Micro4-schematic.pdf
+│   │   ├── Fly-Micro4.step
+│   │   └── pin.webp                # Connector pinout
+│   └── WAVESHARE-ESP32-S3-Touch-LCD-7-7inch/
+│       ├── README.md
+│       ├── source/                 # LCD, SD, TWAI and CH422G vendor code
+│       └── *.pdf, *.jpg, *.webp    # Schematics and board photos
 └── doc/
     ├── system_requirements.md
     ├── mechanical_analysis.md

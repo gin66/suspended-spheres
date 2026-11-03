@@ -792,7 +792,7 @@ choice under `FR-MOT-009`/`CON-006`; verify repeatability on the bench.
 **DIAG routing:** all four DIAG are routed (Drive0–3: GPIO13/14/15/12). The
 official config uses GPIO12 (Drive3 DIAG) as the Z endstop, so Drive3 StallGuard
 and a separate endstop share that pin. For 4-axis StallGuard, all four are
-available; do not use GPIO12 as both. See `boards/Fly_Micro4_pinmap.md`.
+available; do not use GPIO12 as both. See `boards/Fly-Micro4/Fly_Micro4_pinmap.md`.
 
 **Derived homing requirements**
 
@@ -931,8 +931,8 @@ lib_deps =
 ```
 
 **Pin map.** Board pin assignment, DIAG routing and the official Klipper
-reference are in `boards/Fly_Micro4_pinmap.md` and
-`boards/Fly_Micro4_klipper_reference.cfg`. Record the verified pins in
+reference are in `boards/Fly-Micro4/Fly_Micro4_pinmap.md` and
+`boards/Fly-Micro4/Fly_Micro4_klipper_reference.cfg`. Record the verified pins in
 `board_pins.h`.
 
 ---
@@ -1364,6 +1364,7 @@ Drift (35 ppm):
 - Mellow Fly-Micro4 schematic: `boards/Fly-Micro4/Fly-Micro4-schematic.pdf`;
   confirm the exact revision before assigning pins.
 - Official Mellow Fly-Micro4 pin map and Klipper reference:
-  `boards/Fly_Micro4_pinmap.md`, `boards/Fly_Micro4_klipper_reference.cfg`.
+  `boards/Fly-Micro4/Fly_Micro4_pinmap.md`,
+  `boards/Fly-Micro4/Fly_Micro4_klipper_reference.cfg`.
 - Node identity and CAN-ID allocation: `Fly_Micro4_addressing.md`.
 - Host TDD plan (no hardware): `motion_streaming_tdd.md`.
