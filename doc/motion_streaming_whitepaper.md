@@ -73,7 +73,7 @@ it has a hard bandwidth limit.
 | Item | Baseline |
 |------|----------|
 | Node | **Selected:** Mellow Fly-Micro4 V1.0, RP2040, 4 × TMC2209, can2040 |
-| CAN | Classic CAN 2.0B, 1 Mbit/s, 120 Ω at the two physical ends only |
+| CAN | Classic CAN 2.0B, 1 Mbit/s. Waveshare CAN jumper set to 120 Ω; 120 Ω soldered into a cable terminator; R39/R58 desoldered on every Fly-Micro4 |
 | Sample interval | `Δt` configurable: 10, 11, 15 ms (default 10 ms) |
 | Wire format | 1 frame per motor: position, speed, acceleration, jerk at the segment start; message period `N·Δt` |
 | Lookahead | One segment of length `N·Δt`. The message carries the whole polynomial |
@@ -114,7 +114,7 @@ The rest of this paper justifies these choices and defines the interfaces.
 | 2 × PIO blocks, 4 SMs each | can2040 and FastAccelStepper each consume a whole block's program memory; can2040 uses all 4 SMs, FastAccelStepper one SM per axis → **4 axes** |
 | 4 × TMC2209, step/dir | No on-driver trajectory ramp (unlike TMC5160); MCU generates steps |
 | 4/4 DIAG routed (Drive0–3: GPIO13/14/15/12) | Sensorless homing and stall/overtemperature events; **GPIO12 is shared with the official Z endstop** |
-| 2-pin CAN, no GND, fixed split termination | Rework R39/R58 on 28 of 30 boards; common ground/star point |
+| 2-pin CAN, no GND, fixed split termination | Desolder R39 and R58 on all 30 boards. Set the Waveshare CAN jumper to 120 Ω. Solder 120 Ω into a cable terminator. Common 24 V star ground |
 | USB-C BOOTSEL/UF2 | Easiest field recovery of the surveyed boards |
 
 > **CAN-FD is not a Fly-Micro4 option.** The MCP2542 is only the transceiver;
@@ -864,8 +864,9 @@ power (`FR-MOT-011`); software only provides orderly stops.
 3. **CAN load:** 30-node traffic generator (or 30 boards) at 1 Mbit/s; measure
    error frames and worst-case latency at 40 % and 60 % load.
 4. **Sync:** two boards, scheduled LED/step event, scope skew; target ≪ 1 ms.
-5. **Termination:** 30 boards with R39/R58 removed except at the ends; measure
-   the differential waveform and common-mode shift.
+5. **Termination:** R39 and R58 desoldered on every Fly-Micro4; Waveshare
+   CAN jumper set to 120 Ω; 120 Ω soldered into the cable terminator.
+   Measure the differential waveform and the common-mode shift.
 6. **Homing repeatability:** 20 cycles per axis, StallGuard threshold sweep.
 7. **Thermal/current:** 120 motors holding, 30 A at 24 V; measure board and
    enclosure temperatures.
@@ -1238,7 +1239,7 @@ shared core, the host tests and this table together.
 | PIO block conflict | CAN or steppers fail to initialize | Init can2040 first; hard 4-axis limit; assert at boot |
 | `FasTimed` experimental | API/behavior change | Pin/vendor; wrap behind a small interface; fallback custom chunker |
 | Direction reversals | DIR pause, thread slack, noise | Monotone cubic, deadband/hysteresis, rare reversals, account for pause |
-| CAN termination | Over-termination, reflections, errors | Remove R39/R58 on 28/30 boards; 120 Ω at the ends only; scope test |
+| CAN termination | Over-termination, reflections, errors | Desolder R39/R58 on all 30 boards. Set the Waveshare CAN jumper to 120 Ω. Solder 120 Ω into a cable terminator; scope test |
 | 2-pin CAN without GND | Common-mode shift | Common 24 V/ground star; keep motor return separate; measure |
 | Node reset | Four balls drop/descend | Accept per FR-MOT-011; watchdog cause log; re-home |
 | can2040 no bus-off | Silent bus fault | Error counters/timeouts, heartbeat, hold/stop |

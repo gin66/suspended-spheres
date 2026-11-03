@@ -35,7 +35,7 @@ DIAG and a separate endstop.
 |----------|-----------------|-------|
 | RGB LED | GPIO11, 5V, GND | WS2812/NeoPixel data on GPIO11; not in the official Klipper config. GPIO11 is also listed for an optional filament runout, so do not use both |
 | Laser | GPIO10, VCC, GND | not used |
-| CAN | CAN L/H, 120 Ω | MCP2542 transceiver; can2040 uses PIO |
+| CAN | CAN L/H | MCP2542 transceiver; can2040 uses PIO. Desolder R39 and R58; this board is not a bus end |
 | USB | USB-C | USB serial or CAN firmware (`canbus_uuid`) |
 | Fan0 | GPIO16 | |
 | Fan1 | GPIO17 | |

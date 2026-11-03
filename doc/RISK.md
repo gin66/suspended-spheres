@@ -41,7 +41,7 @@ The cumulative acoustic and mechanical noise from 100–120 motors is still a si
 | **Dedicated stepper boards plus a few Pico 2 boards** | Significantly more work; introduces reliability concerns (loose cables, bad connections). |
 | **One custom PCB with 4/8/12 stepper drivers per board** | Best balance of integration and reliability. Reduces point-of-failure connections. |
 
-The selected node is the Mellow Fly-Micro4, a COTS 4-axis board, with the CAN termination rework in `controller_analysis.md`. The custom carrier stays in that survey as the design that was not built.
+The selected node is the Mellow Fly-Micro4, a COTS 4-axis board. R39 and R58 are desoldered on every board. The two 120 Ω ends are the Waveshare CAN jumper, set to 120 Ω, and a resistor soldered into a cable terminator (`controller_analysis.md`, `esp32gui_whitepaper.md`). The custom carrier stays in that survey as the design that was not built.
 
 ### 2.2 PC Real-Time Limitation
 

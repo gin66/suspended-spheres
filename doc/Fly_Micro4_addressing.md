@@ -2,7 +2,9 @@
 
 > The installation node is the Mellow Fly-Micro4 V1.0. The selection, the
 > termination rework and the physical-layer limits are in
-> `controller_analysis.md`. This file owns board identity, discovery, the
+> `controller_analysis.md`: R39 and R58 are desoldered from every board, and
+> the 120 Ω ends are the Waveshare CAN jumper, set to 120 Ω, and a resistor
+> soldered into a cable terminator. This file owns board identity, discovery, the
 > volatile board ID, and CAN-ID allocation. The host owns the map from a
 > board axis to a grid position. A board does not.
 >
