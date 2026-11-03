@@ -16,6 +16,9 @@ int mc_abi_probe(void) {
 
     (void)mc_pack_frame(0, &seg, frame);
     (void)mc_unpack_frame(frame, 8, 0, &out_seg);
+    mc_node_positions_t node = {{0, 0, 0, 0}, 0};
+    (void)mc_pack_node_frame(&node, frame);
+    (void)mc_unpack_node_frame(frame, 8, &node);
     (void)mc_trajectory_push(0, 0, 0, 1000, &seg);
     (void)mc_eval(0, 0);
     (void)mc_step_chunk(steps, &ticks, 0, 2000);

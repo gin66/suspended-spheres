@@ -6,8 +6,8 @@
  *
  *   [ p0 : u16 ][ v0 : s16 ][ a0 : s16 ][ j : s16 ]
  *
- * Type 0 is motion; type 1 is reserved and rejected.  P4–P9 arrive later
- * (§13 step 4).
+ * Type 0 is motion; type 1 is reserved and rejected.  P4–P8 are in
+ * test_protocol.cpp.
  */
 
 #include "assert.h"
@@ -75,6 +75,41 @@ static int test_p3_length_rejected(void) {
     return 0;
 }
 
+/* P9 — the per-node alternate packs four 16-bit positions into one
+ * frame; unpacking marks it as not the per-motor cubic baseline. */
+static int test_p9_per_node_frame(void) {
+    mc_node_positions_t frame;
+    frame.pos[0] = 0;
+    frame.pos[1] = 1;
+    frame.pos[2] = 0xFFFE;
+    frame.pos[3] = 0xFFFF;
+    frame.per_node = 0;
+
+    uint8_t buf[8];
+    ASSERT(mc_pack_node_frame(&frame, buf) == 0);
+    const uint8_t expect[8] = {
+        0x00, 0x00, 0x01, 0x00, 0xFE, 0xFF, 0xFF, 0xFF,
+    };
+    for (int i = 0; i < 8; ++i)
+        ASSERT(buf[i] == expect[i]);
+
+    mc_node_positions_t out;
+    out.per_node = 0;
+    ASSERT(mc_unpack_node_frame(buf, 8, &out) == 0);
+    for (int i = 0; i < 4; ++i)
+        ASSERT(out.pos[i] == frame.pos[i]);
+    ASSERT(out.per_node == 1);
+    ASSERT(out.per_node != 0);   /* not the per-motor baseline */
+
+    ASSERT(mc_unpack_node_frame(buf, 7, &out) == -1);
+    ASSERT(mc_unpack_node_frame(buf, 9, &out) == -1);
+    ASSERT(mc_pack_node_frame(0, buf) == -1);
+    ASSERT(mc_pack_node_frame(&frame, 0) == -1);
+    ASSERT(mc_unpack_node_frame(0, 8, &out) == -1);
+    ASSERT(mc_unpack_node_frame(buf, 8, 0) == -1);
+    return 0;
+}
+
 /* P10 — mc_pack_frame / mc_unpack_frame follow P1 and P2 across the full
  * coefficient domain. */
 static int test_p10_variants_through_abi(void) {
@@ -102,4 +137,5 @@ static int test_p10_variants_through_abi(void) {
 static int reg_p1 = add_test("P1", test_p1_segment_roundtrip);
 static int reg_p2 = add_test("P2", test_p2_type1_reserved);
 static int reg_p3 = add_test("P3", test_p3_length_rejected);
+static int reg_p9 = add_test("P9", test_p9_per_node_frame);
 static int reg_p10 = add_test("P10", test_p10_variants_through_abi);

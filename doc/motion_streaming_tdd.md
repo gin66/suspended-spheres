@@ -88,8 +88,8 @@ That session stops there. It does not add `PlaybackClock`, the identifier
 tests (§3), the frame codecs beyond the endian check in U7, the golden
 file, the Python fixture, or the WASM build.
 
-**Progress note (2026-11-03, fifth slice).** §1–§11 are implemented and
-passing except P9. The identifier rules match the volatile board-ID model:
+**Progress note (2026-11-03, sixth slice).** §1–§12 are implemented and
+passing. The identifier rules match the volatile board-ID model:
 motor fields 0–119, board IDs 0–29, field 127 for all boards, and `ASK` /
 `DISC` / `ASSIGN`. P4–P8 lock the sync, status and discovery payloads.
 The host node double in `tests/node_sim.h` covers N1–N14 with
@@ -99,8 +99,7 @@ bake, limits, report, `.hbp` export and live file state live in
 `tests/test_live.cpp`. Native/WASM parity (§12) also passes with Emscripten
 6.0.13: `tests/wasm_parity.sh` compares the native and Node/WASM transcripts
 byte for byte. The browser viewer imports the generated module, so built-in
-shows and loaded files both evaluate through `pc::evaluate`. P9 is deferred
-above.
+shows and loaded files both evaluate through `pc::evaluate`.
 
 Later byte layouts are the Markdown tables in the whitepaper §4.5 and in
 `Fly_Micro4_addressing.md` §3. There is no separate schema file. A test
@@ -234,11 +233,9 @@ Whitepaper §4.2, §4.3, §4.5. Addressing §3.
 - [x] **P8** `ASSIGN` is one frame, type 10, field = board ID 0–29, payload
   = the flash ID. The board stores that field only when the payload matches
   its own flash ID. A second frame is not required.
-- [ ] **P9** The per-node alternate (four 16-bit positions, one frame per
+- [x] **P9** The per-node alternate (four 16-bit positions, one frame per
   node) packs and unpacks. A flag on the unpacked frame says it is not the
-  per-motor baseline. **Deferred:** it is not in the volatile board-ID
-  addressing document and is not needed for the host gate; the baseline is
-  the type-0 cubic frame.
+  per-motor baseline.
 - [x] **P10** `mc_pack_frame` / `mc_unpack_frame` follow P1 and P2 for the
   motion variants in §6.3.
 

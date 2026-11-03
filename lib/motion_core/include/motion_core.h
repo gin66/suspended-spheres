@@ -113,6 +113,21 @@ int mc_pack_frame(int type, const mc_segment_t *seg, uint8_t buf[8]);
 int mc_unpack_frame(const uint8_t buf[8], int len, int expect_type,
                     mc_segment_t *seg);
 
+/* Alternative per-node packing (whitepaper §4.3, TDD P9): four
+ * full-range positions in one 8-byte frame, little-endian:
+ *   [ p_axis0 : u16 ][ p_axis1 : u16 ][ p_axis2 ][ p_axis3 ]
+ * Velocity is derived by the node from buffered frames.  Unpacking sets
+ * per_node = 1, so the result cannot be mistaken for the type-0 cubic
+ * per-motor baseline. */
+typedef struct {
+    uint16_t pos[MC_AXES_PER_NODE];
+    int per_node;
+} mc_node_positions_t;
+
+int mc_pack_node_frame(const mc_node_positions_t *f, uint8_t buf[8]);
+int mc_unpack_node_frame(const uint8_t buf[8], int len,
+                         mc_node_positions_t *f);
+
 /* Pure segment evaluation, shared by the stateful playback API and the
  * host node tests. τ is microseconds since the segment start. */
 int32_t mc_segment_eval_um(const mc_segment_t *seg, int64_t tau_us);

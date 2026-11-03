@@ -205,6 +205,26 @@ int mc_unpack_frame(const uint8_t buf[8], int len, int expect_type,
     return 0;
 }
 
+int mc_pack_node_frame(const mc_node_positions_t *f, uint8_t buf[8]) {
+    if (f == 0 || buf == 0)
+        return -1;
+    for (int i = 0; i < MC_AXES_PER_NODE; ++i)
+        put_u16le(buf + i * 2, f->pos[i]);
+    return 0;
+}
+
+int mc_unpack_node_frame(const uint8_t buf[8], int len,
+                         mc_node_positions_t *f) {
+    if (buf == 0 || len != 8 || f == 0)
+        return -1;
+    mc_node_positions_t tmp;
+    for (int i = 0; i < MC_AXES_PER_NODE; ++i)
+        tmp.pos[i] = get_u16le(buf + i * 2);
+    tmp.per_node = 1;
+    *f = tmp;
+    return 0;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Sync, status and commissioning payloads (P4–P8; §4.5)              */
 /* ------------------------------------------------------------------ */
