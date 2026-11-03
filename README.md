@@ -258,34 +258,62 @@ error in the pattern status line.
 
 ---
 
-## Use Claude or another LLM
+## Use Claude or another LLM in a browser
 
 Claude produced a good “walking peak” visual from this prompt. Use it as a
-starting point and replace the motion description with your own idea.
+starting point and replace the motion description with your own idea. It is
+written for a browser chat with **no repository access**, so the model only
+returns text and links.
 
 **English**
 
 > I want to use the animations from
 > https://github.com/gin66/suspended-spheres. Please create a walking peak
-> running in circles. First create a 3D HTML preview similar to the webapp;
-> only when I ask, create the `.anim.json` as a downloadable file. After the
-> report is clean, export a `.hbp` playback file.
+> running in circles as a version-1 `.anim.json`.
+>
+> Use these references:
+> - Schema: https://github.com/gin66/suspended-spheres/blob/main/doc/motion_streaming_whitepaper.md
+>   (section 6.9)
+> - Example: https://github.com/gin66/suspended-spheres/blob/main/patterns/golden_sine.anim.json
+>
+> Show it in the hosted viewer: https://gin66.github.io/suspended-spheres/
+> Give me either a clickable link of the form
+> `https://gin66.github.io/suspended-spheres/#pattern=g1.<base64url(gzip(json))>`
+> (plain `j1.<base64url(json)>` is also accepted), or the complete `.anim.json`
+> in a code block if you cannot build the link.
+>
+> The viewer can also open the file with **Load Pattern File**. Do not assume
+> repository access. Keep the motion inside the ordinary tier; I will run
+> `pattern_check` locally and export the `.hbp` after the report is clean.
 
 **Italiano**
 
 > Voglio usare le animazioni di
 > https://github.com/gin66/suspended-spheres. Per favore, crea un picco che
-> cammina muovendosi in cerchi. Prima crea un’anteprima 3D in HTML simile alla
-> webapp; solo quando te lo chiedo, crea il file `.anim.json` come file
-> scaricabile. Dopo che il report è pulito, esporta un file di riproduzione
-> `.hbp`.
+> cammina muovendosi in cerchi come file `.anim.json` versione 1.
+>
+> Usa questi riferimenti:
+> - Schema: https://github.com/gin66/suspended-spheres/blob/main/doc/motion_streaming_whitepaper.md
+>   (sezione 6.9)
+> - Esempio: https://github.com/gin66/suspended-spheres/blob/main/patterns/golden_sine.anim.json
+>
+> Mostralo nel viewer ospitato: https://gin66.github.io/suspended-spheres/
+> Dammi un link cliccabile del tipo
+> `https://gin66.github.io/suspended-spheres/#pattern=g1.<base64url(gzip(json))>`
+> (è accettato anche `j1.<base64url(json)>` senza compressione), oppure il file
+> `.anim.json` completo in un blocco di codice se non riesci a costruire il
+> link.
+>
+> Il viewer può anche aprire il file con **Load Pattern File**. Non assumere di
+> avere accesso al repository. Mantieni il movimento nel tier ordinary;
+> eseguirò `pattern_check` in locale ed esporterò `.hbp` dopo che il report è
+> pulito.
 
 The preview-first request is deliberate: judge the motion before the model
-commits to the JSON. The best results come when it then writes a version-1
-`patterns/<name>.anim.json`, runs `./build/pattern_check` until the report has
-no violations, and only then exports the `.hbp`. If the model can build URLs,
-it can also return a one-click hosted render link using the `#pattern=` format
-above.
+commits to the JSON. A browser model can build the `#pattern=` link using the
+format above; if it cannot encode it, ask for the `.anim.json` and open it in
+the viewer with **Load Pattern File**. The local authoring loop above remains
+the way to run `pattern_check` and export `.hbp`.
 
 **Success rate varies.** Model quality, context size, language and how precisely
 the motion is described all matter. Expect several iterations: a model may
