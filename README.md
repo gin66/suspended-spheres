@@ -100,6 +100,19 @@ Sine Wave · Standing Wave · Spiral · Random Cascade · Music Reactive · Brea
 
 ---
 
+## See the 3D viewer first
+
+[![3D viewer demo](doc/media/viewer-demo.jpg)](doc/media/viewer-demo.mp4)
+
+This is a **30 s silent video** of the viewer. It needs no Node.js, no Python
+and no installation. Click the image or open
+[`doc/media/viewer-demo.mp4`](doc/media/viewer-demo.mp4) directly. If GitHub
+does not play it in the browser, download the MP4 and open it in your video
+player.
+
+The interactive viewer is the `webapp/` folder. Follow the steps below only if
+you want to orbit the camera, switch animations and edit patterns yourself.
+
 ## Run the 3D Viewer
 
 The designer preview is the `webapp/` folder. No Git account is needed: you can
