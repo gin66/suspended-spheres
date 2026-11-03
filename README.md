@@ -112,38 +112,44 @@ downloaded or opened in a new page. The full-quality **30 s MP4** is still in
 the repository at [`doc/media/viewer-demo.mp4`](doc/media/viewer-demo.mp4) for
 offline viewing.
 
-The interactive viewer is the `webapp/` folder. Follow the steps below only if
-you want to orbit the camera, switch animations and edit patterns yourself.
+The interactive viewer is also available as one file:
+[`webapp/viewer-standalone.html`](webapp/viewer-standalone.html). Download the
+ZIP, unzip it and double-click that file. The steps below are only for the
+authoring loop that watches `patterns/`.
 
 ## Run the 3D Viewer
 
-The designer preview is the `webapp/` folder. No Git account is needed: you can
-download the project as a ZIP, then open it in a browser. You do **not** need to
-build anything by hand.
+### One-click viewer (no Node.js, no server, no terminal)
 
-### 1. Download the project
+1. Download the project ZIP from
+   <https://github.com/gin66/suspended-spheres> (green **Code** button).
+2. Unzip it.
+3. Double-click `webapp/viewer-standalone.html`.
 
-1. Open <https://github.com/gin66/suspended-spheres> in a browser.
-2. Click the green **Code** button, then **Download ZIP**.
-3. Unzip the downloaded file (usually `suspended-spheres-main.zip`).
-4. Open the unzipped folder and find the `webapp` subfolder.
+That one file contains the viewer, Three.js and the WASM motion core, so it
+runs offline from `file://`. Built-in animations, play/pause, loop, fidelity,
+timeline, pattern-file loading and camera orbit all work. The only thing it
+cannot do is watch `patterns/` for live edits.
 
-### 2. Install Node.js (one time)
+The standalone file is prebuilt and checked in; you do not need to rebuild it.
+If you change `webapp/src/` and have Node.js, regenerate it with:
 
-The viewer needs Node.js. Install the **LTS** version from
-<https://nodejs.org/> and accept the default options.
+```sh
+cd webapp
+npm install
+npm run build:standalone
+```
 
-To check the install, open a terminal and run:
+### Authoring loop (optional, needs Node.js)
+
+The steps below add the live pattern list, auto-reload on save and report
+writing. Install the **LTS** version of Node.js from <https://nodejs.org/> and
+accept the defaults. To check the install:
 
 ```sh
 node --version
 npm --version
 ```
-
-If either command is not found, close the terminal, open a new one, and try
-again.
-
-### 3. Start the viewer
 
 Open a terminal **in the `webapp` folder**:
 
@@ -151,7 +157,7 @@ Open a terminal **in the `webapp` folder**:
 - **Windows:** Shift-right-click the `webapp` folder → **Open PowerShell window here**
 - **Linux:** right-click inside the folder → **Open in Terminal**
 
-Then run these two commands:
+Then run:
 
 ```sh
 npm install
@@ -164,10 +170,10 @@ a browser. Leave the terminal open while you use the viewer; press `Ctrl+C` in
 the terminal to stop it.
 
 The shared integer motion core is prebuilt in `webapp/src/wasm/pattern_core.js`,
-so you do not need Emscripten to run the viewer. After changing code under
-`lib/`, rebuild it with `./wasm/build_viewer.sh`.
+so you do not need Emscripten. After changing code under `lib/`, rebuild it with
+`./wasm/build_viewer.sh`.
 
-### 4. Use the viewer
+### Use the viewer
 
 - Click an animation under **Animations** on the left to switch to it.
 - **Play / Pause**, **Loop**, the speed slider, and the timeline control the show.
@@ -178,15 +184,15 @@ so you do not need Emscripten to run the viewer. After changing code under
 
 ### If you cannot or do not want to install npm
 
-If Python 3 is already installed, you can serve the same folder without Node.js.
-In a terminal opened in `webapp/`, run:
+The one-click standalone file above needs neither npm nor Python. For the
+authoring loop without Node.js, Python 3 can serve the source folder instead:
 
 ```sh
+cd webapp
 python3 -m http.server 8000
 ```
 
-Then open <http://localhost:8000/>. This works because the viewer loads Three.js
-from a CDN, so an internet connection is required either way.
+Then open <http://localhost:8000/>.
 
 ### Common problems
 

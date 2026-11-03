@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:standalone": "vite build && node build_standalone.mjs",
     "preview": "vite preview",
     "build:wasm": "sh ../wasm/build_viewer.sh"
   },
