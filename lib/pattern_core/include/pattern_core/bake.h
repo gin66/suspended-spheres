@@ -7,6 +7,11 @@ namespace pc {
 
 Trajectory bake(const AnimFile &file);
 
+/* Evaluate one ball at an arbitrary integer millisecond.  The bake uses
+ * this function at every frame boundary, so the preview and the baked
+ * samples come from the same integer path. */
+int32_t evaluate(const AnimFile &file, int ball, int64_t t_ms);
+
 /* Wire fidelity: full-range 16-bit code decoded back to micrometres.
  * Step fidelity: the same position on the microstep grid. */
 int32_t wire_sample_um(int32_t ideal_um);

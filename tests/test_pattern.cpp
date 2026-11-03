@@ -158,6 +158,10 @@ static int test_a2_deterministic(void) {
     pc::Trajectory b = pc::bake(f);
     ASSERT(a.samples.size() == b.samples.size());
     ASSERT(a.samples == b.samples);
+    for (int fr = 0; fr < a.frame_count; ++fr)
+        for (int ball = 0; ball < f.cols * f.rows; ++ball)
+            ASSERT(pc::evaluate(f, ball, (int64_t)fr * f.dt_ms) ==
+                   a.at(fr, ball));
 
     pc::AnimFile changed = f;
     changed.layers[0].amplitude_um ^= 1;

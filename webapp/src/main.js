@@ -1,244 +1,141 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-
-// Pattern file structures (from test_pattern.cpp)
-const MAX_LAYERS = 16;
-const MAX_SAMPLES = 20000;
+import createPatternCore from './wasm/pattern_core.js';
 
 // ---------------------------------------------------------------------------
-// Pattern file schema / parsing (parity with tests/test_pattern.cpp)
+// Shared integer core (WASM)
 // ---------------------------------------------------------------------------
 
-class LayerDef {
-  constructor() {
-    this.op = '';
-    this.amplitude_um = 0;
-    this.period_ms = 0;
-    this.wavelength_cols = 0;
-    this.axis = '';
-    this.phase_rad = 0;
+const TIER_NAMES = ['ordinary', 'nominal', 'optional'];
+const OP_NAMES = [
+  'keyframes', 'sine', 'travelling_wave', 'interference',
+  'spiral', 'ripple', 'cascade', 'random_walk',
+];
+
+let core = null;
+let pc = null;
+
+async function initCore() {
+  core = await createPatternCore();
+  pc = {
+    load: core.cwrap('pc_load_json', 'number', ['string', 'number']),
+    free: core.cwrap('pc_free', null, ['number']),
+    lastError: core.cwrap('pc_last_error', 'string', []),
+    gridCols: core.cwrap('pc_grid_cols', 'number', ['number']),
+    gridRows: core.cwrap('pc_grid_rows', 'number', ['number']),
+    dtMs: core.cwrap('pc_dt_ms', 'number', ['number']),
+    n: core.cwrap('pc_n', 'number', ['number']),
+    durationMs: core.cwrap('pc_duration_ms', 'number', ['number']),
+    tier: core.cwrap('pc_tier', 'number', ['number']),
+    layerCount: core.cwrap('pc_layer_count', 'number', ['number']),
+    layerOp: core.cwrap('pc_layer_op', 'number', ['number', 'number']),
+    layerAxis: core.cwrap('pc_layer_axis', 'number', ['number', 'number']),
+    evalUm: core.cwrap('pc_eval_um', 'number', ['number', 'number', 'number']),
+    report: core.cwrap('pc_report_json', 'string', ['number']),
+    busLoad: core.cwrap('pc_bus_load_percent', 'number', ['number']),
+    umToCode: core.cwrap('mc_um_to_code', 'number', ['number']),
+    codeToUm: core.cwrap('mc_code_to_um', 'number', ['number']),
+    umToSteps: core.cwrap('mc_um_to_steps', 'number', ['number']),
+    stepsToUm: core.cwrap('mc_steps_to_um', 'number', ['number']),
+  };
+}
+
+// Serialize a built-in show into the version-1 .anim.json fields the core
+// understands.  Loaded files go straight to the core as their original text.
+function showJson(show, duration_ms) {
+  const layers = show.layers.map((l) => ({
+    op: l.op || 'sine',
+    amplitude_um: l.amplitude_um || 0,
+    period_ms: l.period_ms || 0,
+    wavelength_cols: l.wavelength_cols || 0,
+    phase_deg: l.phase_deg || 0,
+    axis: l.axis || 'col',
+    direction: l.direction ?? 1,
+    seed: l.seed || 0,
+    amplitude2_um: l.amplitude2_um || 0,
+    period2_ms: l.period2_ms || 0,
+    wavelength2_cols: l.wavelength2_cols || 0,
+    phase2_deg: l.phase2_deg || 0,
+    axis2: l.axis2 || 'col',
+  }));
+  return JSON.stringify({
+    version: 1,
+    grid: [show.grid_cols, show.grid_rows],
+    dt_ms: show.dt_ms,
+    n: show.n,
+    duration_ms,
+    tier: show.tier || 'ordinary',
+    base_um: 1000000,
+    layers,
+  });
+}
+
+function reportFromHandle(handle) {
+  let raw = { violations: [] };
+  try { raw = JSON.parse(pc.report(handle)); } catch { /* keep empty */ }
+  const violations = (raw.violations || []).map((v) => ({
+    ball_index: v.ball,
+    time_ms: v.time_ms,
+    limit_name: v.limit,
+    measured_um: v.measured,
+    allowed_um: v.allowed,
+  }));
+  return {
+    count: violations.length,
+    violations,
+    parse_error: raw.parse_error || '',
+  };
+}
+
+function showFromHandle(name, handle) {
+  const nLayers = pc.layerCount(handle);
+  const layers = [];
+  for (let i = 0; i < nLayers; i++) {
+    layers.push({
+      op: OP_NAMES[pc.layerOp(handle, i)] || 'sine',
+      axis: pc.layerAxis(handle, i) === 1 ? 'row' : 'col',
+    });
   }
+  const cols = pc.gridCols(handle);
+  const rows = pc.gridRows(handle);
+  return {
+    name,
+    coreHandle: handle,
+    version: 1,
+    grid: [cols, rows],
+    grid_cols: cols,
+    grid_rows: rows,
+    dt_ms: pc.dtMs(handle),
+    n: pc.n(handle),
+    duration_ms: pc.durationMs(handle),
+    tier: TIER_NAMES[pc.tier(handle)] || 'ordinary',
+    layers,
+    n_layers: nLayers,
+    report: reportFromHandle(handle),
+  };
 }
 
-class PatternFile {
-  constructor() {
-    this.version = 0;
-    this.grid = [0, 0];
-    this.grid_cols = 0;
-    this.grid_rows = 0;
-    this.dt_ms = 0;
-    this.n = 0;
-    this.duration_ms = 0;
-    this.tier = '';
-    this.n_layers = 0;
-    this.layers = [];
-    for (let i = 0; i < MAX_LAYERS; i++) {
-      this.layers.push(new LayerDef());
-    }
-  }
+function ensureCoreShow(show) {
+  if (show.coreHandle) return show.coreHandle;
+  const duration = Math.max(show.duration_ms || computeLoopPeriodMs(show),
+                            show.dt_ms || 10);
+  const handle = pc.load(showJson(show, duration), 0);
+  if (!handle) throw new Error(pc.lastError());
+  show.coreHandle = handle;
+  show.duration_ms = duration;
+  return handle;
 }
 
-class TrajectorySample {
-  constructor() {
-    this.ball_index = 0;
-    this.time_ms = 0;
-    this.pos_um = 0;
-  }
-}
-
-class Trajectory {
-  constructor() {
-    this.samples = [];
-    this.count = 0;
-    this.grid_cols = 0;
-    this.grid_rows = 0;
-    this.dt_ms = 0;
-    this.n = 0;
-    this.duration_ms = 0;
-  }
-}
-
-class LimitViolation {
-  constructor() {
-    this.ball_index = 0;
-    this.time_ms = 0;
-    this.limit_name = '';
-    this.measured_um = 0;
-    this.allowed_um = 0;
-  }
-}
-
-class LimitReport {
-  constructor() {
-    this.violations = [];
-    this.count = 0;
-  }
-}
-
-function parse_pattern_file(text) {
-  const pf = new PatternFile();
-  let data;
-  try { data = JSON.parse(text); } catch { return null; }
-  if (!data || typeof data !== 'object') return null;
-
-  if (typeof data.version !== 'number' || data.version !== Math.floor(data.version) || data.version !== 1) return null;
-  pf.version = data.version;
-
-  if (!Array.isArray(data.grid) || data.grid.length !== 2) return null;
-  const g0 = data.grid[0], g1 = data.grid[1];
-  if (typeof g0 !== 'number' || typeof g1 !== 'number') return null;
-  pf.grid[0] = g0; pf.grid[1] = g1;
-  if (!((pf.grid[0] === 10 && pf.grid[1] === 10) || (pf.grid[0] === 10 && pf.grid[1] === 12))) return null;
-  pf.grid_cols = pf.grid[0];
-  pf.grid_rows = pf.grid[1];
-
-  if (typeof data.dt_ms !== 'number') return null;
-  pf.dt_ms = data.dt_ms;
-  if (pf.dt_ms !== 10 && pf.dt_ms !== 11 && pf.dt_ms !== 15) return null;
-
-  if (typeof data.n !== 'number') return null;
-  pf.n = data.n;
-  if (pf.n !== 3 && pf.n !== 4) return null;
-
-  if (typeof data.duration_ms !== 'number') return null;
-  pf.duration_ms = data.duration_ms;
-
-  if (typeof data.tier !== 'string') return null;
-  pf.tier = data.tier;
-
-  if (!Array.isArray(data.layers)) return null;
-
-  pf.n_layers = 0;
-  for (let i = 0; i < data.layers.length && pf.n_layers < MAX_LAYERS; i++) {
-    const lay = data.layers[i];
-    if (typeof lay !== 'object' || lay === null) return null;
-    const layer = pf.layers[pf.n_layers];
-
-    if (typeof lay.op !== 'string') return null;
-    layer.op = lay.op;
-    if (typeof lay.amplitude_um !== 'number') return null;
-    layer.amplitude_um = lay.amplitude_um;
-    if (typeof lay.period_ms !== 'number') return null;
-    layer.period_ms = lay.period_ms;
-    if (typeof lay.wavelength_cols !== 'number') return null;
-    layer.wavelength_cols = lay.wavelength_cols;
-    if (typeof lay.axis !== 'string') return null;
-    layer.axis = lay.axis;
-    layer.phase_rad = typeof lay.phase_rad === 'number' ? lay.phase_rad : 0;
-
-    pf.n_layers++;
-  }
-
-  return pf;
-}
-
-// ---------------------------------------------------------------------------
-// Kinematics: additive layer composition
-// ---------------------------------------------------------------------------
-
-// One sine layer contribution around the 1 m centre. axis "col" varies with
-// the grid column, "row" with the grid row, so two layers make X/Y waves.
-function sineContributionUm(lay, col, row, time_ms) {
-  const coord = lay.axis === 'row' ? row : col;
-  const period = lay.period_ms > 0 ? lay.period_ms : 1;
-  const wl = lay.wavelength_cols > 0 ? lay.wavelength_cols : 1;
-  const phase = (2.0 * Math.PI * time_ms) / period + (lay.phase_rad || 0);
-  const spatial = (2.0 * Math.PI * coord) / wl;
-  return (lay.amplitude_um || 0) * Math.sin(phase + spatial);
-}
-
+// Render-time evaluation uses the same integer path as the bake.
 function evaluatePositionUm(show, col, row, time_ms) {
-  let um = 1000000;
-  for (let l = 0; l < show.n_layers; l++) {
-    um += sineContributionUm(show.layers[l], col, row, time_ms);
-  }
+  if (!show.coreHandle) return 1000000;
+  const ball = row * show.grid_cols + col;
+  let um = pc.evalUm(show.coreHandle, ball, Math.round(time_ms));
+  if (um < 0) um = 1000000;
   if (um < 0) um = 0;
   else if (um > 2000000) um = 2000000;
   return um;
 }
-
-function bake_trajectory(show) {
-  const tr = new Trajectory();
-  const total_balls = show.grid_cols * show.grid_rows;
-  const n_samples = show.duration_ms / show.dt_ms;
-
-  if (n_samples * total_balls > MAX_SAMPLES) return null;
-
-  tr.grid_cols = show.grid_cols;
-  tr.grid_rows = show.grid_rows;
-  tr.dt_ms = show.dt_ms;
-  tr.n = show.n;
-  tr.duration_ms = show.duration_ms;
-  tr.count = 0;
-
-  for (let t = 0; t < n_samples; t++) {
-    const time_ms = t * show.dt_ms;
-    for (let ball = 0; ball < total_balls; ball++) {
-      const col = ball % show.grid_cols;
-      const row = Math.floor(ball / show.grid_cols);
-      const s = new TrajectorySample();
-      s.ball_index = ball;
-      s.time_ms = time_ms;
-      s.pos_um = evaluatePositionUm(show, col, row, time_ms);
-      tr.samples[tr.count] = s;
-      tr.count++;
-    }
-  }
-  return tr;
-}
-
-function check_limits(tr, tier) {
-  const report = new LimitReport();
-  const total_balls = tr.grid_cols * tr.grid_rows;
-  const n_samples = tr.duration_ms / tr.dt_ms;
-
-  for (let ball = 0; ball < total_balls; ball++) {
-    for (let t = 0; t < n_samples; t++) {
-      const idx = t * total_balls + ball;
-      if (idx >= tr.count) break;
-      const s = tr.samples[idx];
-      if (s.pos_um < 0 || s.pos_um > 2000000) {
-        const v = new LimitViolation();
-        v.ball_index = ball;
-        v.time_ms = s.time_ms;
-        v.limit_name = 'FR-MOT-005';
-        v.measured_um = s.pos_um;
-        v.allowed_um = 2000000;
-        report.violations[report.count] = v;
-        report.count++;
-      }
-      if (t > 0 && t < n_samples - 1) {
-        const idx_prev = (t - 1) * total_balls + ball;
-        const idx_next = (t + 1) * total_balls + ball;
-        if (idx_prev >= 0 && idx_prev < tr.count && idx_next >= 0 && idx_next < tr.count) {
-          const dz = tr.samples[idx_next].pos_um - tr.samples[idx_prev].pos_um;
-          const speed_um_s = Math.abs(dz) * 1000 / (tr.dt_ms * 2);
-          let speed_limit = 0;
-          if (tier === 'ordinary') speed_limit = 300000;
-          else if (tier === 'nominal') speed_limit = 590000;
-          else if (tier === 'optional') speed_limit = 1300000;
-          if (speed_um_s > speed_limit) {
-            const v = new LimitViolation();
-            v.ball_index = ball;
-            v.time_ms = s.time_ms;
-            v.limit_name = 'ASM-015';
-            v.measured_um = speed_um_s;
-            v.allowed_um = speed_limit;
-            report.violations[report.count] = v;
-            report.count++;
-          }
-        }
-      }
-    }
-  }
-  return report;
-}
-
-// Motion core conversions (from motion_core.h)
-function mc_code_to_um(code) { return Math.round((code * 2000000) / 65535); }
-function mc_um_to_code(um) { return Math.round((um * 65535) / 2000000); }
-function mc_um_to_steps(um) { return Math.round((um * 1668861) / (1000 * 65536)); }
-function mc_steps_to_um(steps) { return Math.round((steps * 1000 * 65536) / 1668861); }
 
 // ---------------------------------------------------------------------------
 // Show definitions
@@ -271,12 +168,12 @@ function computeLoopPeriodMs(show) {
 
 function makeShow(name, layerDefs, extra = {}) {
   const layers = layerDefs.map((l) => ({
-    op: 'sine',
+    op: l.op || 'sine',
     amplitude_um: l.amplitude_um,
     period_ms: l.period_ms,
     wavelength_cols: l.wavelength_cols,
     axis: l.axis,
-    phase_rad: l.phase_rad || 0,
+    phase_deg: Math.round(((l.phase_rad || 0) * 180) / Math.PI),
   }));
   return {
     name,
@@ -502,8 +399,8 @@ function updateSpherePositions(time_ms, now_ms) {
     if (currentFidelity !== 'ideal') {
       const exactUm = um;
       const quantizedUm = currentFidelity === 'wire'
-        ? mc_code_to_um(mc_um_to_code(um))
-        : mc_steps_to_um(mc_um_to_steps(um));
+        ? pc.codeToUm(pc.umToCode(um))
+        : pc.stepsToUm(pc.umToSteps(um));
       um = fidelityExaggerate
         ? exactUm + (quantizedUm - exactUm) * FIDELITY_ERROR_SCALE
         : quantizedUm;
@@ -547,7 +444,9 @@ function layerSummary(show) {
   if (!show.n_layers) return '-';
   const parts = [];
   for (let i = 0; i < show.n_layers; i++) {
-    parts.push(`sine(${show.layers[i].axis})`);
+    const layer = show.layers[i];
+    const op = layer.op || 'sine';
+    parts.push(layer.axis ? `${op}(${layer.axis})` : op);
   }
   return parts.join(' + ');
 }
@@ -565,9 +464,8 @@ function updateInfoPanel() {
     : `${currentFidelity}${fidelityExaggerate ? ' (error ×1000)' : ' (true scale)'}`;
   document.getElementById('fidelity-info').textContent = fidelityText;
 
-  const frames_s = Math.round(120000 / (show.n * show.dt_ms));
-  const load = Math.round((frames_s + 350) * 130 / 10000);
-  document.getElementById('bus-load').textContent = `${load}%`;
+  const load = show.coreHandle ? pc.busLoad(show.coreHandle) : 0;
+  document.getElementById('bus-load').textContent = `${Math.max(0, load)}%`;
 
   document.getElementById('violation-count').textContent = currentReport.count;
 
@@ -596,6 +494,12 @@ function updateShowButtons() {
 function selectShow(index, doBlend = true) {
   const next = shows[index];
   if (!next) return;
+  try {
+    ensureCoreShow(next);
+  } catch (err) {
+    alert('Could not load show into the motion core: ' + err.message);
+    return;
+  }
 
   const prev = currentShow;
   currentShowIndex = index;
@@ -719,34 +623,13 @@ document.getElementById('pattern-file').addEventListener('change', async (event)
   if (!file) return;
   try {
     const text = await file.text();
-    const pf = parse_pattern_file(text);
-    if (!pf) {
-      alert('Failed to parse pattern file');
+    const handle = pc.load(text, 1);
+    if (!handle) {
+      alert('Failed to parse pattern file: ' + pc.lastError());
       return;
     }
-
-    const show = {
-      name: file.name.replace(/\.anim\.json$/, '').replace(/\.json$/, '') || 'Loaded',
-      version: pf.version,
-      grid: [pf.grid_cols, pf.grid_rows],
-      grid_cols: pf.grid_cols,
-      grid_rows: pf.grid_rows,
-      dt_ms: pf.dt_ms,
-      n: pf.n,
-      duration_ms: pf.duration_ms,
-      tier: pf.tier,
-      layers: pf.layers.slice(0, pf.n_layers),
-      n_layers: pf.n_layers,
-    };
-
-    const tr = bake_trajectory(show);
-    if (!tr) {
-      alert('Trajectory too large');
-      return;
-    }
-    show.report = check_limits(tr, show.tier);
-
-    shows.push(show);
+    const name = file.name.replace(/\.anim\.json$/, '').replace(/\.json$/, '') || 'Loaded';
+    shows.push(showFromHandle(name, handle));
     selectShow(shows.length - 1);
   } catch (err) {
     alert('Error loading pattern: ' + err.message);
@@ -757,9 +640,19 @@ document.getElementById('pattern-file').addEventListener('change', async (event)
 // Init
 // ---------------------------------------------------------------------------
 
-updateShowButtons();
-selectShow(1, false); // start on the X/Y showcase
-requestAnimationFrame(animate);
+async function initViewer() {
+  try {
+    await initCore();
+  } catch (err) {
+    alert('Could not load the shared motion core: ' + err.message);
+    return;
+  }
+  updateShowButtons();
+  selectShow(1, false); // start on the X/Y showcase
+  requestAnimationFrame(animate);
+}
+
+initViewer();
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;

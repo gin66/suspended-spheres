@@ -143,6 +143,10 @@ prints a local address, normally <http://localhost:5173/>. Open that address in
 a browser. Leave the terminal open while you use the viewer; press `Ctrl+C` in
 the terminal to stop it.
 
+The shared integer motion core is prebuilt in `webapp/src/wasm/pattern_core.js`,
+so you do not need Emscripten to run the viewer. After changing code under
+`lib/`, rebuild it with `./wasm/build_viewer.sh`.
+
 ### 4. Use the viewer
 
 - Click an animation under **Animations** on the left to switch to it.
@@ -184,7 +188,7 @@ from a CDN, so an internet connection is required either way.
 | **Controller Hardware** | Fly-Micro4 selected; desolder R39/R58 on every board. Waveshare CAN jumper set to 120 Ω; solder 120 Ω into a cable terminator |
 | **Show controller** | Waveshare ESP32-S3-Touch-LCD-7 selected; sources will live in `esp32gui/` |
 | **Firmware** | ⏳ Planned |
-| **Simulation** | ✅ 3D viewer available in `webapp/`; pattern export in progress |
+| **Simulation** | ✅ 3D viewer uses the shared WASM core; pattern export in progress |
 | **Prototype** | ⏳ Planned |
 
 ---

@@ -205,6 +205,19 @@ int32_t layer_offset(const Layer &layer, int col, int row, int64_t t_ms,
 
 }  // namespace
 
+int32_t evaluate(const AnimFile &file, int ball, int64_t t_ms) {
+    int col = file.cols > 0 ? ball % file.cols : 0;
+    int row = file.cols > 0 ? ball / file.cols : 0;
+    int64_t pos = file.base_um;
+    for (const auto &layer : file.layers) {
+        if (!in_group(layer.group, ball, file.cols, file.rows))
+            continue;
+        pos += layer_offset(layer, col, row, t_ms, file.cols, file.rows,
+                            ball);
+    }
+    return (int32_t)pos;
+}
+
 Trajectory bake(const AnimFile &file) {
     Trajectory t;
     t.cols = file.cols;
@@ -220,18 +233,8 @@ Trajectory bake(const AnimFile &file) {
 
     for (int f = 0; f < frames; ++f) {
         int64_t t_ms = (int64_t)f * file.dt_ms;
-        for (int b = 0; b < balls; ++b) {
-            int col = b % file.cols;
-            int row = b / file.cols;
-            int64_t pos = file.base_um;
-            for (const auto &layer : file.layers) {
-                if (!in_group(layer.group, b, file.cols, file.rows))
-                    continue;
-                pos += layer_offset(layer, col, row, t_ms, file.cols,
-                                    file.rows, b);
-            }
-            t.samples[(size_t)f * balls + b] = (int32_t)pos;
-        }
+        for (int b = 0; b < balls; ++b)
+            t.samples[(size_t)f * balls + b] = evaluate(file, b, t_ms);
     }
     return t;
 }

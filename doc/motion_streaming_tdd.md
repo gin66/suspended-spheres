@@ -98,7 +98,9 @@ bake, limits, report, `.hbp` export and live file state live in
 `lib/pattern_core/` and are exercised by `tests/test_pattern.cpp` and
 `tests/test_live.cpp`. Native/WASM parity (§12) also passes with Emscripten
 6.0.13: `tests/wasm_parity.sh` compares the native and Node/WASM transcripts
-byte for byte. P9 is deferred above.
+byte for byte. The browser viewer imports the generated module, so built-in
+shows and loaded files both evaluate through `pc::evaluate`. P9 is deferred
+above.
 
 Later byte layouts are the Markdown tables in the whitepaper §4.5 and in
 `Fly_Micro4_addressing.md` §3. There is no separate schema file. A test
