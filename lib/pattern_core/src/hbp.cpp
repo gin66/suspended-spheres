@@ -52,6 +52,9 @@ std::string manifest_json(const AnimFile &file) {
       << "\"units\":\"um\","
       << "\"sample_type\":\"int32\","
       << "\"layout\":\"frame-major\","
+      << "\"axis_order\":\"ball\","
+      << "\"wire_format\":\"p0u16_v0s16_a0s16_js16\","
+      << "\"wire_stride\":8,"
       << "\"cadence_ms\":" << file.dt_ms << ","
       << "\"n\":" << file.n << ","
       << "\"duration_ms\":" << file.duration_ms << ","
@@ -273,6 +276,7 @@ bool read_zip(const std::string &path, std::vector<ZipMember> *members,
             return false;
         }
         uint16_t method = get16(buf, p + 10);
+        uint32_t crc = get32(buf, p + 16);
         uint32_t csize = get32(buf, p + 20);
         uint16_t nlen = get16(buf, p + 28);
         uint16_t elen = get16(buf, p + 30);
@@ -296,6 +300,10 @@ bool read_zip(const std::string &path, std::vector<ZipMember> *members,
         ZipMember m;
         m.name.assign((const char *)buf.data() + p + 46, nlen);
         m.data.assign(buf.begin() + data_pos, buf.begin() + data_pos + csize);
+        if (crc32_calc(m.data.data(), m.data.size()) != crc) {
+            if (error) *error = "zip CRC mismatch";
+            return false;
+        }
         members->push_back(std::move(m));
         p += 46 + nlen + elen + clen;
     }
@@ -371,6 +379,17 @@ bool read_hbp(const std::string &path, AnimFile *file, Trajectory *traj,
     }
     if (!manifest || !bin || !sha) {
         if (error) *error = "hbp is missing a member";
+        return false;
+    }
+
+    std::string sha_text((const char *)sha->data.data(), sha->data.size());
+    std::string want_manifest = sha256_hex(manifest->data.data(),
+                                           manifest->data.size()) +
+                                "  manifest.json\n";
+    std::string want_traj = sha256_hex(bin->data.data(), bin->data.size()) +
+                            "  trajectory.bin\n";
+    if (sha_text != want_manifest + want_traj) {
+        if (error) *error = "hbp sha256 mismatch";
         return false;
     }
 

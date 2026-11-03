@@ -71,8 +71,9 @@ is 50 ms.
 As of 2026-11-03 the first session (harness + units) has been started in the
 repository: the shared core lives in `lib/motion_core/`, the host harness in
 `tests/`, and the firmware-only scaffold in `rp2040/` carries a PlatformIO
-`[env:rpipico]`. Still open: the `patterns/golden_sine.anim.json` file and the
-Python fixture. Leave `boards/`, `LICENSE`, and the EasyEDA project unchanged.
+`[env:rpipico]`. The `patterns/golden_sine.anim.json` file and the Python
+fixture are now in the tree; the fifth-slice note below records the current
+state. Leave `boards/`, `LICENSE`, and the EasyEDA project unchanged.
 
 This plan is ready to implement. The first session covers §1 and §2 only,
 in that order:
@@ -87,14 +88,17 @@ That session stops there. It does not add `PlaybackClock`, the identifier
 tests (§3), the frame codecs beyond the endian check in U7, the golden
 file, the Python fixture, or the WASM build.
 
-**Progress note (2026-11-03, fourth slice).** §1–§9 are implemented and
-passing except P9. The identifier rules now match the volatile
-board-ID model: motor fields 0–119, board IDs 0–29, field 127 for all
-boards, and `ASK` / `DISC` / `ASSIGN`. P4–P8 lock the sync, status and
-discovery payloads. The host node double in `tests/node_sim.h` covers
-N1–N14 with `PlaybackClock`, and `tests/commission_sim.h` covers M1–M7.
-Still open: the pattern bake and file state (§10–§11), and the golden
-file / WASM parity (§12). P9 is deferred above.
+**Progress note (2026-11-03, fifth slice).** §1–§11 are implemented and
+passing except P9. The identifier rules match the volatile board-ID model:
+motor fields 0–119, board IDs 0–29, field 127 for all boards, and `ASK` /
+`DISC` / `ASSIGN`. P4–P8 lock the sync, status and discovery payloads.
+The host node double in `tests/node_sim.h` covers N1–N14 with
+`PlaybackClock`, and `tests/commission_sim.h` covers M1–M7. Pattern parse,
+bake, limits, report, `.hbp` export and live file state live in
+`lib/pattern_core/` and are exercised by `tests/test_pattern.cpp` and
+`tests/test_live.cpp`. Still open: native/WASM parity (§12); it needs an
+Emscripten toolchain, which is not installed in this environment. P9 is
+deferred above.
 
 Later byte layouts are the Markdown tables in the whitepaper §4.5 and in
 `Fly_Micro4_addressing.md` §3. There is no separate schema file. A test
@@ -420,19 +424,19 @@ Addressing §1–§3. No flash chip: the test supplies an 8-byte ID.
 
 Whitepaper §6.4, §6.6, §6.9. Headless. No browser.
 
-- [ ] **A1** `.anim.json` version 1 matches the whitepaper §6.9.
+- [x] **A1** `.anim.json` version 1 matches the whitepaper §6.9.
   A file missing `version`, `grid`, `dt_ms`, `n`, `duration_ms`, `tier`, or
   `layers` fails parse. The parser accepts grids `[10, 10]` and `[10, 12]`.
   A non-integer numeric field fails parse.
-- [ ] **A2** The same `.anim.json` bakes to the same sample bytes on two
+- [x] **A2** The same `.anim.json` bakes to the same sample bytes on two
   runs. A one-bit change in a layer parameter changes the bytes.
-- [ ] **A3** Layers that bake and pass a slow take: keyframes, sine,
+- [x] **A3** Layers that bake and pass a slow take: keyframes, sine,
   travelling wave, interference of two waves, spiral, ripple, cascade,
   and a seeded random walk. The seeded walk repeats for a repeated seed.
-- [ ] **A4** A group (row, column, ring, checkerboard, mask) applies a
+- [x] **A4** A group (row, column, ring, checkerboard, mask) applies a
   parameter to those balls only. Balls outside the group stay at the
   base layer.
-- [ ] **A5** The limit checker writes `.report.json` with one entry per
+- [x] **A5** The limit checker writes `.report.json` with one entry per
   violation: ball, time, limit name, measured value, allowed value.
   An empty `violations` array is the export gate.
 
@@ -449,22 +453,22 @@ Whitepaper §6.4, §6.6, §6.9. Headless. No browser.
   | `Δt` / `N` that push the bus to or above 60 % | violation (B4) |
   | A 2 ms chunk that would exceed 128 steps | violation (S4) |
 
-- [ ] **A6** `.hbp` is written only when `violations` is empty. It is a
+- [x] **A6** `.hbp` is written only when `violations` is empty. It is a
   zip with `manifest.json` (grid, units, cadence, duration, calibration),
   `trajectory.bin` (int32 µm, little-endian), and `sha256.txt` over those
   members. A dirty report leaves no new zip, or leaves the previous zip
   untouched.
-- [ ] **A7** Unpacking `.hbp` and running `mc_eval` reproduces
+- [x] **A7** Unpacking `.hbp` and running `mc_eval` reproduces
   `trajectory.bin`. Packing that trajectory with P1 or P2 reproduces the
   wire bytes the manifest names.
-- [ ] **A8** `tests/fixtures/write_sine.py` writes a version-1 `.anim.json`.
+- [x] **A8** `tests/fixtures/write_sine.py` writes a version-1 `.anim.json`.
   The test process may run that script. The checker accepts the JSON it
   wrote. The checker returns a parse error when its input path ends in
   `.py`.
-- [ ] **A9** A 120-ball sine inside the ordinary tier bakes clean, stays
+- [x] **A9** A 120-ball sine inside the ordinary tier bakes clean, stays
   inside the travel, and stays under 60 % bus load at the file's `Δt`
   and `N`.
-- [ ] **A10** Wire-fidelity samples differ from the ideal curve by at most
+- [x] **A10** Wire-fidelity samples differ from the ideal curve by at most
   half a code step (15.3 µm). Step-fidelity samples lie on the microstep
   grid of 39.3 µm. Both are functions of the same core.
 
@@ -474,21 +478,21 @@ Whitepaper §6.4, §6.6, §6.9. Headless. No browser.
 
 Whitepaper §6.9. A temp directory and a fake clock. No window, no WebGL.
 
-- [ ] **L1** A content change of `.anim.json`, after the debounce interval,
+- [x] **L1** A content change of `.anim.json`, after the debounce interval,
   replaces the trajectory. Two writes inside the debounce window cause
   one bake.
-- [ ] **L2** The playhead, the selected ball, and the camera pose are
+- [x] **L2** The playhead, the selected ball, and the camera pose are
   unchanged by a reload. Samples from the current time forward come from
   the new bake. Time is not reset to 0.
-- [ ] **L3** A file that does not parse keeps the last good trajectory.
+- [x] **L3** A file that does not parse keeps the last good trajectory.
   The report gains a parse error and keeps the previous violations.
-- [ ] **L4** Changing `Δt` or `N` in the file rebakes the whole take from
+- [x] **L4** Changing `Δt` or `N` in the file rebakes the whole take from
   the start of the file. The in-flight-segment rule (B8) still applies
   to a playing node; the file change is a new take, not a mid-segment edit.
-- [ ] **L5** Export and the simulated CAN playback entry point stay
+- [x] **L5** Export and the simulated CAN playback entry point stay
   disabled while `violations` is non-empty, and become enabled on the
   next clean report.
-- [ ] **L6** A watcher that is shown a `.hbp` write does not treat it as
+- [x] **L6** A watcher that is shown a `.hbp` write does not treat it as
   an authoring change. Only `.anim.json` is the watched source.
 
 ---
@@ -496,6 +500,11 @@ Whitepaper §6.9. A temp directory and a fake clock. No window, no WebGL.
 ## 12. Native and WASM parity
 
 Whitepaper §6.3, §6.7. Still no board.
+
+> **Deferred (2026-11-03).** W1–W3 need Emscripten (`emcc`), which is not
+> installed in the host environment used for the fifth slice. The checked-in
+> `patterns/golden_sine.anim.json` and the deterministic native bake (A2) are
+> ready for the parity comparison; run W1–W3 when `emcc` is available.
 
 - [ ] **W1** The same core sources compile with Emscripten (`-std=c++17`).
   A host driver calls the native binary and the WASM binary (via Node)
@@ -519,8 +528,8 @@ After that:
 3. Playback polynomial C1–C10 (§6) and steps S1–S10 (§7). **Done.**
 4. Node playback N1–N14 (§8) and payloads P4–P8 (§4). **Done.**
 5. Commissioning M1–M7 (§9). **Done.**
-6. Pattern bake (§10), live file state (§11), then native/WASM parity
-   (§12).
+6. Pattern bake (§10) and live file state (§11). **Done.**
+7. Native/WASM parity (§12). **Deferred: `emcc` not installed.**
 
 Phase 12 is the host gate named in roadmap W1: golden traces pass, and
 the worst-case chunk and tick asserts (S3–S5) pass. W0 and the scope

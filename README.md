@@ -57,9 +57,12 @@ Suspended_Spheres/
 ├── README.md                   # This file — project overview and entry point
 ├── AGENTS.md                   # Mission, overview, development notes
 ├── lib/
-│   └── motion_core/            # Shared integer motion core (PC and firmware)
+│   ├── motion_core/            # Shared integer motion core (PC and firmware)
+│   └── pattern_core/           # Pattern bake, limits, report and .hbp export
 ├── tests/                      # Host-only harness (CMake; no hardware)
 ├── rp2040/                     # Fly-Micro4 firmware (PlatformIO)
+├── webapp/                     # Designer 3D viewer (Vite + Three.js)
+├── patterns/                   # .anim.json example patterns
 ├── esp32gui/                   # Show controller and LVGL UI (not created yet)
 ├── boards/
 │   ├── Fly_Micro4_pinmap.md         # Pin reference for the vendor files
@@ -91,6 +94,86 @@ Sine Wave · Standing Wave · Spiral · Random Cascade · Music Reactive · Brea
 
 ---
 
+## Run the 3D Viewer
+
+The designer preview is the `webapp/` folder. No Git account is needed: you can
+download the project as a ZIP, then open it in a browser. You do **not** need to
+build anything by hand.
+
+### 1. Download the project
+
+1. Open <https://github.com/gin66/suspended-spheres> in a browser.
+2. Click the green **Code** button, then **Download ZIP**.
+3. Unzip the downloaded file (usually `suspended-spheres-main.zip`).
+4. Open the unzipped folder and find the `webapp` subfolder.
+
+### 2. Install Node.js (one time)
+
+The viewer needs Node.js. Install the **LTS** version from
+<https://nodejs.org/> and accept the default options.
+
+To check the install, open a terminal and run:
+
+```sh
+node --version
+npm --version
+```
+
+If either command is not found, close the terminal, open a new one, and try
+again.
+
+### 3. Start the viewer
+
+Open a terminal **in the `webapp` folder**:
+
+- **macOS:** right-click the `webapp` folder → **Services** → **New Terminal at Folder**
+- **Windows:** Shift-right-click the `webapp` folder → **Open PowerShell window here**
+- **Linux:** right-click inside the folder → **Open in Terminal**
+
+Then run these two commands:
+
+```sh
+npm install
+npm run dev
+```
+
+`npm install` downloads the 3D library and may take a minute. `npm run dev`
+prints a local address, normally <http://localhost:5173/>. Open that address in
+a browser. Leave the terminal open while you use the viewer; press `Ctrl+C` in
+the terminal to stop it.
+
+### 4. Use the viewer
+
+- Click an animation under **Animations** on the left to switch to it.
+- **Play / Pause**, **Loop**, the speed slider, and the timeline control the show.
+- **Fidelity** switches between the ideal curve, the 16-bit wire values, and the microstep grid.
+- **Load Pattern File** opens a `.anim.json` file. Try `patterns/golden_sine.anim.json` from the project folder.
+- Drag to orbit the camera and scroll to zoom.
+- Red spheres and the violation banner mark positions outside the allowed limits.
+
+### If you cannot or do not want to install npm
+
+If Python 3 is already installed, you can serve the same folder without Node.js.
+In a terminal opened in `webapp/`, run:
+
+```sh
+python3 -m http.server 8000
+```
+
+Then open <http://localhost:8000/>. This works because the viewer loads Three.js
+from a CDN, so an internet connection is required either way.
+
+### Common problems
+
+| Problem | Fix |
+|---------|-----|
+| `npm: command not found` | Install Node.js LTS, then open a new terminal |
+| Blank page when opening `index.html` directly | Do not double-click the file; use `npm run dev` or the Python server above |
+| Address already in use | `npm run dev -- --port 5174`, or pick another Python port |
+| The 3D view does not load | Check the internet connection; Three.js comes from a CDN |
+
+---
+
 ## Status
 
 | Area | Status |
@@ -100,7 +183,7 @@ Sine Wave · Standing Wave · Spiral · Random Cascade · Music Reactive · Brea
 | **Controller Hardware** | Fly-Micro4 selected; desolder R39/R58 on every board. Waveshare CAN jumper set to 120 Ω; solder 120 Ω into a cable terminator |
 | **Show controller** | Waveshare ESP32-S3-Touch-LCD-7 selected; sources will live in `esp32gui/` |
 | **Firmware** | ⏳ Planned |
-| **Simulation** | ⏳ Planned |
+| **Simulation** | ✅ 3D viewer available in `webapp/`; pattern export in progress |
 | **Prototype** | ⏳ Planned |
 
 ---

@@ -95,10 +95,18 @@ struct Trajectory {
     int frame_count = 0;
     /* frame-major: frame * (cols*rows) + ball */
     std::vector<int32_t> samples;
+    /* Optional explicit frame times.  Empty means frame * dt_ms.  The
+     * checker uses this to report two positions at the same time. */
+    std::vector<int64_t> times_ms;
 
     int ball_count() const { return cols * rows; }
     int32_t at(int frame, int ball) const {
         return samples[(size_t)frame * ball_count() + ball];
+    }
+    int64_t time_ms(int frame) const {
+        if ((size_t)frame < times_ms.size())
+            return times_ms[(size_t)frame];
+        return (int64_t)frame * dt_ms;
     }
 };
 

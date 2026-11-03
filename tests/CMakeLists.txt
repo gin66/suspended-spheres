@@ -12,6 +12,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(MOTION_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib/motion_core")
+set(PATTERN_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib/pattern_core")
 
 add_library(motion_core STATIC
     "${MOTION_CORE_DIR}/src/motion_core.cpp"
@@ -19,6 +20,18 @@ add_library(motion_core STATIC
 target_include_directories(motion_core PUBLIC
     "${MOTION_CORE_DIR}/include"
 )
+
+add_library(pattern_core STATIC
+    "${PATTERN_CORE_DIR}/src/bake.cpp"
+    "${PATTERN_CORE_DIR}/src/hbp.cpp"
+    "${PATTERN_CORE_DIR}/src/json.cpp"
+    "${PATTERN_CORE_DIR}/src/limits.cpp"
+    "${PATTERN_CORE_DIR}/src/live.cpp"
+)
+target_include_directories(pattern_core PUBLIC
+    "${PATTERN_CORE_DIR}/include"
+)
+target_link_libraries(pattern_core PUBLIC motion_core)
 
 # One host executable.  test_runner.cpp is C++17; abi_c.c is the C caller
 # that proves H4 (unmangled names, matching integer widths).
@@ -35,11 +48,11 @@ add_executable(motion_core_tests
     test_node.cpp
     test_commission.cpp
     test_pattern.cpp
-    cJSON.c
+    test_live.cpp
     abi_c.c
 )
 
-target_link_libraries(motion_core_tests PRIVATE motion_core)
+target_link_libraries(motion_core_tests PRIVATE motion_core pattern_core)
 target_include_directories(motion_core_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )

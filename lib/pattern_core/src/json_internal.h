@@ -217,7 +217,7 @@ struct JsonParser {
     }
 };
 
-bool get_int(const JValue &obj, const char *key, int64_t *out,
+inline bool get_int(const JValue &obj, const char *key, int64_t *out,
              std::string *error, bool required) {
     const JValue *v = obj.get(key);
     if (!v) {
@@ -234,7 +234,7 @@ bool get_int(const JValue &obj, const char *key, int64_t *out,
     return true;
 }
 
-bool get_string(const JValue &obj, const char *key, std::string *out,
+inline bool get_string(const JValue &obj, const char *key, std::string *out,
                 std::string *error, bool required) {
     const JValue *v = obj.get(key);
     if (!v) {

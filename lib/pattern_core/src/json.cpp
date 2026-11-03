@@ -223,7 +223,7 @@ bool parse_anim_json(const std::string &text, AnimFile *out,
     f.duration_ms = (int)duration;
     f.tier = t;
 
-    int64_t base = 0;
+    int64_t base = f.base_um;
     if (get_int(root, "base_um", &base, nullptr, false))
         f.base_um = (int32_t)base;
 
@@ -258,13 +258,9 @@ bool parse_anim_file(const std::string &path, AnimFile *out,
     return parse_anim_json(text, out, error);
 }
 
-
+std::string report_json(const CheckResult &result) {
     std::ostringstream o;
-    o << "{";
-    if (!result.parse_error.empty())
-        o << "\"parse_error\":\"" << json_escape(result.parse_error)
-          << "\",";
-    o << "\"violations\":[";
+    o << "{\"violations\":[";
     for (size_t i = 0; i < result.violations.size(); ++i) {
         const auto &v = result.violations[i];
         if (i) o << ",";
@@ -274,8 +270,19 @@ bool parse_anim_file(const std::string &path, AnimFile *out,
           << ",\"measured\":" << v.measured
           << ",\"allowed\":" << v.allowed << "}";
     }
-    o << "]}";
+    o << "]";
+    if (!result.parse_error.empty())
+        o << ",\"parse_error\":\"" << json_escape(result.parse_error) << "\"";
+    o << "}";
     return o.str();
+}
+
+bool write_report_file(const std::string &path, const CheckResult &result) {
+    std::ofstream f(path);
+    if (!f)
+        return false;
+    f << report_json(result) << "\n";
+    return (bool)f;
 }
 
 }  // namespace pc
