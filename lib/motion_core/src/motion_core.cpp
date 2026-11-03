@@ -603,6 +603,12 @@ int32_t mc_um_to_steps(int32_t um) {
                               1000LL * 65536LL);
 }
 
+int32_t mc_steps_to_um(int32_t steps) {
+    /* um = round(steps × 1000 mm × 65536 / steps_per_mm_q16) */
+    return (int32_t)round_div((int64_t)steps * 1000LL * 65536LL,
+                              (int64_t)MC_STEPS_PER_MM_Q16);
+}
+
 int mc_step_chunk(int16_t steps[4], uint16_t *ticks, int64_t t_us,
                   int32_t chunk_us) {
     if (steps == 0 || ticks == 0 || chunk_us <= 0)

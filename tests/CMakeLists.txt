@@ -34,6 +34,8 @@ add_executable(motion_core_tests
     test_clock.cpp
     test_node.cpp
     test_commission.cpp
+    test_pattern.cpp
+    cJSON.c
     abi_c.c
 )
 

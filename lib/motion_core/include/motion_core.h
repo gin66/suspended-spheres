@@ -258,12 +258,17 @@ void mc_core_reset(void);
 /*  Steps and chunks (whitepaper §4.7, §5.3, §5.4; TDD §7)             */
 /* ------------------------------------------------------------------ */
 
-/* Q16.16 steps/mm for a 40 mm drum, 200 steps/rev, 1/16 microstepping. */
+/* Q16.16 steps/mm for a 40 mm drum, 200 steps/rev.
+ * Microstepping is TBD; this constant is the 1/16 worked case
+ * (25.4648 steps/mm) until the count is chosen. */
 #define MC_STEPS_PER_MM_Q16 1668861
 int32_t mc_steps_per_mm_q16(void);
 
 /* Round a micrometre position to the nearest whole step. */
 int32_t mc_um_to_steps(int32_t um);
+
+/* Convert whole steps back to micrometres (inverse of mc_um_to_steps). */
+int32_t mc_steps_to_um(int32_t steps);
 
 /* Compute one timed chunk ending at t_us. The tick count is
  * chunk_us × 16. Returns 0 on success, -1 when the chunk is outside the
