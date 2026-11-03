@@ -53,6 +53,12 @@ lv_obj_t *s_show_testrun;
 lv_obj_t *s_show_hold;
 lv_obj_t *s_show_run_btn;
 
+/* Animations screen */
+lv_obj_t *s_anim_list;
+lv_obj_t *s_anim_summary;
+lv_obj_t *s_anim_status;
+uint32_t s_anim_shown_hash = 0;
+
 /* Grid screen */
 lv_obj_t *s_grid_summary;
 lv_obj_t *s_grid_cells[UI_MAX_POSITIONS];
@@ -92,6 +98,7 @@ lv_obj_t *s_log_status;
 /* CAN scope screen */
 lv_obj_t *s_can_text;
 lv_obj_t *s_can_summary;
+lv_obj_t *s_can_bus;
 uint32_t s_can_shown_hash = 0;
 uint32_t s_can_last_ms = 0;
 char s_can_buf[UI_MAX_CAN_IDS * 96];
@@ -387,6 +394,21 @@ void on_mock_inject(lv_event_t *e) {
   if (s_actions.mock_inject != nullptr) s_actions.mock_inject();
 }
 
+void on_anim_row(lv_event_t *e) {
+  const int index = (int)(intptr_t)lv_event_get_user_data(e);
+  if (s_actions.animation_select != nullptr) s_actions.animation_select(index);
+}
+
+void on_anim_refresh(lv_event_t *e) {
+  (void)e;
+  if (s_actions.animation_refresh != nullptr) s_actions.animation_refresh();
+}
+
+void on_anim_load(lv_event_t *e) {
+  (void)e;
+  if (s_actions.animation_load != nullptr) s_actions.animation_load();
+}
+
 void on_can_clear(lv_event_t *e) {
   (void)e;
   if (s_actions.can_clear != nullptr) s_actions.can_clear();
@@ -505,8 +527,8 @@ void build_nav(int active) {
   lv_obj_t *edge = nav_part(s_nav, 0, 0, 1, kHeight, C_LINE);
 
   static const char *names[UI_SCREEN_COUNT] = {
-      "SHOW", "GRID", "NODES", "MOTOR", "CONFIG",
-      "LOG",  "CAN",  "UPGRADE", "SETTINGS"};
+      "SHOW", "ANIM", "GRID",  "NODES", "MOTOR",
+      "CONFIG", "LOG", "CAN", "UPGRADE", "SETTINGS"};
   const int tab_h = kHeight / UI_SCREEN_COUNT;
   const int icon_cy = 16;
 
@@ -527,6 +549,9 @@ void build_nav(int active) {
     switch (i) {
       case UI_SCREEN_SHOW:
         nav_icon_symbol(tab, LV_SYMBOL_PLAY, color);
+        break;
+      case UI_SCREEN_ANIMATIONS:
+        nav_icon_symbol(tab, LV_SYMBOL_DIRECTORY, color);
         break;
       case UI_SCREEN_GRID:
         nav_icon_grid(tab, kRailW / 2, icon_cy, color);
@@ -554,7 +579,7 @@ void build_nav(int active) {
     lv_obj_t *label = make_label(tab, names[i], &lv_font_montserrat_12, color);
     lv_obj_set_width(label, kRailW);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_pos(label, 0, 34);
+    lv_obj_set_pos(label, 0, 32);
 
     if (is_active) {
       lv_obj_t *rule = nav_part(tab, 0, 10, 3, tab_h - 20, C_ACCENT);
@@ -651,6 +676,43 @@ void build_show(void) {
     lv_obj_set_pos(mock, 512, 6);
   }
   (void)can;
+}
+
+void build_animations(void) {
+  lv_obj_t *s = s_screens[UI_SCREEN_ANIMATIONS];
+  lv_obj_t *head = make_panel(s, 12, 8, 688, 48);
+  make_label(head, "ANIMATIONS", &lv_font_montserrat_20, C_TEXT);
+  s_anim_summary = make_label(head, "", &lv_font_montserrat_12, C_MUTED);
+  lv_obj_align(s_anim_summary, LV_ALIGN_RIGHT_MID, -12, 0);
+
+  lv_obj_t *controls = make_panel(s, 12, 64, 688, 84);
+  lv_obj_t *refresh = make_button(controls, "REFRESH", 140, 44,
+                                  on_anim_refresh, nullptr);
+  lv_obj_set_pos(refresh, 8, 8);
+  lv_obj_t *load = make_button(controls, "LOAD SELECTED", 190, 44,
+                               on_anim_load, nullptr);
+  lv_obj_set_pos(load, 156, 8);
+  s_anim_status = make_label(controls, "idle", &lv_font_montserrat_12, C_MUTED);
+  lv_obj_set_pos(s_anim_status, 356, 10);
+  lv_label_set_long_mode(s_anim_status, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width(s_anim_status, 300);
+
+  lv_obj_t *list = lv_obj_create(s);
+  lv_obj_remove_style_all(list);
+  lv_obj_set_pos(list, 12, 156);
+  lv_obj_set_size(list, 688, 288);
+  lv_obj_set_style_bg_color(list, C_PANEL, 0);
+  lv_obj_set_style_bg_opa(list, LV_OPA_COVER, 0);
+  lv_obj_set_style_radius(list, 8, 0);
+  lv_obj_set_style_border_width(list, 1, 0);
+  lv_obj_set_style_border_color(list, C_LINE, 0);
+  lv_obj_set_style_pad_all(list, 8, 0);
+  lv_obj_set_style_pad_row(list, 6, 0);
+  lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_scroll_dir(list, LV_DIR_VER);
+  lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_ACTIVE);
+  s_anim_list = list;
+  s_anim_shown_hash = 0;
 }
 
 void build_grid(void) {
@@ -938,19 +1000,42 @@ void build_can(void) {
   lv_obj_t *s = s_screens[UI_SCREEN_CAN];
   lv_obj_t *head = make_panel(s, 12, 8, 688, 48);
   make_label(head, "CAN SCOPE", &lv_font_montserrat_20, C_TEXT);
+  s_can_bus = make_label(head, "BUS --", &lv_font_montserrat_12, C_MUTED);
+  lv_obj_align(s_can_bus, LV_ALIGN_LEFT_MID, 160, 0);
   s_can_summary = make_label(head, "", &lv_font_montserrat_12, C_MUTED);
-  lv_obj_align(s_can_summary, LV_ALIGN_LEFT_MID, 160, 0);
+  lv_obj_align(s_can_summary, LV_ALIGN_LEFT_MID, 236, 0);
   lv_obj_t *clear = make_button(head, "CLEAR", 100, 36, on_can_clear, nullptr);
   lv_obj_align(clear, LV_ALIGN_RIGHT_MID, -12, 0);
 
+  char header[96];
+  std::snprintf(header, sizeof(header), "%-3s %-4s %5s %s", "ID", "TYPE",
+                "CNT", "DATA");
+  lv_obj_t *s_can_header = lv_textarea_create(s);
+  lv_obj_set_pos(s_can_header, 12, 62);
+  lv_obj_set_size(s_can_header, 688, 30);
+  lv_textarea_set_text(s_can_header, header);
+  lv_obj_set_style_bg_color(s_can_header, C_PANEL2, 0);
+  lv_obj_set_style_bg_opa(s_can_header, LV_OPA_COVER, 0);
+  lv_obj_set_style_text_color(s_can_header, C_MUTED, 0);
+  lv_obj_set_style_text_font(s_can_header, &lv_font_unscii_16, 0);
+  lv_obj_set_style_pad_left(s_can_header, 8, 0);
+  lv_obj_set_style_pad_top(s_can_header, 4, 0);
+  lv_obj_set_style_pad_bottom(s_can_header, 4, 0);
+  lv_obj_set_style_border_color(s_can_header, C_LINE, 0);
+  lv_obj_set_style_border_width(s_can_header, 1, 0);
+  lv_obj_set_style_radius(s_can_header, 6, 0);
+  lv_obj_clear_flag(s_can_header, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_clear_flag(s_can_header, LV_OBJ_FLAG_SCROLLABLE);
+
   s_can_text = lv_textarea_create(s);
-  lv_obj_set_pos(s_can_text, 12, 64);
-  lv_obj_set_size(s_can_text, 688, 380);
+  lv_obj_set_pos(s_can_text, 12, 96);
+  lv_obj_set_size(s_can_text, 688, 348);
   lv_textarea_set_text(s_can_text, "");
   lv_obj_set_style_bg_color(s_can_text, C_PANEL, 0);
   lv_obj_set_style_bg_opa(s_can_text, LV_OPA_COVER, 0);
   lv_obj_set_style_text_color(s_can_text, C_TEXT, 0);
-  lv_obj_set_style_text_font(s_can_text, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_font(s_can_text, &lv_font_unscii_16, 0);
+  lv_obj_set_style_pad_left(s_can_text, 8, 0);
   lv_obj_set_style_border_color(s_can_text, C_LINE, 0);
   lv_obj_set_style_border_width(s_can_text, 1, 0);
   lv_obj_clear_flag(s_can_text, LV_OBJ_FLAG_CLICKABLE);
@@ -1056,6 +1141,7 @@ void ui_init(const ui_actions_t *actions) {
   build_status_strip();
   for (int i = 0; i < UI_SCREEN_COUNT; ++i) s_screens[i] = make_screen();
   build_show();
+  build_animations();
   build_grid();
   build_nodes();
   build_motor();
@@ -1139,6 +1225,76 @@ void ui_update(const ui_snapshot_t *snapshot) {
   lv_label_set_text(lbl, s_snap.test_run_active ? "TEST RUNNING" : "START TEST RUN");
   lv_obj_set_style_bg_color(s_show_run_btn,
                             s_snap.test_run_active ? C_WARN : C_PANEL2, 0);
+
+  /* Animations */
+  uint32_t anim_hash = 2166136261u;
+  for (int i = 0; i < s_snap.animation_count; ++i) {
+    const ui_animation_t *a = &s_snap.animations[i];
+    anim_hash = (anim_hash ^ (uint32_t)a->size_bytes) * 16777619u;
+    anim_hash = (anim_hash ^ a->duration_ms) * 16777619u;
+    anim_hash = (anim_hash ^ (a->valid ? 1u : 0u)) * 16777619u;
+    for (const char *p = a->name; *p != '\0'; ++p) {
+      anim_hash = (anim_hash ^ (uint8_t)*p) * 16777619u;
+    }
+  }
+  anim_hash = (anim_hash ^ (uint32_t)s_snap.selected_animation) * 16777619u;
+  if (anim_hash != s_anim_shown_hash) {
+    s_anim_shown_hash = anim_hash;
+    lv_obj_clean(s_anim_list);
+    if (s_snap.animation_count == 0) {
+      lv_obj_t *l = make_label(s_anim_list,
+                               "No animations found. Insert an SD card with "
+                               ".hbp files.",
+                               &lv_font_montserrat_16, C_MUTED);
+      lv_obj_set_style_pad_all(l, 12, 0);
+    }
+    for (int i = 0; i < s_snap.animation_count; ++i) {
+      const ui_animation_t *a = &s_snap.animations[i];
+      lv_obj_t *row = lv_button_create(s_anim_list);
+      lv_obj_set_size(row, 664, 48);
+      lv_obj_set_style_radius(row, 6, 0);
+      lv_obj_set_style_bg_color(
+          row, (i == s_snap.selected_animation) ? C_PANEL2 : C_PANEL, 0);
+      lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
+      lv_obj_set_style_border_width(row, 1, 0);
+      lv_obj_set_style_border_color(
+          row, (i == s_snap.selected_animation) ? C_ACCENT : C_LINE, 0);
+      lv_obj_set_style_shadow_width(row, 0, 0);
+      lv_obj_set_style_pad_left(row, 10, 0);
+      lv_obj_set_style_pad_right(row, 10, 0);
+      lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+      lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                            LV_FLEX_ALIGN_CENTER);
+      lv_obj_set_style_pad_column(row, 14, 0);
+      lv_obj_add_event_cb(row, on_anim_row, LV_EVENT_CLICKED,
+                          (void *)(intptr_t)i);
+
+      lv_obj_t *name = make_label(row, a->name, &lv_font_montserrat_14, C_TEXT);
+      lv_obj_set_width(name, 300);
+      lv_obj_t *size = make_label(row, "", &lv_font_montserrat_12, C_MUTED);
+      lv_obj_set_width(size, 100);
+      lv_obj_set_style_text_align(size, LV_TEXT_ALIGN_RIGHT, 0);
+      lv_label_set_text_fmt(size, "%lu KB",
+                            (unsigned long)(a->size_bytes / 1024u));
+      lv_obj_t *duration = make_label(row, "", &lv_font_montserrat_12, C_MUTED);
+      lv_obj_set_width(duration, 90);
+      lv_obj_set_style_text_align(duration, LV_TEXT_ALIGN_RIGHT, 0);
+      lv_label_set_text_fmt(duration, "%lu s",
+                            (unsigned long)(a->duration_ms / 1000u));
+      lv_obj_t *state = make_label(row, a->valid ? "ok" : "invalid",
+                                   &lv_font_montserrat_12,
+                                   a->valid ? C_OK : C_ERR);
+      lv_obj_set_width(state, 80);
+      lv_obj_set_style_text_align(state, LV_TEXT_ALIGN_RIGHT, 0);
+    }
+  }
+  lv_label_set_text_fmt(s_anim_summary, "%d files  %s",
+                        s_snap.animation_count, s_snap.animation_source);
+  lv_label_set_text(s_anim_status,
+                    s_snap.animation_status[0] ? s_snap.animation_status
+                                               : "idle");
+  lv_obj_set_style_text_color(s_anim_status,
+                              s_snap.animation_loading ? C_WARN : C_MUTED, 0);
 
   /* Grid */
   rebuild_grid(s_snap.grid_cols, s_snap.grid_rows);
@@ -1316,10 +1472,23 @@ void ui_update(const ui_snapshot_t *snapshot) {
                               s_snap.config_dirty ? C_WARN : C_OK, 0);
 
   /* CAN scope */
-  lv_label_set_text_fmt(s_can_summary, "%lu ids, %lu/s, %lu dropped",
-                        (unsigned long)s_snap.can_unique_ids,
+  if (!s_snap.can_running) {
+    lv_label_set_text(s_can_bus, "STOPPED");
+    lv_obj_set_style_text_color(s_can_bus, C_MUTED, 0);
+  } else if (s_snap.can_bus_off) {
+    lv_label_set_text(s_can_bus, "BUS OFF");
+    lv_obj_set_style_text_color(s_can_bus, C_ERR, 0);
+  } else {
+    lv_label_set_text(s_can_bus, "BUS OK");
+    lv_obj_set_style_text_color(s_can_bus, C_OK, 0);
+  }
+  lv_label_set_text_fmt(s_can_summary,
+                        "rx %lu/s  %lu ids  tx %lu sent  %lu rej  %lu drop",
                         (unsigned long)s_snap.can_rate_1s,
-                        (unsigned long)s_snap.can_dropped);
+                        (unsigned long)s_snap.can_unique_ids,
+                        (unsigned long)s_snap.can_tx_frames,
+                        (unsigned long)s_snap.can_tx_failed,
+                        (unsigned long)s_snap.can_rx_dropped);
   uint32_t can_hash = 2166136261u;
   for (int i = 0; i < s_snap.can_entry_count; ++i) {
     const ui_can_entry_t *e = &s_snap.can_entries[i];
@@ -1349,11 +1518,9 @@ void ui_update(const ui_snapshot_t *snapshot) {
         data[dp] = '\0';
         off += (size_t)std::snprintf(
             s_can_buf + off, sizeof(s_can_buf) - off,
-            "0x%03lx  T%u F%03u  n=%-7lu dt=%-5lu/%-5lu  %s\n",
+            "%03lx %-4u %5lu %s\n",
             (unsigned long)e->identifier, (unsigned)e->type,
-            (unsigned)e->field, (unsigned long)e->frame_count,
-            (unsigned long)e->interval_min_ms,
-            (unsigned long)e->interval_max_ms, data);
+            (unsigned long)e->frame_count, data);
         if (off >= sizeof(s_can_buf) - 1) break;
       }
       if (s_snap.can_entry_count == 0) {

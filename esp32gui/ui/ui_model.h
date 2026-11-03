@@ -23,6 +23,8 @@ extern "C" {
 #define UI_GRID_MAX_ROWS  12
 #define UI_LOG_BYTES      4096
 #define UI_MAX_CAN_IDS    256
+#define UI_MAX_ANIMATIONS 32
+#define UI_ANIM_NAME_LEN  40
 
 typedef struct {
   bool used;
@@ -45,9 +47,15 @@ typedef struct {
 } ui_cell_t;
 
 typedef struct {
+  char name[UI_ANIM_NAME_LEN];
+  uint32_t size_bytes;
+  uint32_t duration_ms;
+  bool valid;
+} ui_animation_t;
+
+typedef struct {
   uint32_t identifier;
   uint8_t type;
-  uint8_t field;
   uint8_t data_len;
   uint8_t data[8];
   uint32_t frame_count;
@@ -82,6 +90,9 @@ typedef struct {
   uint32_t can_rx_frames;
   uint32_t can_tx_frames;
   uint32_t can_errors;
+  uint32_t can_tx_failed;
+  uint32_t can_rx_dropped;
+  bool can_bus_off;
 
   /* CAN scope: per-identifier rows and counters */
   int can_entry_count;
@@ -108,6 +119,14 @@ typedef struct {
   bool test_run_active;
   int test_run_remaining;
   bool config_dirty;
+
+  /* Animation library and selection */
+  int animation_count;
+  ui_animation_t animations[UI_MAX_ANIMATIONS];
+  int selected_animation;
+  bool animation_loading;
+  char animation_source[24];
+  char animation_status[64];
 
   /* Node software upgrade */
   bool upgrade_active;
@@ -145,6 +164,9 @@ typedef struct {
   void (*can_start)(void);
   void (*can_stop)(void);
   void (*can_clear)(void);
+  void (*animation_refresh)(void);
+  void (*animation_select)(int index);
+  void (*animation_load)(void);
   void (*version_query_all)(void);
   void (*upgrade_selected)(void);
   void (*mock_inject)(void);  /* host harness only; may be NULL */

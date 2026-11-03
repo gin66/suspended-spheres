@@ -63,12 +63,17 @@ frames           # 8-byte cubic wire frames, window-major
 - The body is already the wire stream (`p0:u16, v0:s16, a0:s16, j:s16`), one
   frame per motor per `N·Δt`. No trajectory fitting or pattern bake runs on
   the panel.
-- The `show` task consumes a PSRAM ring buffer. A separate low-priority task
-  reads ahead from SD, checks each block CRC, and fills the ring. One second
-  of frames is about 32 KB at `N=3`, `Δt=10 ms`.
-- Missing SD, a corrupt block, a short read, or a SHA-256 mismatch stops the
-  show with a safe hold and a log entry. It never continues with stale or
-  partial frames.
+- **Playback does not depend on continuous SD streaming.** The panel reads
+  whole HBP2 blocks into a PSRAM chunk cache ahead of the playback window;
+  the `show` task consumes only PSRAM. A low-priority refill task replaces
+  consumed chunks from SD. If the file fits in the cache, the whole body is
+  loaded before start and SD is idle during the show.
+- One second of frames is about 32 KB at `N=3`, `Δt=10 ms`. The 4 MiB cache
+  target covers about 131 s of playback; the exact internal-RAM, flash and
+  PSRAM budget is in `memory_map.md`.
+- Missing SD, a corrupt block, a short read, a cache underrun, or a SHA-256
+  mismatch stops the show with a safe hold and a log entry. It never
+  continues with stale or partial frames.
 - `codec` is `none` in the first firmware. Compression, if added, is a
   per-block codec: an 8–16 KB block decompresses independently, so one bad
   block does not take down the file.
@@ -130,7 +135,7 @@ Pins come from Waveshare `waveshare_lcd_port.h` and `waveshare_twai_port.h`.
 
 | Item | Value |
 |------|-------|
-| Module | ESP32-S3, 240 MHz, 16 MB flash, octal PSRAM (`qio_opi`) |
+| Module | ESP32-S3, 240 MHz, 16 MB flash, 8 MB octal PSRAM (`qio_opi`) |
 | Panel | ST7262, RGB565, 800 × 480, parallel RGB, 16 data pins |
 | Orientation | Landscape, `TPL_WS7_ROTATION=1` (LVGL rotation 0) |
 | Touch | GT911, I²C GPIO 8 / 9, shared with the CH422G |
@@ -244,14 +249,21 @@ to a PNG before it is treated as done; the PNGs live in
 | Screen | Shows |
 |--------|--------|
 | Show | Pattern name, play / stop, elapsed time, bus state, discovered/assigned/online counts, unassigned steppers, test-run state |
+| Animations | HBP2 files on the card: name, size, duration, validity; refresh, select and load |
 | Grid | One cell per ball: assigned, free, fault; click a cell to select its board |
 | Nodes | Discovered boards by 64-bit flash ID, board ID, online state, assigned positions |
 | Motor | Selected board and axis (assigned axes are green); HOME, UP, DOWN, STOP; tap a grid cell to choose the position, then assign/unassign |
 | Config | Grid size, test-run drop/speed/gap, serpentine, save/reset/clear, SPIFFS state |
 | Log | Recent PSRAM log ring, boot count, last watchpoint, last safe hold |
-| CAN | Received-frame scope by identifier: raw ID, type/field, count, min/max interval, last data; clear |
+| CAN | Received-frame scope by identifier (raw ID, type, count, last data), TX sent/rejected, RX drops, bus-off state; clear |
 | Upgrade | Per-board software version, `QUERY ALL` (type-12 request), selected board, upgrade status and progress |
 | Settings | WiFi/SSID/IP/RSSI and CAN state, firmware, boot, uptime, position capacity, service path |
+
+The Animations screen is the file-selection UI. The SD enumeration and HBP2
+load/playback backend are not implemented yet, so the firmware reports that
+`REFRESH` and `LOAD SELECTED` are pending; the host harness fills the list with
+sample files. The screen reads only from the snapshot, so the backend can fill
+it without changing the LVGL code.
 
 The CAN scope keeps 256 identifiers: a running show already uses 120
 per-motor type-0 IDs plus 30 status IDs and the sync ID, and commissioning and

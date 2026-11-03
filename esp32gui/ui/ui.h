@@ -9,6 +9,7 @@ extern "C" {
 
 typedef enum {
   UI_SCREEN_SHOW = 0,
+  UI_SCREEN_ANIMATIONS,
   UI_SCREEN_GRID,
   UI_SCREEN_NODES,
   UI_SCREEN_MOTOR,

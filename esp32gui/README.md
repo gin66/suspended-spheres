@@ -13,12 +13,13 @@ not include `template.h`, `tpl_wifi`, `wifi_secrets.*`, `private_bot.h` or
 
 | Done | Deferred |
 |------|----------|
-| PlatformIO board bring-up (RGB panel, GT911, CH422G, `USB_SEL`) | HBP2 SD playback, PSRAM ring, block CRC/SHA |
+| PlatformIO board bring-up (RGB panel, GT911, CH422G, `USB_SEL`) | HBP2 SD playback, PSRAM chunk cache, block CRC/SHA |
 | Local PSRAM log ring, boot/watchpoint watchdog, CAN link watchdog | Real TWAI transport at 1 Mbit/s (code present, compile-guarded) |
 | CAN transport boundary with a mock backend | Node discovery on a real bus |
 | Discovery/ASSIGN registry, grid map, SPIFFS config | Full HBP2 show scheduler |
-| LVGL screens: Show, Grid, Nodes, Motor, Config, Log, CAN, Upgrade, Settings | Panel brightness PWM (on/off today) |
-| Right-hand icon rail; per-ID CAN receive scope; CAN version query (types 12/13) | CAN firmware transfer on the node |
+| LVGL screens: Show, Animations, Grid, Nodes, Motor, Config, Log, CAN, Upgrade, Settings | Panel brightness PWM (on/off today) |
+| Animations screen: file list, select, load action | SD enumeration and HBP2 load/playback |
+| Right-hand icon rail; per-ID CAN scope with TX/reject/bus-off; CAN version query (types 12/13) | CAN firmware transfer on the node |
 | Host harness renders every screen to PNG | |
 
 The bench has no CAN wiring yet, so `platformio.ini` defines `SS_CAN_MOCK=1`.
@@ -66,19 +67,23 @@ review artifacts for screen changes.
 4. **Config** — grid size (10 × 10 or 10 × 12), test-run drop/speed/gap,
    serpentine, and `SAVE TO SPIFFS`. The mapping and
    `(flash_id → board_id)` map persist in `/config.bin`.
-5. **Show** — discovered boards, online boards, assigned positions, remaining
+5. **Animations** — lists HBP2 files with name, size, duration and validity;
+   tap a row to select it, `LOAD SELECTED` loads it. SD enumeration and HBP2
+   load/playback are still backend work; the firmware reports that state.
+6. **Show** — discovered boards, online boards, assigned positions, remaining
    assigns, and `START TEST RUN`. The test run requires every grid position to
    be assigned. It walks rows **back to front**; within a row it goes
    left→right, then right→left on the next row (serpentine). Each sphere drops
    `test_drop_mm` (default 100 mm) slowly and the next one starts after the
    previous move plus the configured gap.
-6. **CAN** — received-frame scope by identifier, with raw ID, type/field,
-   frame count, min/max interval and last data. `CLEAR` resets the scope.
-7. **Upgrade** — `QUERY ALL` sends a `VERSION_REQ` (type 12) to every board;
+7. **CAN** — received-frame scope by identifier, with raw ID, type, frame
+   count and last data, plus TX sent/rejected, RX drops and bus-off state.
+   `CLEAR` resets the scope.
+8. **Upgrade** — `QUERY ALL` sends a `VERSION_REQ` (type 12) to every board;
    each answer (`VERSION_RSP`, type 13) fills the board's software version.
    `UPGRADE SELECTED` is present but reports that the CAN transfer is not
    implemented in the Fly-Micro4 firmware yet.
-8. **Settings** — read-only WiFi/SSID/IP/RSSI and CAN state, firmware, boot
+9. **Settings** — read-only WiFi/SSID/IP/RSSI and CAN state, firmware, boot
    count, uptime, capacity and the CH9102 service path. This build has no
    WiFi stack, so the network fields report `not compiled`.
 

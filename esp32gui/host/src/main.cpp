@@ -161,6 +161,33 @@ ui_snapshot_t make_snapshot() {
   std::snprintf(s.upgrade_status, sizeof(s.upgrade_status), "%s",
                 "idle; QUERY ALL asks every board for its version");
 
+  s.animation_count = 4;
+  const struct {
+    const char *name;
+    uint32_t size;
+    uint32_t duration_ms;
+    bool valid;
+  } anim_rows[4] = {
+      {"sine_120.hbp", 1u << 20, 120000, true},
+      {"rain_2d.hbp", 3u << 20, 240000, true},
+      {"spiral.hbp", 2u << 20, 180000, true},
+      {"wave_test.hbp", 64u << 10, 30000, false},
+  };
+  for (int i = 0; i < s.animation_count; ++i) {
+    ui_animation_t *a = &s.animations[i];
+    std::snprintf(a->name, sizeof(a->name), "%s", anim_rows[i].name);
+    a->size_bytes = anim_rows[i].size;
+    a->duration_ms = anim_rows[i].duration_ms;
+    a->valid = anim_rows[i].valid;
+  }
+  s.selected_animation = 0;
+  std::snprintf(s.animation_source, sizeof(s.animation_source), "%s", "SD");
+  std::snprintf(s.animation_status, sizeof(s.animation_status), "%s",
+                "ready; LOAD is not wired to playback");
+
+  s.can_tx_failed = 2;
+  s.can_rx_dropped = 0;
+  s.can_bus_off = false;
   s.can_rate_1s = 350;
   s.can_dropped = 0;
   s.can_unique_ids = 6;
@@ -168,24 +195,22 @@ ui_snapshot_t make_snapshot() {
   const struct {
     uint32_t id;
     uint8_t type;
-    uint8_t field;
     uint32_t count;
     uint32_t interval;
     uint8_t len;
     uint8_t data[8];
   } can_rows[6] = {
-      {0x000, 0, 0, 1200, 10, 8, {0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}},
-      {0x010, 0, 1, 1200, 10, 8, {0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}},
-      {0x002, 2, 0, 50, 20, 8, {0x24, 0x1A, 0x10, 0x27, 0x10, 0x27, 0x04, 0x5A}},
-      {0x033, 3, 3, 30, 100, 8, {0x03, 0x00, 0x00, 0x00, 0x00, 0x03, 0x05, 0x5A}},
-      {0x00B, 11, 0, 12, 5000, 8, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}},
-      {0x7FC, 12, 127, 12, 5000, 8, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}},
+      {0x000, 0, 1200, 10, 8, {0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}},
+      {0x010, 0, 1200, 10, 8, {0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}},
+      {0x002, 2, 50, 20, 8, {0x24, 0x1A, 0x10, 0x27, 0x10, 0x27, 0x04, 0x5A}},
+      {0x033, 3, 30, 100, 8, {0x03, 0x00, 0x00, 0x00, 0x00, 0x03, 0x05, 0x5A}},
+      {0x00B, 11, 12, 5000, 8, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}},
+      {0x7FC, 12, 12, 5000, 8, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}},
   };
   for (int i = 0; i < s.can_entry_count; ++i) {
     ui_can_entry_t *e = &s.can_entries[i];
     e->identifier = can_rows[i].id;
     e->type = can_rows[i].type;
-    e->field = can_rows[i].field;
     e->frame_count = can_rows[i].count;
     e->changed_count = can_rows[i].count;
     e->interval_ms = can_rows[i].interval;
@@ -249,8 +274,8 @@ int main(int argc, char **argv) {
   ui_snapshot_t snap = make_snapshot();
 
   static const char *names[UI_SCREEN_COUNT] = {
-      "show", "grid", "nodes", "motor", "config",
-      "log",  "can",  "upgrade", "settings"};
+      "show", "animations", "grid",  "nodes", "motor",
+      "config", "log", "can", "upgrade", "settings"};
   for (int i = 0; i < UI_SCREEN_COUNT; ++i) {
     ui_show_screen(i);
     ui_update(&snap);

@@ -1091,7 +1091,9 @@ a block codec can be added without changing the frame layout.
 
 Include the exact sample format, cadence, axis order and calibration so the
 file is self-describing. The embedded master reads HBP2 blocks from SD into a
-PSRAM ring ahead of the window; it never fits or bakes motion.
+PSRAM chunk cache ahead of the window; it never relies on continuous SD
+streaming during playback and never fits or bakes motion. The cache sizing is
+in `memory_map.md`.
 
 **Live streaming:** a local bridge process (Python or Node) owns the USB-CAN
 adapter; the web app talks to it over WebSocket. Do not try to drive a USB-CAN

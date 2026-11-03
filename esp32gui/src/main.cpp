@@ -38,6 +38,9 @@ uint32_t s_test_run_started_ms = 0;
 bool s_upgrade_active = false;
 uint8_t s_upgrade_progress = 0;
 char s_upgrade_status[64] = "idle";
+int s_selected_animation = 0;
+bool s_animation_loading = false;
+char s_animation_status[64] = "SD file listing is not implemented";
 ss_can_id_entry_t s_can_scratch[SS_CAN_MONITOR_MAX_IDS];
 
 static uint32_t lv_tick_cb(void) { return (uint32_t)millis(); }
@@ -162,6 +165,26 @@ void action_test_stop(void) { commission_test_run_stop(); }
 
 void action_log_clear(void) { app_log_clear(); }
 
+void action_animation_refresh(void) {
+  std::snprintf(s_animation_status, sizeof(s_animation_status),
+                "SD file listing is not implemented");
+  SS_LOGW("anim", "animation refresh: SD file listing is not implemented");
+}
+
+void action_animation_select(int index) {
+  if (index < 0) index = 0;
+  if (index >= UI_MAX_ANIMATIONS) index = UI_MAX_ANIMATIONS - 1;
+  s_selected_animation = index;
+}
+
+void action_animation_load(void) {
+  if (!s_animation_loading) {
+    std::snprintf(s_animation_status, sizeof(s_animation_status),
+                  "HBP2 load and playback are not implemented");
+    SS_LOGW("anim", "load selected: HBP2 load/playback is not implemented");
+  }
+}
+
 void action_version_query_all(void) {
   if (commission_query_versions()) {
     std::snprintf(s_upgrade_status, sizeof(s_upgrade_status),
@@ -242,6 +265,9 @@ void build_snapshot(ui_snapshot_t *snap) {
   snap->can_rx_frames = can.rx_frames;
   snap->can_tx_frames = can.tx_frames;
   snap->can_errors = can.tx_failed + can.bus_errors;
+  snap->can_tx_failed = can.tx_failed;
+  snap->can_rx_dropped = can.rx_dropped;
+  snap->can_bus_off = can.bus_off;
 
   const ss_can_monitor_counters_t *mon = can_monitor_counters();
   snap->can_rate_1s = mon->rate_1s;
@@ -255,7 +281,6 @@ void build_snapshot(ui_snapshot_t *snap) {
     ui_can_entry_t *dst = &snap->can_entries[i];
     dst->identifier = src->identifier;
     dst->type = (uint8_t)mc_id_type((int)src->identifier);
-    dst->field = (uint8_t)mc_id_field((int)src->identifier);
     dst->data_len = src->data_len;
     std::memcpy(dst->data, src->data, sizeof(dst->data));
     dst->frame_count = src->frame_count;
@@ -305,6 +330,12 @@ void build_snapshot(ui_snapshot_t *snap) {
     u->assigned_positions = n.assigned_positions;
   }
   snap->selected_node = commission_selected_index();
+  snap->animation_count = 0;
+  snap->selected_animation = s_selected_animation;
+  snap->animation_loading = s_animation_loading;
+  std::snprintf(snap->animation_source, sizeof(snap->animation_source), "SD");
+  std::snprintf(snap->animation_status, sizeof(snap->animation_status), "%s",
+                s_animation_status);
   snap->upgrade_active = s_upgrade_active;
   snap->upgrade_progress = s_upgrade_progress;
   std::snprintf(snap->upgrade_status, sizeof(snap->upgrade_status), "%s",
@@ -403,6 +434,9 @@ void setup() {
   actions.can_start = action_can_start;
   actions.can_stop = action_can_stop;
   actions.can_clear = action_can_clear;
+  actions.animation_refresh = action_animation_refresh;
+  actions.animation_select = action_animation_select;
+  actions.animation_load = action_animation_load;
   actions.version_query_all = action_version_query_all;
   actions.upgrade_selected = action_upgrade_selected;
 #ifdef SS_CAN_MOCK
