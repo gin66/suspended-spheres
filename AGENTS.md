@@ -20,14 +20,18 @@ Suspended_Spheres/
 ├── README.md                   # Project overview and entry point
 ├── AGENTS.md                   # This file — mission and dev notes
 ├── lib/
-│   └── motion_core/            # Shared integer core (PC and firmware)
-│       ├── include/motion_core.h
-│       └── src/motion_core.cpp
+│   ├── motion_core/            # Shared integer core (PC and firmware)
+│   │   ├── include/motion_core.h
+│   │   └── src/motion_core.cpp
+│   └── pattern_core/           # Pattern bake, limits, report, .hbp export, live reload
 ├── tests/                      # Host-only harness (CMake, no hardware)
 │   ├── CMakeLists.txt
 │   ├── assert.h
 │   ├── test_runner.cpp
 │   └── abi_c.c
+├── wasm/                       # Native/Emscripten parity driver
+├── webapp/                     # Vite + Three.js designer viewer
+├── patterns/                   # .anim.json sources and the golden sine
 ├── rp2040/                     # Firmware-only PlatformIO project
 │   ├── platformio.ini
 │   └── src/main.cpp
@@ -60,6 +64,14 @@ All technical Markdown belongs in `doc/`. Only `README.md` and `AGENTS.md` sit a
   cd rp2040 && pio run
   ```
   PlatformIO finds the shared core through `lib_extra_dirs = ../lib`; do not copy `motion_core` into `rp2040/`.
+- **Native/WASM parity (optional).** Build the same driver natively and with
+  Emscripten, then compare the transcripts:
+  ```sh
+  ./wasm/build.sh
+  ./tests/wasm_parity.sh
+  ```
+  Without `emcc` the script builds the native side and reports that the WASM
+  driver is absent.
 - **Markdown + SI units.** Use metres, seconds, kilograms, newtons, and watts. Keep tables aligned with the surrounding style.
 - **Source of truth:** requirements in `doc/system_requirements.md`; physics in `doc/mechanical_analysis.md`; platform and bus decisions in `doc/controller_analysis.md`; motion payloads in `doc/motion_streaming_whitepaper.md`; node identity and CAN-ID allocation in `doc/Fly_Micro4_addressing.md`; the host test plan in `doc/motion_streaming_tdd.md`; risks in `doc/RISK.md`.
 - **No duplicated calculations outside `doc/`.** `AGENTS.md` and `README.md` describe the project; they do not carry datasheets, torque tables, or protocol frames.

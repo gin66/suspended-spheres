@@ -60,6 +60,7 @@ Suspended_Spheres/
 │   ├── motion_core/            # Shared integer motion core (PC and firmware)
 │   └── pattern_core/           # Pattern bake, limits, report and .hbp export
 ├── tests/                      # Host-only harness (CMake; no hardware)
+├── wasm/                       # Native/WASM parity driver
 ├── rp2040/                     # Fly-Micro4 firmware (PlatformIO)
 ├── webapp/                     # Designer 3D viewer (Vite + Three.js)
 ├── patterns/                   # .anim.json example patterns

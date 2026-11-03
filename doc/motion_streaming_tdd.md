@@ -501,10 +501,12 @@ Whitepaper §6.9. A temp directory and a fake clock. No window, no WebGL.
 
 Whitepaper §6.3, §6.7. Still no board.
 
-> **Deferred (2026-11-03).** W1–W3 need Emscripten (`emcc`), which is not
+> **Deferred (2026-11-03).** W1–W2 need Emscripten (`emcc`), which is not
 > installed in the host environment used for the fifth slice. The checked-in
-> `patterns/golden_sine.anim.json` and the deterministic native bake (A2) are
-> ready for the parity comparison; run W1–W3 when `emcc` is available.
+> `patterns/golden_sine.anim.json`, the deterministic native bake (A2), and the
+> `wasm/pattern_driver.cpp` / `wasm/build.sh` / `tests/wasm_parity.sh` harness
+> are ready; the native transcript is byte-identical across runs. Run W1–W3
+> when `emcc` is available. W3's golden file is already checked in.
 
 - [ ] **W1** The same core sources compile with Emscripten (`-std=c++17`).
   A host driver calls the native binary and the WASM binary (via Node)
