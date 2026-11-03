@@ -17,7 +17,8 @@ not include `template.h`, `tpl_wifi`, `wifi_secrets.*`, `private_bot.h` or
 | Local PSRAM log ring, boot/watchpoint watchdog, CAN link watchdog | Real TWAI transport at 1 Mbit/s (code present, compile-guarded) |
 | CAN transport boundary with a mock backend | Node discovery on a real bus |
 | Discovery/ASSIGN registry, grid map, SPIFFS config | Full HBP2 show scheduler |
-| LVGL screens: Show, Grid, Nodes, Motor, Config, Log | Panel brightness PWM (on/off today) |
+| LVGL screens: Show, Grid, Nodes, Motor, Config, Log, CAN, Upgrade, Settings | Panel brightness PWM (on/off today) |
+| Right-hand icon rail; per-ID CAN receive scope; CAN version query (types 12/13) | CAN firmware transfer on the node |
 | Host harness renders every screen to PNG | |
 
 The bench has no CAN wiring yet, so `platformio.ini` defines `SS_CAN_MOCK=1`.
@@ -57,8 +58,9 @@ review artifacts for screen changes.
    answers `ASSIGN` (type 10) with the board ID. The list shows the flash ID,
    board ID, online state and how many positions each board owns.
 2. **Motor** — select a board, select axis 0–3, then `HOME`, `UP`, `DOWN` or
-   `STOP`. `UP`/`DOWN` jog 10 mm at the configured test speed. Assign the
-   selected axis to a grid position with `ASSIGN`; `UNASSIGN` clears it.
+   `STOP`. `UP`/`DOWN` jog 10 mm at the configured test speed. Axes that
+   already own a position are green. Tap a cell in the scrolling grid to pick
+   the position, then `ASSIGN`; `UNASSIGN` clears it.
 3. **Grid** — one cell per position. Green = assigned, red = assigned board has
    a fault, dark = free. Row 0 is the back row, column 0 is the left column.
 4. **Config** — grid size (10 × 10 or 10 × 12), test-run drop/speed/gap,
@@ -70,6 +72,15 @@ review artifacts for screen changes.
    left→right, then right→left on the next row (serpentine). Each sphere drops
    `test_drop_mm` (default 100 mm) slowly and the next one starts after the
    previous move plus the configured gap.
+6. **CAN** — received-frame scope by identifier, with raw ID, type/field,
+   frame count, min/max interval and last data. `CLEAR` resets the scope.
+7. **Upgrade** — `QUERY ALL` sends a `VERSION_REQ` (type 12) to every board;
+   each answer (`VERSION_RSP`, type 13) fills the board's software version.
+   `UPGRADE SELECTED` is present but reports that the CAN transfer is not
+   implemented in the Fly-Micro4 firmware yet.
+8. **Settings** — read-only WiFi/SSID/IP/RSSI and CAN state, firmware, boot
+   count, uptime, capacity and the CH9102 service path. This build has no
+   WiFi stack, so the network fields report `not compiled`.
 
 The test run is a commissioning cascade, **not** HBP2 show playback. It uses
 the same commissioning `COMMAND` frames as the Motor screen.

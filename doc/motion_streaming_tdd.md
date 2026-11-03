@@ -194,7 +194,9 @@ Whitepaper §3.2, §4.2, Appendix A.
   Fields `30 … 126` are rejected. Field 0 is board 0.
 - [x] **I5** Types 8 (`DISC`) and 11 (`ASK`) require field 0. Type 10
   (`ASSIGN`) carries the new board ID in the field. Type 9 is rejected.
-- [x] **I6** Types 12–15 are rejected.
+- [x] **I6** Types 12 (`VERSION_REQ`) and 13 (`VERSION_RSP`) carry a board
+  ID in `0 … 29`, or 127 for the request. Fields `30 … 126` are rejected.
+  Types 14–15 are rejected.
 - [x] **I7** Motor 5 / type 0 and board 5 / type 3 produce different
   identifiers. The decoder reports a motor for type 0 and a board for
   types 3–7. Type 9 is rejected (I5).
@@ -238,6 +240,9 @@ Whitepaper §4.2, §4.3, §4.5. Addressing §3.
   per-motor baseline.
 - [x] **P10** `mc_pack_frame` / `mc_unpack_frame` follow P1 and P2 for the
   motion variants in §6.3.
+- [x] **P11** `VERSION_REQ` is 8 zero bytes. `VERSION_RSP` carries
+  `major, minor, patch, flags, build_u32` in the whitepaper §4.5 layout,
+  little-endian; pack and unpack are inverses.
 
 ---
 

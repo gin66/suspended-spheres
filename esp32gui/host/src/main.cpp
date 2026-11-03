@@ -97,6 +97,9 @@ void add_node(ui_snapshot_t *s, int index, uint8_t tag, int board, bool online,
   n->state = state;
   n->fault_flags = fault;
   n->buffer_depth = 3;
+  n->version_seen = true;
+  std::snprintf(n->sw_version, sizeof(n->sw_version), "%s",
+                (board == 3) ? "1.1.0-dirty" : "1.1.0");
   n->assigned_positions = 3;
 }
 
@@ -153,6 +156,45 @@ ui_snapshot_t make_snapshot() {
   s.test_run_remaining = 0;
   s.config_dirty = true;
 
+  s.upgrade_active = false;
+  s.upgrade_progress = 0;
+  std::snprintf(s.upgrade_status, sizeof(s.upgrade_status), "%s",
+                "idle; QUERY ALL asks every board for its version");
+
+  s.can_rate_1s = 350;
+  s.can_dropped = 0;
+  s.can_unique_ids = 6;
+  s.can_entry_count = 6;
+  const struct {
+    uint32_t id;
+    uint8_t type;
+    uint8_t field;
+    uint32_t count;
+    uint32_t interval;
+    uint8_t len;
+    uint8_t data[8];
+  } can_rows[6] = {
+      {0x000, 0, 0, 1200, 10, 8, {0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}},
+      {0x010, 0, 1, 1200, 10, 8, {0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}},
+      {0x002, 2, 0, 50, 20, 8, {0x24, 0x1A, 0x10, 0x27, 0x10, 0x27, 0x04, 0x5A}},
+      {0x033, 3, 3, 30, 100, 8, {0x03, 0x00, 0x00, 0x00, 0x00, 0x03, 0x05, 0x5A}},
+      {0x00B, 11, 0, 12, 5000, 8, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}},
+      {0x7FC, 12, 127, 12, 5000, 8, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}},
+  };
+  for (int i = 0; i < s.can_entry_count; ++i) {
+    ui_can_entry_t *e = &s.can_entries[i];
+    e->identifier = can_rows[i].id;
+    e->type = can_rows[i].type;
+    e->field = can_rows[i].field;
+    e->frame_count = can_rows[i].count;
+    e->changed_count = can_rows[i].count;
+    e->interval_ms = can_rows[i].interval;
+    e->interval_min_ms = can_rows[i].interval;
+    e->interval_max_ms = can_rows[i].interval;
+    e->data_len = can_rows[i].len;
+    std::memcpy(e->data, can_rows[i].data, can_rows[i].len);
+  }
+
   s.boot_count = 7;
   s.last_watchpoint = 3;
   std::snprintf(s.firmware_version, sizeof(s.firmware_version), "%s",
@@ -206,8 +248,9 @@ int main(int argc, char **argv) {
 
   ui_snapshot_t snap = make_snapshot();
 
-  static const char *names[UI_SCREEN_COUNT] = {"show", "grid", "nodes",
-                                               "motor", "config", "log"};
+  static const char *names[UI_SCREEN_COUNT] = {
+      "show", "grid", "nodes", "motor", "config",
+      "log",  "can",  "upgrade", "settings"};
   for (int i = 0; i < UI_SCREEN_COUNT; ++i) {
     ui_show_screen(i);
     ui_update(&snap);

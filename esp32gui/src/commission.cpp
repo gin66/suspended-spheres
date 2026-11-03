@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <freertos/FreeRTOS.h>
 
+#include <cstdio>
 #include <cstring>
 
 #include "app_log.h"
@@ -20,6 +21,8 @@ enum : int {
   kTypeDisc = 8,
   kTypeAssign = 10,
   kTypeAsk = 11,
+  kTypeVersionReq = MC_TYPE_VERSION_REQ,
+  kTypeVersionRsp = MC_TYPE_VERSION_RSP,
 };
 
 enum : uint8_t {
@@ -126,6 +129,15 @@ void send_ask(void) {
   }
 }
 
+void send_version_req(void) {
+  ss_can_frame_t f;
+  std::memset(&f, 0, sizeof(f));
+  f.id = (uint32_t)mc_id_make(MC_BOARD_ALL, kTypeVersionReq);
+  f.len = 8;
+  mc_pack_version_req(f.data);
+  if (!can_transport_send(&f)) s_stats.tx_errors++;
+}
+
 void send_assign(int board_id, const uint8_t flash_id[SS_FLASH_ID_LEN]) {
   ss_can_frame_t f;
   std::memset(&f, 0, sizeof(f));
@@ -211,6 +223,31 @@ void handle_status(const ss_can_frame_t *frame) {
   portEXIT_CRITICAL(&s_lock);
 }
 
+void handle_version(const ss_can_frame_t *frame) {
+  const int board_id = mc_id_field((int)frame->id);
+  if (board_id < 0 || board_id >= SS_MAX_BOARDS) return;
+
+  mc_version_t v;
+  if (mc_unpack_version_rsp(frame->data, &v) != 0) return;
+
+  portENTER_CRITICAL(&s_lock);
+  const int idx = find_board_locked(board_id);
+  if (idx >= 0) {
+    ss_node_t *node = &s_nodes[idx];
+    node->version_seen = true;
+    node->last_version_ms = frame->timestamp_ms;
+    if ((v.flags & MC_VERSION_FLAG_DIRTY) != 0) {
+      std::snprintf(node->sw_version, sizeof(node->sw_version),
+                    "%u.%u.%u-dirty", (unsigned)v.major, (unsigned)v.minor,
+                    (unsigned)v.patch);
+    } else {
+      std::snprintf(node->sw_version, sizeof(node->sw_version), "%u.%u.%u",
+                    (unsigned)v.major, (unsigned)v.minor, (unsigned)v.patch);
+    }
+  }
+  portEXIT_CRITICAL(&s_lock);
+}
+
 void recompute_stats(void) {
   portENTER_CRITICAL(&s_lock);
   const uint32_t now = millis();
@@ -281,6 +318,9 @@ void commission_on_frame(const ss_can_frame_t *frame, void *ctx) {
       break;
     case kTypeStatus:
       handle_status(frame);
+      break;
+    case kTypeVersionRsp:
+      handle_version(frame);
       break;
     case kTypeFault:
       SS_LOGW("commission", "fault frame id=0x%03lx board=%d",
@@ -364,6 +404,13 @@ int commission_find_node(const uint8_t flash_id[8]) {
   const int idx = find_node_locked(flash_id);
   portEXIT_CRITICAL(&s_lock);
   return idx;
+}
+
+bool commission_query_versions(void) {
+  if (!can_transport_running()) return false;
+  send_version_req();
+  SS_LOGI("commission", "VERSION query sent to all boards");
+  return true;
 }
 
 int commission_selected_index(void) { return s_selected; }

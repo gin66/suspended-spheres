@@ -26,8 +26,11 @@
 extern "C" {
 #endif
 
+/* 120 per-motor motion IDs, 30 status IDs, plus sync, commissioning and
+ * version IDs. 32 drops the show; 256 leaves room for both a running show
+ * and commissioning traffic. */
 #ifndef SS_CAN_MONITOR_MAX_IDS
-#define SS_CAN_MONITOR_MAX_IDS 32
+#define SS_CAN_MONITOR_MAX_IDS 256
 #endif
 #ifndef SS_CAN_MONITOR_RING_SLOTS
 #define SS_CAN_MONITOR_RING_SLOTS 128
@@ -64,6 +67,9 @@ void can_monitor_push(const ss_can_frame_t *frame);
 
 /* Copy one row. Returns false for an unused index. */
 bool can_monitor_get_entry(int index, ss_can_id_entry_t *out);
+
+/* Copy up to max rows under one lock. Returns the number copied. */
+int can_monitor_copy(ss_can_id_entry_t *out, int max);
 int can_monitor_count(void);
 
 const ss_can_monitor_counters_t *can_monitor_counters(void);

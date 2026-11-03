@@ -19,6 +19,7 @@
 #include "can_transport.h"
 #include "commission.h"
 #include "config_store.h"
+#include "motion_core.h"
 #include "ui.h"
 
 #ifndef SS_FW_VERSION
@@ -34,6 +35,10 @@ ui_snapshot_t s_snapshot;
 lv_display_t *s_display = nullptr;
 uint32_t s_last_ui_ms = 0;
 uint32_t s_test_run_started_ms = 0;
+bool s_upgrade_active = false;
+uint8_t s_upgrade_progress = 0;
+char s_upgrade_status[64] = "idle";
+ss_can_id_entry_t s_can_scratch[SS_CAN_MONITOR_MAX_IDS];
 
 static uint32_t lv_tick_cb(void) { return (uint32_t)millis(); }
 
@@ -157,6 +162,36 @@ void action_test_stop(void) { commission_test_run_stop(); }
 
 void action_log_clear(void) { app_log_clear(); }
 
+void action_version_query_all(void) {
+  if (commission_query_versions()) {
+    std::snprintf(s_upgrade_status, sizeof(s_upgrade_status),
+                  "version query sent, waiting for responses");
+  } else {
+    std::snprintf(s_upgrade_status, sizeof(s_upgrade_status),
+                  "CAN is not running");
+  }
+}
+
+void action_upgrade_selected(void) {
+  ss_node_t node;
+  if (selected_node(&node) == nullptr || node.board_id < 0) {
+    std::snprintf(s_upgrade_status, sizeof(s_upgrade_status),
+                  "select an assigned board first");
+    return;
+  }
+  if (!node.version_seen) {
+    std::snprintf(s_upgrade_status, sizeof(s_upgrade_status),
+                  "no version reported by board %d", node.board_id);
+    return;
+  }
+  std::snprintf(s_upgrade_status, sizeof(s_upgrade_status),
+                "board %d: CAN upgrade transfer is not implemented in the "
+                "node firmware",
+                node.board_id);
+  SS_LOGW("upgrade", "upgrade requested for board %d, transfer not implemented",
+          node.board_id);
+}
+
 void action_can_start(void) {
   if (!can_transport_start(1000000u, can_rx_callback, nullptr)) {
     SS_LOGE("can", "start failed");
@@ -169,6 +204,8 @@ void action_can_stop(void) {
   can_transport_stop();
   app_watchdog_set_can_expected(false);
 }
+
+void action_can_clear(void) { can_monitor_reset(); }
 
 #ifdef SS_CAN_MOCK
 void action_mock_inject(void) {
@@ -205,6 +242,28 @@ void build_snapshot(ui_snapshot_t *snap) {
   snap->can_rx_frames = can.rx_frames;
   snap->can_tx_frames = can.tx_frames;
   snap->can_errors = can.tx_failed + can.bus_errors;
+
+  const ss_can_monitor_counters_t *mon = can_monitor_counters();
+  snap->can_rate_1s = mon->rate_1s;
+  snap->can_dropped = mon->dropped;
+  snap->can_unique_ids = mon->unique_ids;
+  int can_n = can_monitor_copy(s_can_scratch, SS_CAN_MONITOR_MAX_IDS);
+  if (can_n > UI_MAX_CAN_IDS) can_n = UI_MAX_CAN_IDS;
+  snap->can_entry_count = can_n;
+  for (int i = 0; i < can_n; ++i) {
+    const ss_can_id_entry_t *src = &s_can_scratch[i];
+    ui_can_entry_t *dst = &snap->can_entries[i];
+    dst->identifier = src->identifier;
+    dst->type = (uint8_t)mc_id_type((int)src->identifier);
+    dst->field = (uint8_t)mc_id_field((int)src->identifier);
+    dst->data_len = src->data_len;
+    std::memcpy(dst->data, src->data, sizeof(dst->data));
+    dst->frame_count = src->frame_count;
+    dst->changed_count = src->changed_count;
+    dst->interval_ms = src->interval_ms;
+    dst->interval_min_ms = src->interval_min_ms;
+    dst->interval_max_ms = src->interval_max_ms;
+  }
   snap->safe_hold = wd->safe_hold;
   std::snprintf(snap->hold_reason, sizeof(snap->hold_reason), "%s",
                 wd->hold_reason);
@@ -241,9 +300,15 @@ void build_snapshot(ui_snapshot_t *snap) {
     u->state = n.state;
     u->fault_flags = n.fault_flags;
     u->buffer_depth = n.buffer_depth;
+    u->version_seen = n.version_seen;
+    std::snprintf(u->sw_version, sizeof(u->sw_version), "%s", n.sw_version);
     u->assigned_positions = n.assigned_positions;
   }
   snap->selected_node = commission_selected_index();
+  snap->upgrade_active = s_upgrade_active;
+  snap->upgrade_progress = s_upgrade_progress;
+  std::snprintf(snap->upgrade_status, sizeof(snap->upgrade_status), "%s",
+                s_upgrade_status);
 
   snap->grid_cols = cfg->grid_cols;
   snap->grid_rows = cfg->grid_rows;
@@ -337,6 +402,9 @@ void setup() {
   actions.log_clear = action_log_clear;
   actions.can_start = action_can_start;
   actions.can_stop = action_can_stop;
+  actions.can_clear = action_can_clear;
+  actions.version_query_all = action_version_query_all;
+  actions.upgrade_selected = action_upgrade_selected;
 #ifdef SS_CAN_MOCK
   actions.mock_inject = action_mock_inject;
 #endif

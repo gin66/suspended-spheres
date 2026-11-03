@@ -160,6 +160,17 @@ bool can_monitor_get_entry(int index, ss_can_id_entry_t *out) {
   return ok;
 }
 
+int can_monitor_copy(ss_can_id_entry_t *out, int max) {
+  if (out == nullptr || max <= 0) return 0;
+  int n = 0;
+  portENTER_CRITICAL(&s_data_lock);
+  for (int i = 0; i < s_count && n < max; ++i) {
+    if (s_table[i].used) out[n++] = s_table[i];
+  }
+  portEXIT_CRITICAL(&s_data_lock);
+  return n;
+}
+
 int can_monitor_count(void) {
   portENTER_CRITICAL(&s_data_lock);
   const int n = s_count;

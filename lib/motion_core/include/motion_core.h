@@ -63,7 +63,9 @@ int mc_um_in_range(int32_t um);
  *   type 9     reserved      rejected                (I5)
  *   type 10    ASSIGN        field = board 0…29      (I5)
  *   type 11    ASK           field = 0               (I5)
- *   type 12–15 reserved       rejected               (I6)
+ *   type 12    VERSION_REQ   field = board 0…29 or 127
+ *   type 13    VERSION_RSP   field = board 0…29
+ *   type 14–15 reserved       rejected
  */
 int mc_id_make(int field, int type);
 
@@ -186,6 +188,27 @@ typedef struct {
 
 int mc_pack_status(const mc_status_t *s, uint8_t buf[8]);
 int mc_unpack_status(const uint8_t buf[8], mc_status_t *s);
+
+/* Version query and response, types 12 and 13. The request is eight zeros;
+ * the response carries a semantic version and a 32-bit build id,
+ * little-endian:
+ *   [0] major  [1] minor  [2] patch  [3] flags  [4..7] build (u32)
+ * flags bit 0 means a dirty working tree. */
+#define MC_TYPE_VERSION_REQ  12
+#define MC_TYPE_VERSION_RSP  13
+#define MC_VERSION_FLAG_DIRTY (1u << 0)
+
+typedef struct {
+    uint8_t  major;
+    uint8_t  minor;
+    uint8_t  patch;
+    uint8_t  flags;
+    uint32_t build;
+} mc_version_t;
+
+int mc_pack_version_req(uint8_t buf[8]);
+int mc_pack_version_rsp(const mc_version_t *v, uint8_t buf[8]);
+int mc_unpack_version_rsp(const uint8_t buf[8], mc_version_t *v);
 
 /* DISC and ASSIGN carry the 64-bit flash ID; ASK is eight zero bytes. */
 int mc_pack_flash_id(const uint8_t flash_id[8], uint8_t buf[8]);

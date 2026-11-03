@@ -12,6 +12,10 @@
  * payload layout is the commissioning extension documented in
  * doc/esp32gui_whitepaper.md §9 and must stay in sync with the Fly-Micro4
  * firmware once that firmware implements it.
+ *
+ * Version query/response uses types 12/13 (motion_core.h). The master sends
+ * VERSION_REQ to field 127; each board answers VERSION_RSP with its semantic
+ * version and build id.
  */
 
 #ifndef COMMISSION_H
@@ -47,6 +51,9 @@ typedef struct {
   uint8_t last_seq;
   uint32_t last_seen_ms;
   uint32_t last_status_ms;
+  bool version_seen;
+  char sw_version[24];
+  uint32_t last_version_ms;
   int assigned_positions;  /* count of grid positions for this board */
 } ss_node_t;
 
@@ -97,6 +104,10 @@ bool commission_test_motor(const uint8_t flash_id[8], uint8_t axis,
 
 /* Operational stop for every board (type 4, field 127). Not the hardwired
  * E-stop in FR-MOT-011. */
+/* Ask every board for its software version (type 12, field 127). Results
+ * arrive as type-13 responses and are kept in ss_node_t.sw_version. */
+bool commission_query_versions(void);
+
 bool commission_stop_all(void);
 
 /* Commissioning cascade: requires every grid position to be assigned. Rows

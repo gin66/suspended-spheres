@@ -22,6 +22,7 @@ extern "C" {
 #define UI_GRID_MAX_COLS  12
 #define UI_GRID_MAX_ROWS  12
 #define UI_LOG_BYTES      4096
+#define UI_MAX_CAN_IDS    256
 
 typedef struct {
   bool used;
@@ -32,6 +33,8 @@ typedef struct {
   uint8_t state;      /* mc_status state */
   uint8_t fault_flags;
   uint8_t buffer_depth;
+  bool version_seen;
+  char sw_version[24];
   int assigned_positions;
 } ui_node_t;
 
@@ -40,6 +43,19 @@ typedef struct {
   int node_index;     /* -1 when unassigned */
   uint8_t axis;
 } ui_cell_t;
+
+typedef struct {
+  uint32_t identifier;
+  uint8_t type;
+  uint8_t field;
+  uint8_t data_len;
+  uint8_t data[8];
+  uint32_t frame_count;
+  uint32_t changed_count;
+  uint32_t interval_ms;
+  uint32_t interval_min_ms;
+  uint32_t interval_max_ms;
+} ui_can_entry_t;
 
 typedef struct {
   /* Link and show state */
@@ -67,6 +83,13 @@ typedef struct {
   uint32_t can_tx_frames;
   uint32_t can_errors;
 
+  /* CAN scope: per-identifier rows and counters */
+  int can_entry_count;
+  ui_can_entry_t can_entries[UI_MAX_CAN_IDS];
+  uint32_t can_rate_1s;
+  uint32_t can_dropped;
+  uint32_t can_unique_ids;
+
   /* Nodes */
   int node_count;
   ui_node_t nodes[UI_MAX_NODES];
@@ -85,6 +108,18 @@ typedef struct {
   bool test_run_active;
   int test_run_remaining;
   bool config_dirty;
+
+  /* Node software upgrade */
+  bool upgrade_active;
+  uint8_t upgrade_progress;  /* 0…100 */
+  char upgrade_status[64];
+
+  /* Network and service information (read-only on the panel) */
+  bool wifi_present;
+  bool wifi_connected;
+  char wifi_ssid[33];
+  char wifi_ip[16];
+  int16_t wifi_rssi;
 
   /* Diagnostics */
   uint32_t boot_count;
@@ -109,6 +144,9 @@ typedef struct {
   void (*log_clear)(void);
   void (*can_start)(void);
   void (*can_stop)(void);
+  void (*can_clear)(void);
+  void (*version_query_all)(void);
+  void (*upgrade_selected)(void);
   void (*mock_inject)(void);  /* host harness only; may be NULL */
 } ui_actions_t;
 

@@ -102,6 +102,8 @@ not by the identifier.
 | 9 | reserved (was `HELLO`) |
 | 10 | `ASSIGN` — payload is the 64-bit flash ID, field is the board ID |
 | 11 | `ASK` — master asks unidentified boards to advertise |
+| 12 | `VERSION_REQ` — field is a board ID or 127 for every board |
+| 13 | `VERSION_RSP` — field is the answering board ID |
 
 The 7-bit field is a motor field, a board ID, 127, or zero. The type says which:
 
@@ -112,6 +114,8 @@ The 7-bit field is a motor field, a board ID, 127, or zero. The type says which:
 | 2 (sync), 8 (`DISC`), 11 (`ASK`) | 0 |
 | 3–7 (status, command, home, parameter, fault) | board ID 0–29, or 127 for every board |
 | 10 (`ASSIGN`) | the board ID being given, 0–29 |
+| 12 (`VERSION_REQ`) | board ID 0–29, or 127 for every board |
+| 13 (`VERSION_RSP`) | the answering board ID, 0–29 |
 
 - Type 0 carries a motor field, never a board ID by itself. Motor 0 is
   board 0 axis 0; it is a legal motion field. The same numeric value can
@@ -123,5 +127,6 @@ The 7-bit field is a motor field, a board ID, 127, or zero. The type says which:
   board *b*, frames with field 127 on types 3–7, and field 0 on types 2, 8
   and 11. Every other motion frame is discarded before the payload is
   parsed. The receive-path timing is in `motion_streaming_whitepaper.md` §5.5.
-- Types 12–15 are reserved.
+- Types 12 and 13 are the version query and response. Types 14–15 remain
+  reserved.
 - The motion payload layout is in `motion_streaming_whitepaper.md` §4.2. Sync, status and command payloads are in §4.5 of that paper.

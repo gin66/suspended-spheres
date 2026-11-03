@@ -234,8 +234,11 @@ CAN callback only updates the RAM registry and queues `ASSIGN`.
 
 ## 7. Screens
 
-Enough to operate and commission the piece. The host harness renders each
-one to a PNG before it is treated as done; the PNGs live in
+Enough to operate and commission the piece. Navigation is a right-hand
+88 px rail with an icon and short label per screen; the content area is
+712 × 480. The rail marks the active screen with an accent rule at its left
+edge, following the house-panel layout. The host harness renders each screen
+to a PNG before it is treated as done; the PNGs live in
 `esp32gui/host/png/`.
 
 | Screen | Shows |
@@ -243,9 +246,27 @@ one to a PNG before it is treated as done; the PNGs live in
 | Show | Pattern name, play / stop, elapsed time, bus state, discovered/assigned/online counts, unassigned steppers, test-run state |
 | Grid | One cell per ball: assigned, free, fault; click a cell to select its board |
 | Nodes | Discovered boards by 64-bit flash ID, board ID, online state, assigned positions |
-| Motor | Selected board and axis; HOME, UP, DOWN, STOP; assign/unassign a grid position |
+| Motor | Selected board and axis (assigned axes are green); HOME, UP, DOWN, STOP; tap a grid cell to choose the position, then assign/unassign |
 | Config | Grid size, test-run drop/speed/gap, serpentine, save/reset/clear, SPIFFS state |
 | Log | Recent PSRAM log ring, boot count, last watchpoint, last safe hold |
+| CAN | Received-frame scope by identifier: raw ID, type/field, count, min/max interval, last data; clear |
+| Upgrade | Per-board software version, `QUERY ALL` (type-12 request), selected board, upgrade status and progress |
+| Settings | WiFi/SSID/IP/RSSI and CAN state, firmware, boot, uptime, position capacity, service path |
+
+The CAN scope keeps 256 identifiers: a running show already uses 120
+per-motor type-0 IDs plus 30 status IDs and the sync ID, and commissioning and
+version traffic need headroom on top. Only received frames are counted.
+
+`QUERY ALL` sends `VERSION_REQ` (type 12) to field 127. Boards answer with
+`VERSION_RSP` (type 13) and the panel keeps the last version per board; see
+`motion_streaming_whitepaper.md` §4.5. The CAN firmware-transfer path is not
+implemented on the Fly-Micro4 yet, so `UPGRADE SELECTED` currently reports
+that the transfer is pending and makes no bus transaction.
+
+This build has no WiFi stack. The Settings network fields are fed from the
+snapshot and report `not compiled` until a net-status source exists; the
+service path remains the CH9102 UART. There is no language switch: labels are
+short and the log is English-only.
 
 Commissioning text uses the rules in `Fly_Micro4_addressing.md`. The panel
 is the master that sends ASK and ASSIGN. It stores the host map

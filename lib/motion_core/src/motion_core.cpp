@@ -79,7 +79,11 @@ int mc_id_make(int field, int type) {
         return (field <= 29) ? ((field << 4) | 10) : -1;
     case 11:  /* ASK: field 0 only (I5) */
         return (field == 0) ? 11 : -1;
-    default:  /* types 12–15 reserved (I6) */
+    case 12:  /* VERSION_REQ: board 0…29, or 127 for all */
+    case 13:  /* VERSION_RSP: board 0…29 */
+        return (field <= 29 || field == MC_BOARD_ALL)
+                   ? ((field << 4) | type) : -1;
+    default:  /* types 14–15 reserved */
         return -1;
     }
 }
@@ -115,7 +119,8 @@ int mc_id_board(int id) {
     if (id < 0 || id > MC_ID_MAX)
         return -1;
     int type = mc_id_type(id);
-    if ((type >= 3 && type <= 7) || type == 10)
+    if ((type >= 3 && type <= 7) || type == 10 ||
+        (type >= 12 && type <= 13))
         return mc_id_field(id);
     return -1;
 }
@@ -154,6 +159,8 @@ int mc_board_accepts_id(int board, int id) {
         return (field == board || field == MC_BOARD_ALL) ? 1 : 0;
     if (type == 10)                          /* ASSIGN to this board */
         return field == board ? 1 : 0;
+    if (type == MC_TYPE_VERSION_REQ)
+        return (field == board || field == MC_BOARD_ALL) ? 1 : 0;
     return 0;
 }
 
@@ -308,6 +315,42 @@ int mc_unpack_status(const uint8_t buf[8], mc_status_t *s) {
     tmp.buffer_depth = buf[6];
     tmp.last_seq = buf[7];
     *s = tmp;
+    return 0;
+}
+
+int mc_pack_version_req(uint8_t buf[8]) {
+    if (buf == 0)
+        return -1;
+    for (int i = 0; i < 8; ++i)
+        buf[i] = 0;
+    return 0;
+}
+
+int mc_pack_version_rsp(const mc_version_t *v, uint8_t buf[8]) {
+    if (v == 0 || buf == 0)
+        return -1;
+    buf[0] = v->major;
+    buf[1] = v->minor;
+    buf[2] = v->patch;
+    buf[3] = v->flags;
+    buf[4] = (uint8_t)(v->build & 0xFFu);
+    buf[5] = (uint8_t)((v->build >> 8) & 0xFFu);
+    buf[6] = (uint8_t)((v->build >> 16) & 0xFFu);
+    buf[7] = (uint8_t)((v->build >> 24) & 0xFFu);
+    return 0;
+}
+
+int mc_unpack_version_rsp(const uint8_t buf[8], mc_version_t *v) {
+    if (buf == 0 || v == 0)
+        return -1;
+    mc_version_t tmp;
+    tmp.major = buf[0];
+    tmp.minor = buf[1];
+    tmp.patch = buf[2];
+    tmp.flags = buf[3];
+    tmp.build = (uint32_t)buf[4] | ((uint32_t)buf[5] << 8) |
+                ((uint32_t)buf[6] << 16) | ((uint32_t)buf[7] << 24);
+    *v = tmp;
     return 0;
 }
 

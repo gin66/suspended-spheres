@@ -414,6 +414,21 @@ node owns, and how a board is commissioned are in `Fly_Micro4_addressing.md`.
 
   On request or on failure, a separate command response carries per-ball
   position and velocity (`FR-MON-001`). The 10 Hz frame never does.
+- **Version query / response** (types 12/13). The master sends an 8-byte
+  `VERSION_REQ` of zeros to field 127 (every board) or to one board. Each
+  board answers `VERSION_RSP` in the same 8-byte layout, little-endian:
+
+  | Offset | Type | Field |
+  |--------|------|--------|
+  | 0 | `uint8` | `major` |
+  | 1 | `uint8` | `minor` |
+  | 2 | `uint8` | `patch` |
+  | 3 | `uint8` | `flags`, bit 0 = dirty working tree |
+  | 4–7 | `uint32` | `build` id |
+
+  A board delays its response by `1 ms × (board_id mod 10)` so a query to all
+  boards does not turn into a burst of identical identifiers. The panel keeps
+  the last version per board; a missing answer is shown as `--`.
 - **Command/home/parameter**: on demand, acknowledged. Homing and calibration
   are not in the motion stream.
 - **E-stop**: the hardwired power removal remains the safety function

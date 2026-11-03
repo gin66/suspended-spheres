@@ -134,8 +134,42 @@ static int test_p10_variants_through_abi(void) {
     return 0;
 }
 
+/* P11 — version request is eight zeros; the response carries a semantic
+ * version and a 32-bit build id, little-endian. */
+static int test_p11_version_payloads(void) {
+    uint8_t req[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+    ASSERT(mc_pack_version_req(req) == 0);
+    for (int i = 0; i < 8; ++i)
+        ASSERT(req[i] == 0);
+
+    const mc_version_t v = {1, 2, 3, MC_VERSION_FLAG_DIRTY, 0x12345678u};
+    uint8_t buf[8];
+    ASSERT(mc_pack_version_rsp(&v, buf) == 0);
+    const uint8_t expect[8] = {
+        1, 2, 3, 1, 0x78, 0x56, 0x34, 0x12,
+    };
+    for (int i = 0; i < 8; ++i)
+        ASSERT(buf[i] == expect[i]);
+
+    mc_version_t out = {0, 0, 0, 0, 0};
+    ASSERT(mc_unpack_version_rsp(buf, &out) == 0);
+    ASSERT(out.major == v.major);
+    ASSERT(out.minor == v.minor);
+    ASSERT(out.patch == v.patch);
+    ASSERT(out.flags == v.flags);
+    ASSERT(out.build == v.build);
+
+    ASSERT(mc_pack_version_req(0) == -1);
+    ASSERT(mc_pack_version_rsp(0, buf) == -1);
+    ASSERT(mc_pack_version_rsp(&v, 0) == -1);
+    ASSERT(mc_unpack_version_rsp(0, &out) == -1);
+    ASSERT(mc_unpack_version_rsp(buf, 0) == -1);
+    return 0;
+}
+
 static int reg_p1 = add_test("P1", test_p1_segment_roundtrip);
 static int reg_p2 = add_test("P2", test_p2_type1_reserved);
 static int reg_p3 = add_test("P3", test_p3_length_rejected);
 static int reg_p9 = add_test("P9", test_p9_per_node_frame);
 static int reg_p10 = add_test("P10", test_p10_variants_through_abi);
+static int reg_p11 = add_test("P11", test_p11_version_payloads);
