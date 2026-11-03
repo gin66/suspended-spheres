@@ -245,6 +245,33 @@ error in the pattern status line.
 
 ---
 
+## Use Claude or another LLM
+
+Claude produced a good “walking peak” visual from this prompt. Use it as a
+starting point and replace the motion description with your own idea.
+
+**English**
+
+> I want to use the animations from
+> https://github.com/gin66/suspended-spheres. Please create a walking peak
+> running in circles. First create a 3D HTML preview similar to the webapp;
+> only when I ask, create the `.anim.json` as a downloadable file.
+
+**Italiano**
+
+> Voglio usare le animazioni di
+> https://github.com/gin66/suspended-spheres. Per favore, crea un picco che
+> cammina muovendosi in cerchi. Prima crea un’anteprima 3D in HTML simile alla
+> webapp; solo quando te lo chiedo, crea il file `.anim.json` come file
+> scaricabile.
+
+The preview-first request is deliberate: judge the motion before the model
+commits to the JSON. The best results come when it then writes a version-1
+`patterns/<name>.anim.json` and runs `./build/pattern_check` until the report
+has no violations.
+
+---
+
 ## Use opencode's free models
 
 opencode includes a rotating list of **free, limited-time models** served by

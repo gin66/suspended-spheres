@@ -1016,15 +1016,17 @@ The clock double, the debounce interval, and the test order are in
 
 Keep the authoring model separate from the wire format:
 
-- **Layers** with a generator and parameters:
-  - `keyframes`: time, position, easing per ball or per group.
-  - `sine` / `travelling_wave`: amplitude, frequency, wavelength, direction,
-    phase, axis (x, y, radial).
-  - `interference`: sum of 2–4 waves with phases/amplitudes.
-  - `spiral`, `ripple`, `cascade`, `random_walk` (seeded).
-  - `expression`: a sandboxed formula `z(i, j, t)` for advanced users.
-- **Groups**: rows, columns, rings, checkerboard, masks; parameters can be
-  per-group.
+- **Layers** with a generator and parameters. Version 1 implements:
+  - `keyframes`: time, position offset; linear interpolation, no easing.
+  - `sine` / `travelling_wave`: amplitude, period, wavelength, direction
+    (travelling_wave only), phase, axis (`col` or `row`).
+  - `interference`: sum of two waves with separate periods, wavelengths,
+    phases and axes.
+  - `spiral`, `ripple`, `cascade`, `random_walk`; `random_walk` is seeded and
+    `spiral`/`ripple` use the group centre.
+  - `expression`: deferred; not part of version 1.
+- **Groups**: all, rows, columns, rings, checkerboard, masks; the same layer
+  can be limited to one group. Group fields are in §6.9.
 - **Blend/transition**: crossfade over ~1 s (`FR-PAT-008`); never a position
   jump.
 The tool bakes layers to per-axis absolute samples at the chosen cadence
@@ -1173,11 +1175,75 @@ field, or a numeric field that is not an integer, fails the parse.
 | `n` | yes | `3` or `4` |
 | `duration_ms` | yes | length of the take, in milliseconds |
 | `tier` | yes | `ordinary`, `nominal`, or `optional` |
+| `base_um` | no | rest position of every ball, default `1000000` (1.000 m) |
 | `layers` | yes | array of layer objects |
 
-The sine layer used by the parity golden has integer fields `op` (`"sine"`),
-`amplitude_um`, `period_ms`, `wavelength_cols`, and `axis` (`"col"` or
-`"row"`). The checked-in parity file is `patterns/golden_sine.anim.json`:
+All layer offsets are added to `base_um`, so layers sum. Every field is an
+integer. An unknown `op` or a non-integer number fails the parse.
+
+#### Layer fields
+
+These fields are accepted on any layer. A field that does not apply to the
+selected `op` is ignored.
+
+| Field | Required | Used by | Default | Meaning |
+|-------|----------|---------|---------|---------|
+| `op` | yes | all | — | `keyframes`, `sine`, `travelling_wave`, `interference`, `spiral`, `ripple`, `cascade`, `random_walk` |
+| `amplitude_um` | no | sine, travelling_wave, interference (wave 1), spiral, ripple, cascade, random_walk | `0` | signed peak offset in µm |
+| `period_ms` | no | sine, travelling_wave, interference (per wave), spiral, ripple, cascade, random_walk | `0` | wave period or random-walk waypoint interval; `≤ 0` disables time variation (random_walk returns 0) |
+| `wavelength_cols` | no | sine, travelling_wave, interference (per wave), spiral, ripple | `0` | spatial wavelength in columns; `≤ 0` makes all balls move together |
+| `phase_deg` | no | sine, travelling_wave, interference, spiral, ripple | `0` | phase offset in degrees, reduced modulo 360 |
+| `phase_deg` | no | cascade | `0` | **delay in ms per diagonal step**; `≤ 0` means 1 ms |
+| `axis` | no | sine, travelling_wave, interference (wave 1) | `"col"` | `"col"` uses the column index, `"row"` uses the row index |
+| `direction` | no | travelling_wave | `1` | negative reverses the spatial direction; ignored by sine |
+| `seed` | no | random_walk | `0` | 32-bit PRNG seed |
+| `amplitude2_um` | no | interference | `0` | peak offset of the second wave |
+| `period2_ms` | no | interference | `0` | period of the second wave |
+| `wavelength2_cols` | no | interference | `0` | spatial wavelength of the second wave |
+| `phase2_deg` | no | interference | `0` | phase of the second wave |
+| `axis2` | no | interference | `"col"` | axis of the second wave |
+| `keys` | no | keyframes | `[]` | array of `{ "t_ms": int, "pos_um": int }`, sorted by `t_ms`, linearly interpolated and clamped at the ends |
+| `group` | no | all | all balls | restrict the layer, see below |
+
+#### Group fields
+
+`group` limits a layer to a subset of balls and also supplies the centre for
+`spiral`, `ripple` and `ring`. If `group` is omitted, every ball is included.
+
+| Field | Required | Default | Meaning |
+|-------|----------|---------|---------|
+| `kind` | no | `"all"` | `all`, `row`, `column`, `ring`, `checkerboard`, `mask` |
+| `index` | row/column only | `0` | row or column number |
+| `center` | spiral/ripple/ring | `[0, 0]` | `[col, row]` wave or ring centre |
+| `radius` | ring only | `0` | Chebyshev distance from `center` |
+| `parity` | checkerboard only | `0` | `0` = even `(col + row)`, `1` = odd |
+| `balls` | mask only | `[]` | explicit ball indices, `row × cols + col` |
+
+`spiral` and `ripple` use `group.center` even when `kind` is `all`. The
+default centre is the top-left corner, so set `center` explicitly.
+
+#### Op formulas
+
+`A` is `amplitude_um`, `T` is `period_ms`, `λ` is `wavelength_cols`, `φ` is
+`phase_deg`, and `i` is the column or row selected by `axis`.
+
+| `op` | Offset at time `t` |
+|------|--------------------|
+| `sine` | `A · sin(2π(t/T + i/λ) + φ)` |
+| `travelling_wave` | `A · sin(2π(t/T + direction·i/λ) + φ)` |
+| `interference` | wave 1 with `(A, T, λ, φ, axis)` plus wave 2 with `(A2, T2, λ2, φ2, axis2)` |
+| `spiral` | `A · sin(2π(t/T + r/λ) + φ)`, where `r = floor(√((col−cx)² + (row−cy)²))` |
+| `ripple` | same radial formula as `spiral` in version 1 |
+| `cascade` | `A · sin(2π·(t − (col+row)·delay)/T)`, `delay = phase_deg > 0 ? phase_deg : 1` ms |
+| `random_walk` | seeded per-ball waypoints every `T`, smoothstep between them, scaled by `A` |
+| `keyframes` | linear interpolation of `keys`; clamped before the first and after the last key |
+
+`spiral` and `ripple` are aliases today; a later version may add an angular
+term to `spiral`. The radial distance is Euclidean and truncated to an integer
+before the spatial phase is computed. `cascade` reuses `phase_deg` as a delay,
+not as a phase; `wavelength_cols` is not used by cascade.
+
+The checked-in parity file is `patterns/golden_sine.anim.json`:
 
 ```json
 {
@@ -1199,11 +1265,41 @@ The sine layer used by the parity golden has integer fields `op` (`"sine"`),
 }
 ```
 
-Peak speed is `0.05 m × 2π / 5 s ≈ 0.063 m/s`, inside the ordinary tier.
-Other cadences are this file with `dt_ms` in {10, 11, 15} and `n` in {3, 4}.
-A violation case raises `amplitude_um` until the selected tier is exceeded.
-The host test may run `tests/fixtures/write_sine.py` to produce a version-1
-file. Passing that `.py` path to the checker is a parse error.
+A layer from each op family (each object goes in the top-level `layers`
+array):
+
+```json
+[
+  { "op": "travelling_wave", "amplitude_um": 80000, "period_ms": 6000,
+    "wavelength_cols": 10, "axis": "col", "direction": -1, "phase_deg": 0 },
+  { "op": "interference", "amplitude_um": 70000, "period_ms": 7000,
+    "wavelength_cols": 10, "phase_deg": 0, "axis": "col",
+    "amplitude2_um": 50000, "period2_ms": 11000, "wavelength2_cols": 6,
+    "phase2_deg": 120, "axis2": "col" },
+  { "op": "spiral", "amplitude_um": 60000, "period_ms": 8000,
+    "wavelength_cols": 4, "phase_deg": 0,
+    "group": { "center": [4, 5] } },
+  { "op": "ripple", "amplitude_um": 50000, "period_ms": 5000,
+    "wavelength_cols": 3, "phase_deg": 0,
+    "group": { "center": [4, 5] } },
+  { "op": "cascade", "amplitude_um": 70000, "period_ms": 4000,
+    "phase_deg": 120 },
+  { "op": "random_walk", "amplitude_um": 40000, "period_ms": 3000,
+    "seed": 1234 },
+  { "op": "keyframes", "keys": [
+      { "t_ms": 0, "pos_um": 0 },
+      { "t_ms": 1000, "pos_um": 50000 },
+      { "t_ms": 4000, "pos_um": -50000 }
+    ] }
+]
+```
+
+Peak speed for the sine parity file is `0.05 m × 2π / 5 s ≈ 0.063 m/s`,
+inside the ordinary tier. Other cadences are this file with `dt_ms` in
+{10, 11, 15} and `n` in {3, 4}. A violation case raises `amplitude_um` until
+the selected tier is exceeded. The host test may run
+`tests/fixtures/write_sine.py` to produce a version-1 file. Passing that `.py`
+path to the checker is a parse error.
 
 - Watch the `.anim.json` (mtime, then a content hash). Debounce bursts by
   50 ms, rebake on a worker, and swap the trajectory in place.
