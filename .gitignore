@@ -4,6 +4,13 @@ easyEDA_backup
 build/
 rp2040/build/
 rp2040/.pio/
+esp32gui/.pio/
+esp32gui/.dummy/
+esp32gui/managed_components/
+esp32gui/dependencies.lock
+esp32gui/CMakeLists.txt
+esp32gui/sdkconfig.*
+esp32gui/host/build/
 webapp/node_modules/
 webapp/dist/
 *.report.json

@@ -4,7 +4,7 @@
 > Motion payloads, timing, and node playback stay in
 > `motion_streaming_whitepaper.md`. Node identity and CAN-ID allocation stay
 > in `Fly_Micro4_addressing.md`. This note names the panel, the process
-> split, and the directory the sources will live in.
+> split, and the directory the sources live in.
 
 The reference implementation is the house panel at
 `../ESP32_projects/ESP32/28_hauszentrale`. That project already runs LVGL on
@@ -83,13 +83,25 @@ report is clean.
 ## 3. Where the source lives
 
 ```
-esp32gui/                  PlatformIO project, not created yet
+esp32gui/                  PlatformIO project
 ├── platformio.ini         Waveshare panel flags; see §5
 ├── src/                   ESP32-only: RGB panel, GT911, CH422G, TWAI
 ├── ui/                    LVGL screens, no ESP-IDF includes
 ├── host/                  Mac build of ui/ against LVGL; writes PNGs
 └── include/
 ```
+
+The first implemented stage is the board bring-up, the commissioning model
+and the UI. The CAN transport boundary selects a mock at build time because
+the bench has no bus wiring yet; the TWAI implementation is present and
+compile-guarded (`SS_CAN_MOCK`). No WiFi, OTA, Telegram or `.private` secret
+is compiled into this project.
+
+The local `app_log`, `app_watchdog` and `can_monitor` adapt the useful
+concepts from `../ESP32_projects/ESP32/prj_template` (`tpl_debug_log`,
+`tpl_system` `WATCH()`, `tpl_net_watchdog`) and
+`28_hauszentrale/src/can_monitor.cpp`. They are local modules; no template
+header and no secret is linked.
 
 `lib/motion_core/` stays the shared integer core. `esp32gui/platformio.ini`
 points at it with `lib_extra_dirs = ../lib`, the same way `rp2040/` does.
@@ -143,9 +155,11 @@ Consequences, already paid for in the house panel:
 - `ARDUINO_USB_MODE=0`. GPIO 19/20 are the TWAI pins, not a USB-OTG CDC.
 - `setup()` drives `USB_SEL` low before anything else, then raises it only
   when the config says CAN is on and `twai_start()` runs.
-- The in-service update path is WiFi OTA (ArduinoOTA and an HTTP `/update`).
-  USB flashing is the bench recovery path: UART switch to ESP32, hold BOOT,
-  tap RESET.
+- **No WiFi and no secrets in `esp32gui/`.** `template.h`, `tpl_wifi`,
+  `wifi_secrets.*`, `private_bot.h` and `private_sha.h` are not used. The
+  service path is USB/UART flashing through the CH9102 (UART switch to ESP32,
+  hold BOOT, tap RESET). A future OTA path must keep credentials outside the
+  repository; none are present today.
 - Diagnostics that must be read while the show runs are drawn on the panel.
   The UART0 log remains available; native USB does not, once CAN is on.
 - The pixel clock that stayed stable on this panel is 12 MHz
@@ -170,26 +184,30 @@ star ground; the panel ground joins that same star.
 
 ## 5. Build flags worth keeping
 
-Start `esp32gui/platformio.ini` from the house panel's `[common]` block,
-then drop the heater libraries (`libsml`, Matter, the web chart stack).
-Keep:
+`esp32gui/platformio.ini` takes the house panel's pioarduino platform and
+drops every heater, Matter, WiFi and web dependency. It keeps:
 
 ```
+platform = pioarduino 55.03.312-1
 board = esp32-s3-devkitc-1
 board_build.flash_size = 16MB
 board_build.arduino.memory_type = qio_opi
+board_build.partitions = partitions_16m.csv
 -DARDUINO_USB_MODE=0
 -DARDUINO_USB_CDC_ON_BOOT=0
 -DIS_WAVESHARE_LCD7
--DTPL_WS7_ROTATION=1
--DTPL_WS7_PCLK_HZ=12000000
+-DBOARD_WS7_ROTATION=1
+-DBOARD_WS7_PCLK_HZ=12000000
 -DLV_CONF_PATH=include/lv_conf.h
+-DSS_CAN_MOCK=1            ; remove when the TJA1051 bus is wired
 lib_deps = lvgl/lvgl@~9.2.0
 lib_extra_dirs = ../lib
 ```
 
-LVGL is 9.2, matching the house panel, so `tpl_display` and the host
-harness move across without an API rewrite.
+`build_src_filter` is ignored by the ESP-IDF framework on pioarduino, so
+`src/ui_build.cpp` includes `ui/ui.cpp` into the firmware build. The host
+harness compiles `ui/ui.cpp` directly. LVGL is 9.2, matching the house
+panel.
 
 ---
 
@@ -206,24 +224,35 @@ The show task is the master scheduler in `motion_streaming_whitepaper.md`
 runs from a hardware timer or a pinned FreeRTOS task. LVGL's handler runs
 on the other core and never calls `twai_transmit`.
 
+In the first stage the UI and commissioning service run in the Arduino
+main loop, and the transport owns its own RX task (TWAI build) or delivers
+synchronously (mock build). The separate `show` task arrives with HBP2
+playback. The SPIFFS config store is mutated only from the main loop; the
+CAN callback only updates the RAM registry and queues `ASSIGN`.
+
 ---
 
 ## 7. Screens
 
-Enough to operate the piece. The host harness renders each one to a PNG
-before it is treated as done.
+Enough to operate and commission the piece. The host harness renders each
+one to a PNG before it is treated as done; the PNGs live in
+`esp32gui/host/png/`.
 
 | Screen | Shows |
 |--------|--------|
-| Show | Pattern name, play / stop, elapsed time, bus state |
-| Grid | One cell per ball, fault and following-error summary |
-| Nodes | Discovery: unanswered boards, ASSIGN in progress, board ID and flash ID |
-| Log | Faults and the last safe stop, stored on the panel |
+| Show | Pattern name, play / stop, elapsed time, bus state, discovered/assigned/online counts, unassigned steppers, test-run state |
+| Grid | One cell per ball: assigned, free, fault; click a cell to select its board |
+| Nodes | Discovered boards by 64-bit flash ID, board ID, online state, assigned positions |
+| Motor | Selected board and axis; HOME, UP, DOWN, STOP; assign/unassign a grid position |
+| Config | Grid size, test-run drop/speed/gap, serpentine, save/reset/clear, SPIFFS state |
+| Log | Recent PSRAM log ring, boot count, last watchpoint, last safe hold |
 
 Commissioning text uses the rules in `Fly_Micro4_addressing.md`. The panel
 is the master that sends ASK and ASSIGN. It stores the host map
 `(flash_id, axis) → position`. The nodes still do not know the grid
 position.
+
+The screen flows are in §9.
 
 ---
 
@@ -234,3 +263,85 @@ position.
 - House-panel application code: heater curves, SML power, water model,
   Matter, Telegram.
 - A second copy of the CAN ID map or the cubic frame layout.
+- WiFi, OTA-over-WiFi, Telegram and every `.private` secret. This panel is
+  a wired CAN master; the CH9102 UART is the service path.
+
+---
+
+## 9. Commissioning and configuration
+
+### 9.1 Workflow
+
+1. **Discover.** The master sends `ASK` (type 11, field 0) every 5 s. A board
+   without a board ID answers `DISC` (type 8, field 0) with its 64-bit QSPI
+   flash ID. The master sends `ASSIGN` (type 10) with the board ID in the
+   field and the flash ID in the payload. A known flash ID keeps the board ID
+   it had in the host map. This is `Fly_Micro4_addressing.md` §3, unchanged.
+2. **Assign steppers.** The Nodes list shows every discovered board, its
+   board ID and how many positions it owns. The Motor screen selects one
+   board and one local axis (0–3) and assigns it to a grid position. The map
+   is one-to-one: assigning a position removes the position's previous owner
+   and any previous position of the same `(flash_id, axis)`.
+3. **Jog and home.** The Motor screen sends `HOME` (type 5) or `COMMAND`
+   (type 4) with a 10 mm jog at the configured test speed. These are
+   commissioning moves, not playback. The node does not use the cubic
+   playback evaluator for them.
+4. **Test the cascade.** With every position assigned, `START TEST RUN`
+   walks rows from the back to the front. Inside a row the order is
+   left→right, and the next row is right→left (serpentine). Each sphere drops
+   `test_drop_mm` slowly; the next command follows after the move time plus
+   `test_step_delay_ms`. The default is 100 mm at 20 mm/s with a 300 ms gap.
+   The run refuses to start if a position has no live board.
+5. **Save.** `SAVE TO SPIFFS` writes the grid size, the position map, the
+   `(flash_id → board_id)` map and the test parameters to `/config.bin`.
+
+The grid is row-major with **row 0 = back** and **column 0 = left**. Position
+`p = row × cols + column`. The Fly-Micro4 never learns `p`; it only sees the
+motor field `board_id × 4 + axis` on motion frames and its board ID on the
+housekeeping frames.
+
+### 9.2 Persistent configuration
+
+`/config.bin` on SPIFFS is a packed, CRC32-checked `ss_config_t`:
+
+| Field | Meaning |
+|-------|---------|
+| `grid_cols`, `grid_rows` | 10 × 10 or 10 × 12 in normal use (`1..12` accepted) |
+| `test_drop_mm`, `test_speed_mm_s`, `test_step_delay_ms`, `test_serpentine` | Commissioning cascade |
+| `brightness` | 10–100 % (reserved; CH422G backlight is on/off today) |
+| `positions[120]` | `assigned`, `flash_id`, `axis` per grid position |
+| `boards[30]` | `flash_id → board_id`, so a returning board keeps its motor fields |
+
+A missing or invalid file writes defaults: 10 × 12, 100 mm, 20 mm/s, 300 ms,
+serpentine on. The HBP2 playback file remains read-only on SD and is not part
+of this store. A card failure or a corrupt block still stops the show, as in
+§2.1.
+
+### 9.3 Proposed commissioning frames
+
+The motion streaming baseline in `motion_streaming_whitepaper.md` §4.5 does
+not define the HOME/COMMAND payloads. This is the proposed extension. It must
+be implemented in `rp2040/` before the Motor screen can drive real hardware;
+until then the mock accepts the frames and the UI is testable.
+
+```
+HOME (type 5), field = board 0–29, exactly 8 bytes:
+  [0]      axis mask, bit0 = Drive0 … bit3 = Drive3
+  [1..7]   zero
+
+COMMAND (type 4), field = board 0–29 or 127, exactly 8 bytes:
+  [0]      op: 1 = UP, 2 = DOWN, 3 = STOP
+  [1]      axis mask, bits 0–3
+  [2..3]   u16 distance_mm, little-endian
+  [4..5]   u16 speed_mm_s, little-endian
+  [6]      sequence, wraps at 256
+  [7]      zero
+```
+
+`STOP` with field 127 and mask `0x0F` is the operational stop-all. It is not
+the hardwired E-stop of `FR-MOT-011`. A node must reject an axis mask outside
+`0x0F`, a speed outside its safe range, or a move that leaves the 0–2000 mm
+range; it must hold and report a fault rather than clamp.
+
+If the Fly-Micro4 firmware chooses a different layout, change this section,
+`esp32gui/src/commission.cpp` and the node together. Do not keep two layouts.

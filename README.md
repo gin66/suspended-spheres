@@ -65,7 +65,7 @@ Suspended_Spheres/
 ├── rp2040/                     # Fly-Micro4 firmware (PlatformIO)
 ├── webapp/                     # Designer 3D viewer (Vite + Three.js)
 ├── patterns/                   # .anim.json example patterns
-├── esp32gui/                   # Show controller and LVGL UI (not created yet)
+├── esp32gui/                   # Show controller and LVGL UI (PlatformIO + host PNGs)
 ├── boards/
 │   ├── Fly_Micro4_pinmap.md         # Pin reference for the vendor files
 │   ├── Fly_Micro4_klipper_reference.cfg
@@ -304,7 +304,7 @@ before using confidential material.
 | **Concept & Documentation** | ✅ Complete |
 | **Mechanical Design** | 🔄 In Progress |
 | **Controller Hardware** | Fly-Micro4 selected; desolder R39/R58 on every board. Waveshare CAN jumper set to 120 Ω; solder 120 Ω into a cable terminator |
-| **Show controller** | Waveshare ESP32-S3-Touch-LCD-7 selected; sources will live in `esp32gui/` |
+| **Show controller** | Waveshare ESP32-S3-Touch-LCD-7 selected; sources in `esp32gui/` (CAN mock until the bus is wired) |
 | **Firmware** | ⏳ Planned |
 | **Simulation** | ✅ 3D viewer uses the shared WASM core; pattern export in progress |
 | **Prototype** | ⏳ Planned |

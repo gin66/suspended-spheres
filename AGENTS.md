@@ -33,9 +33,14 @@ Suspended_Spheres/
 ├── wasm/                       # Native/Emscripten parity driver
 ├── webapp/                     # Vite + Three.js designer viewer
 ├── patterns/                   # .anim.json sources and the golden sine
-├── rp2040/                     # Firmware-only PlatformIO project
+├── rp2040/                     # Fly-Micro4 firmware-only PlatformIO project
 │   ├── platformio.ini
 │   └── src/main.cpp
+├── esp32gui/                   # Waveshare 7" show controller + LVGL UI
+│   ├── platformio.ini
+│   ├── src/                    # board bring-up, CAN boundary, commission, log
+│   ├── ui/                     # LVGL screens, no ESP-IDF includes
+│   └── host/                   # Mac CMake harness, writes screen PNGs
 ├── boards/                     # Fly-Micro4 vendor files and the pin reference
 └── doc/
     ├── system_requirements.md  # Behavioural and non-functional requirements
@@ -43,11 +48,12 @@ Suspended_Spheres/
     ├── controller_analysis.md  # Platforms, drivers, stepping, bus, clock drift
     ├── motion_streaming_whitepaper.md  # Motion payload and node playback
     ├── motion_streaming_tdd.md         # Host tests that need no hardware
+    ├── esp32gui_whitepaper.md          # Waveshare panel: show controller/UI
     ├── Fly_Micro4_addressing.md        # Node identity and CAN-ID allocation
     └── RISK.md                 # Risk register and technical review
 ```
 
-All technical Markdown belongs in `doc/`. Only `README.md` and `AGENTS.md` sit at the repository root. Vendor board files and the pin reference stay in `boards/`. PC build and test code lives in `tests/`; `rp2040/` is firmware-only. The shared core in `lib/motion_core/` is the only source exchanged between the two builds.
+All technical Markdown belongs in `doc/`. Only `README.md` and `AGENTS.md` sit at the repository root. Vendor board files and the pin reference stay in `boards/`. PC build and test code lives in `tests/`; `rp2040/` and `esp32gui/` are firmware-only. `esp32gui/` has no WiFi, OTA, Telegram or `.private` secrets. The shared core in `lib/motion_core/` is the only source exchanged between the firmware builds.
 
 ---
 
@@ -65,6 +71,24 @@ All technical Markdown belongs in `doc/`. Only `README.md` and `AGENTS.md` sit a
   cd rp2040 && pio run
   ```
   PlatformIO finds the shared core through `lib_extra_dirs = ../lib`; do not copy `motion_core` into `rp2040/`.
+- **Show-controller firmware (PlatformIO).** `esp32gui/` is the Waveshare 7"
+  panel. It builds with the mock CAN transport because the bus is not wired:
+  ```sh
+  cd esp32gui && pio run -e esp32usb
+  ```
+  Remove `-D SS_CAN_MOCK=1` from `platformio.ini` only when the TJA1051 and
+  the 1 Mbit/s bus are connected. Never upload or flash without an explicit
+  request.
+- **Screen preview (CMake, no hardware).** The host harness builds the same
+  `ui/ui.cpp` and writes one PNG per screen:
+  ```sh
+  cmake -S esp32gui/host -B esp32gui/host/build
+  cmake --build esp32gui/host/build
+  ./esp32gui/host/build/esp32gui_host esp32gui/host/png
+  ```
+  Review `esp32gui/host/png/output_*.png` before treating a screen change as
+  done. The harness defaults to the LVGL tree already downloaded for the
+  house panel; override with `-DLVGL_ROOT_DIR=/path/to/lvgl`.
 - **Native/WASM parity (optional).** Build the same driver natively and with
   Emscripten, then compare the transcripts:
   ```sh
