@@ -96,9 +96,9 @@ The host node double in `tests/node_sim.h` covers N1–N14 with
 `PlaybackClock`, and `tests/commission_sim.h` covers M1–M7. Pattern parse,
 bake, limits, report, `.hbp` export and live file state live in
 `lib/pattern_core/` and are exercised by `tests/test_pattern.cpp` and
-`tests/test_live.cpp`. Still open: native/WASM parity (§12); it needs an
-Emscripten toolchain, which is not installed in this environment. P9 is
-deferred above.
+`tests/test_live.cpp`. Native/WASM parity (§12) also passes with Emscripten
+6.0.13: `tests/wasm_parity.sh` compares the native and Node/WASM transcripts
+byte for byte. P9 is deferred above.
 
 Later byte layouts are the Markdown tables in the whitepaper §4.5 and in
 `Fly_Micro4_addressing.md` §3. There is no separate schema file. A test
@@ -501,19 +501,17 @@ Whitepaper §6.9. A temp directory and a fake clock. No window, no WebGL.
 
 Whitepaper §6.3, §6.7. Still no board.
 
-> **Deferred (2026-11-03).** W1–W2 need Emscripten (`emcc`), which is not
-> installed in the host environment used for the fifth slice. The checked-in
-> `patterns/golden_sine.anim.json`, the deterministic native bake (A2), and the
-> `wasm/pattern_driver.cpp` / `wasm/build.sh` / `tests/wasm_parity.sh` harness
-> are ready; the native transcript is byte-identical across runs. Run W1–W3
-> when `emcc` is available. W3's golden file is already checked in.
+> **Status (2026-11-03).** W1–W3 pass with Emscripten 6.0.13. The same
+> `motion_core` and `pattern_core` sources build natively and with `em++`;
+> `tests/wasm_parity.sh` runs `patterns/golden_sine.anim.json` through both and
+> compares samples, chunks, packed frames and the report byte for byte.
 
-- [ ] **W1** The same core sources compile with Emscripten (`-std=c++17`).
+- [x] **W1** The same core sources compile with Emscripten (`-std=c++17`).
   A host driver calls the native binary and the WASM binary (via Node)
   with `patterns/golden_sine.anim.json` from the whitepaper §6.9.
-- [ ] **W2** Sample bytes, chunk bytes, packed CAN frames, and the report
+- [x] **W2** Sample bytes, chunk bytes, packed CAN frames, and the report
   JSON match bit for bit between the two builds.
-- [ ] **W3** The golden file is checked in. A change to interpolation,
+- [x] **W3** The golden file is checked in. A change to interpolation,
   units, or chunking that is intentional updates the golden in the same
   change; an unintentional change fails W2.
 
@@ -531,7 +529,7 @@ After that:
 4. Node playback N1–N14 (§8) and payloads P4–P8 (§4). **Done.**
 5. Commissioning M1–M7 (§9). **Done.**
 6. Pattern bake (§10) and live file state (§11). **Done.**
-7. Native/WASM parity (§12). **Deferred: `emcc` not installed.**
+7. Native/WASM parity (§12). **Done.**
 
 Phase 12 is the host gate named in roadmap W1: golden traces pass, and
 the worst-case chunk and tick asserts (S3–S5) pass. W0 and the scope
