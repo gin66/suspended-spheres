@@ -2,3 +2,8 @@
 easyEDA_backup
 .pio/
 build/
+rp2040/build/
+rp2040/.pio/
+webapp/node_modules/
+webapp/dist/
+*.report.json

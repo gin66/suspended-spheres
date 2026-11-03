@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Suspended Spheres</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0a0a0a; color: #e0e0e0; font-family: system-ui, sans-serif; overflow: hidden; }
+    #canvas-container { width: 100vw; height: 100vh; }
+    #ui-overlay {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      pointer-events: none;
+    }
+    #controls {
+      position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+      background: rgba(20, 20, 30, 0.9); padding: 15px 25px;
+      border-radius: 8px; pointer-events: all;
+      display: flex; gap: 15px; align-items: center;
+      backdrop-filter: blur(10px);
+    }
+    #controls button {
+      background: #2a2a3a; color: #e0e0e0; border: 1px solid #4a4a5a;
+      padding: 8px 16px; border-radius: 4px; cursor: pointer;
+      font-size: 14px; transition: background 0.2s;
+    }
+    #controls button:hover { background: #3a3a4a; }
+    #controls button.active { background: #4a4a6a; border-color: #6a6a8a; }
+    #info-panel {
+      position: absolute; top: 20px; right: 20px;
+      background: rgba(20, 20, 30, 0.9); padding: 15px;
+      border-radius: 8px; pointer-events: all;
+      min-width: 200px; backdrop-filter: blur(10px);
+    }
+    #info-panel h3 { margin-bottom: 10px; color: #8a8aaa; font-size: 12px; text-transform: uppercase; }
+    #info-panel .stat { margin: 5px 0; font-size: 13px; }
+    #info-panel .stat span { color: #a0a0c0; }
+    #file-input {
+      position: absolute; top: 20px; left: 20px;
+      background: rgba(20, 20, 30, 0.9); padding: 15px;
+      border-radius: 8px; pointer-events: all;
+      backdrop-filter: blur(10px);
+    }
+    #file-input label {
+      display: block; color: #8a8aaa; font-size: 12px; text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    #file-input input[type="file"] {
+      color: #e0e0e0; font-size: 13px;
+    }
+    #show-list {
+      position: absolute; top: 110px; left: 20px;
+      background: rgba(20, 20, 30, 0.9); padding: 12px;
+      border-radius: 8px; pointer-events: all; max-width: 230px;
+      backdrop-filter: blur(10px);
+    }
+    #show-list h3 {
+      color: #8a8aaa; font-size: 12px; text-transform: uppercase;
+      margin-bottom: 8px; letter-spacing: 0.04em;
+    }
+    #show-list button {
+      display: block; width: 100%; text-align: left; margin: 4px 0;
+      background: #2a2a3a; color: #e0e0e0; border: 1px solid #4a4a5a;
+      padding: 6px 10px; border-radius: 4px; cursor: pointer;
+      font-size: 13px; transition: background 0.2s;
+    }
+    #show-list button:hover { background: #3a3a4a; }
+    #show-list button.active { background: #4a4a6a; border-color: #6a6a8a; }
+    #violation-banner {
+      position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+      background: rgba(255, 50, 50, 0.2); border: 1px solid rgba(255, 50, 50, 0.5);
+      padding: 10px 20px; border-radius: 4px; color: #ff6b6b;
+      font-size: 13px; display: none; backdrop-filter: blur(10px);
+    }
+    #violation-banner.visible { display: block; }
+    #timeline {
+      position: absolute; bottom: 110px; left: 50%; transform: translateX(-50%);
+      width: 60%; height: 6px; background: #2a2a3a;
+      border-radius: 3px; pointer-events: all; cursor: pointer;
+    }
+    #timeline-progress {
+      height: 100%; background: #6a6a8a; border-radius: 3px; width: 0%;
+    }
+    #fidelity-toggle {
+      position: absolute; top: 20px; left: 250px;
+      background: rgba(20, 20, 30, 0.9); padding: 10px 15px;
+      border-radius: 8px; pointer-events: all;
+      backdrop-filter: blur(10px);
+    }
+    #fidelity-toggle label { color: #8a8aaa; font-size: 12px; text-transform: uppercase; margin-right: 10px; }
+    #fidelity-toggle select {
+      background: #2a2a3a; color: #e0e0e0; border: 1px solid #4a4a5a;
+      padding: 5px 10px; border-radius: 4px; font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div id="canvas-container"></div>
+  <div id="ui-overlay">
+    <div id="file-input">
+      <label>Load Pattern File</label>
+      <input type="file" id="pattern-file" accept=".anim.json">
+    </div>
+    <div id="show-list">
+      <h3>Animations</h3>
+      <div id="show-buttons"></div>
+    </div>
+    <div id="fidelity-toggle">
+      <label>Fidelity:</label>
+      <select id="fidelity-select">
+        <option value="ideal">Ideal (continuous)</option>
+        <option value="wire">Wire (16-bit)</option>
+        <option value="steps">Steps (microstep)</option>
+      </select>
+    </div>
+    <div id="info-panel">
+      <h3>Pattern Info</h3>
+      <div class="stat">Grid: <span id="grid-info">-</span></div>
+      <div class="stat">Balls: <span id="ball-count">-</span></div>
+      <div class="stat">Duration: <span id="duration-info">-</span></div>
+      <div class="stat">Layer: <span id="layer-info">-</span></div>
+      <div class="stat">Bus Load: <span id="bus-load">-</span></div>
+      <div class="stat">Violations: <span id="violation-count">0</span></div>
+    </div>
+    <div id="violation-banner">
+      <span id="violation-text"></span>
+    </div>
+    <div id="timeline">
+      <div id="timeline-progress"></div>
+    </div>
+    <div id="controls">
+      <button id="play-btn" class="active">▶ Play</button>
+      <button id="pause-btn">⏸ Pause</button>
+      <button id="loop-btn" class="active">🔄 Loop</button>
+      <input type="range" id="speed-slider" min="0.1" max="3" step="0.1" value="1" style="width: 100px;">
+      <span style="font-size: 12px; color: #8a8aaa;" id="speed-label">1.0x</span>
+    </div>
+  </div>
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+    </script>
+    <script type="module" src="src/main.js"></script>
+</body>
+</html>
