@@ -268,52 +268,71 @@ returns text and links.
 **English**
 
 > I want to use the animations from
-> https://github.com/gin66/suspended-spheres. Please create a walking peak
-> running in circles as a version-1 `.anim.json`.
+> https://github.com/gin66/suspended-spheres. Design goal: a walking peak
+> running in circles.
 >
-> Use these references:
+> Follow this workflow exactly:
+>
+> 1. Understand and clarify the goal. Ask concise questions about the grid,
+>    timing, amplitude, direction, looping and the visual shape. Do not produce
+>    the final file yet.
+> 2. Develop the animation structure. List the layers and their fields (`op`,
+>    `amplitude_um`, `period_ms`, `wavelength_cols`, `phase_deg`, `axis`,
+>    `group`) and explain how they combine. Keep it inside the ordinary tier.
+> 3. Show the result in the hosted viewer and wait for my approval or revision
+>    notes. Use https://gin66.github.io/suspended-spheres/ . Give me a clickable
+>    link of the form
+>    `https://gin66.github.io/suspended-spheres/#pattern=g1.<base64url(gzip(json))>`
+>    (plain `j1.<base64url(json)>` is also accepted). If you cannot build the
+>    link, say so and give me the complete version-1 `.anim.json` in a code
+>    block. I will load it with **Load Pattern File** and confirm the preview.
+> 4. Only when I ask for the file, output the final `.anim.json` as a
+>    downloadable code block. Do not create `.hbp`; I will run `pattern_check`
+>    locally.
+>
+> References:
 > - Schema: https://github.com/gin66/suspended-spheres/blob/main/doc/motion_streaming_whitepaper.md
 >   (section 6.9)
 > - Example: https://github.com/gin66/suspended-spheres/blob/main/patterns/golden_sine.anim.json
->
-> Show it in the hosted viewer: https://gin66.github.io/suspended-spheres/
-> Give me either a clickable link of the form
-> `https://gin66.github.io/suspended-spheres/#pattern=g1.<base64url(gzip(json))>`
-> (plain `j1.<base64url(json)>` is also accepted), or the complete `.anim.json`
-> in a code block if you cannot build the link.
->
-> The viewer can also open the file with **Load Pattern File**. Do not assume
-> repository access. Keep the motion inside the ordinary tier; I will run
-> `pattern_check` locally and export the `.hbp` after the report is clean.
+> - Viewer: https://gin66.github.io/suspended-spheres/
 
 **Italiano**
 
 > Voglio usare le animazioni di
-> https://github.com/gin66/suspended-spheres. Per favore, crea un picco che
-> cammina muovendosi in cerchi come file `.anim.json` versione 1.
+> https://github.com/gin66/suspended-spheres. Obiettivo: un picco che cammina
+> muovendosi in cerchi.
 >
-> Usa questi riferimenti:
+> Segui esattamente questo flusso:
+>
+> 1. Comprendi e chiarisci l’obiettivo. Fai domande concise su griglia, tempi,
+>    ampiezza, direzione, looping e forma visiva. Non produrre ancora il file
+>    finale.
+> 2. Sviluppa la struttura dell’animazione. Elenca i layer e i loro campi (`op`,
+>    `amplitude_um`, `period_ms`, `wavelength_cols`, `phase_deg`, `axis`,
+>    `group`) e spiega come si combinano. Mantieniti nel tier ordinary.
+> 3. Mostra il risultato nel viewer ospitato e attendi la mia approvazione o le
+>    mie richieste di modifica. Usa https://gin66.github.io/suspended-spheres/ .
+>    Dammi un link cliccabile del tipo
+>    `https://gin66.github.io/suspended-spheres/#pattern=g1.<base64url(gzip(json))>`
+>    (è accettato anche `j1.<base64url(json)>`). Se non riesci a costruire il
+>    link, dillo e dammi il file `.anim.json` versione 1 completo in un blocco
+>    di codice. Lo caricherò con **Load Pattern File** e confermerò
+>    l’anteprima.
+> 4. Solo quando te lo chiedo, restituisci il file `.anim.json` finale in un
+>    blocco di codice scaricabile. Non creare `.hbp`; eseguirò `pattern_check`
+>    in locale.
+>
+> Riferimenti:
 > - Schema: https://github.com/gin66/suspended-spheres/blob/main/doc/motion_streaming_whitepaper.md
 >   (sezione 6.9)
 > - Esempio: https://github.com/gin66/suspended-spheres/blob/main/patterns/golden_sine.anim.json
->
-> Mostralo nel viewer ospitato: https://gin66.github.io/suspended-spheres/
-> Dammi un link cliccabile del tipo
-> `https://gin66.github.io/suspended-spheres/#pattern=g1.<base64url(gzip(json))>`
-> (è accettato anche `j1.<base64url(json)>` senza compressione), oppure il file
-> `.anim.json` completo in un blocco di codice se non riesci a costruire il
-> link.
->
-> Il viewer può anche aprire il file con **Load Pattern File**. Non assumere di
-> avere accesso al repository. Mantieni il movimento nel tier ordinary;
-> eseguirò `pattern_check` in locale ed esporterò `.hbp` dopo che il report è
-> pulito.
+> - Viewer: https://gin66.github.io/suspended-spheres/
 
 The preview-first request is deliberate: judge the motion before the model
-commits to the JSON. A browser model can build the `#pattern=` link using the
-format above; if it cannot encode it, ask for the `.anim.json` and open it in
-the viewer with **Load Pattern File**. The local authoring loop above remains
-the way to run `pattern_check` and export `.hbp`.
+commits to the JSON. Models that cannot encode the `#pattern=` link must use the
+JSON fallback and **Load Pattern File**; that still satisfies step 3 as long as
+the model waits for approval before emitting the final file. The local authoring
+loop above remains the way to run `pattern_check` and export `.hbp`.
 
 **Success rate varies.** Model quality, context size, language and how precisely
 the motion is described all matter. Expect several iterations: a model may
