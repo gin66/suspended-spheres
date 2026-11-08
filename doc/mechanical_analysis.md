@@ -1,7 +1,7 @@
 # Mechanical Analysis — Suspended Spheres
 
 > Physics check for the slow-motion design: force/torque budgets, motor speed,
-> thread behaviour, drum winding, and scale accuracy.
+> the sine frequency ceiling, thread behaviour, drum winding, and scale accuracy.
 >
 > **This revision supersedes the earlier 4.5 m/s free-fall analysis.** The
 > designer wants very slow, smooth, hypnotic motion; free-fall speeds and a
@@ -63,6 +63,54 @@ F_hold = m g = 0.050 × 9.81 = 0.491 N
 Downward acceleration stays below `g` even at 4 m/s², so the thread never goes
 slack; the minimum tension is `m (g − a) ≈ 0.29 N`.
 
+### 2.1 Hypnotic sine: amplitude and frequency
+
+Treat the hypnotic motion as one vertical sine. Positive is upward. Travel is
+~2 m, so a wave centred in the stroke has peak amplitude `A ≤ 1 m`
+(peak-to-peak `2A`).
+
+```
+y(t)    = A sin(2π f t)
+a_peak  = A (2π f)²
+```
+
+`FR-MOT-012` requires the thread to remain in tension: across the operating
+envelope the commanded downward acceleration stays below `g`. On this sine the
+downward peak is at the upper crest, where the tension is `m (g − a_peak)`.
+Crest tension reaches zero at `a_peak = g`, which fixes the highest frequency
+for a given amplitude. A played wave stays below that frequency.
+
+```
+f_max = (1 / 2π) √(g / A)
+A_max = g / (2π f)²
+T_min = 2π √(A / g)
+v_peak = √(A g)
+```
+
+`g = 9.81 m/s²`. Frequency scales as `1/√A`: halving the amplitude raises
+`f_max` by `√2`. Each entry below is rounded from those expressions.
+Superposed waves share the acceleration budget, so the ceiling applies to
+the sum.
+
+| Amplitude `A` | Peak-to-peak | `f_max` | `T_min` | Crest speed |
+|---------------|--------------|---------|---------|-------------|
+| 1.00 m | 2.00 m | 0.498 Hz | 2.01 s | 3.13 m/s |
+| 0.50 m | 1.00 m | 0.705 Hz | 1.42 s | 2.21 m/s |
+| 0.25 m | 0.50 m | 0.997 Hz | 1.00 s | 1.57 m/s |
+| 0.10 m | 0.20 m | 1.576 Hz | 0.63 s | 0.99 m/s |
+| 0.05 m | 0.10 m | 2.229 Hz | 0.45 s | 0.70 m/s |
+| 0.02 m | 0.04 m | 3.525 Hz | 0.28 s | 0.44 m/s |
+| 0.01 m | 0.02 m | 4.985 Hz | 0.20 s | 0.31 m/s |
+
+Replacing `g` with a design acceleration `a` multiplies every frequency by
+`√(a/g)`: ×0.639 at the optional 4 m/s², ×0.391 at the nominal 1.5 m/s².
+
+Crest speed on the `g` ceiling is `√(A g)`. At `A = 1 m` that is 3.13 m/s,
+above the §2 envelope (optional peak ≈ 0.8–1.3 m/s). For a full-stroke wave
+the speed envelope sets the frequency, and crest acceleration stays below `g`.
+The `g` ceiling is the tighter bound once `√(A g)` lies inside the envelope:
+below `A ≈ 0.17 m` at 1.3 m/s, and below `A ≈ 0.035 m` at 0.59 m/s.
+
 ---
 
 ## 3. Force and Torque Budget
@@ -77,6 +125,23 @@ slack; the minimum tension is `m (g − a) ≈ 0.29 N`.
 Even the smallest practical motor (NEMA-11, ≈ 0.06–0.2 Nm holding) has a large
 margin, and a NEMA-14 or NEMA-17 pancake has 5–10× margin. Motor selection is
 therefore driven by speed, noise, and integration, not torque.
+
+### 3.1 De-energised detent (power-off hold)
+
+Bench measurements with a 40 mm spool, motor unpowered:
+
+| Motor | Spool Ø | Holds | Does not hold | Implied detent torque |
+|-------|---------|-------|---------------|-----------------------|
+| NEMA-17 pancake | 40 mm | 22 g (0.22 N) | 30 g (0.29 N) | 4.3–5.9 mNm |
+| NEMA-17 full | 40 mm | 50 g (0.49 N); limit not tested | — | ≥ 9.8 mNm |
+
+The pancake detent is only ≈ 4–6 mNm. At the measured 22 g threshold the torque
+is ≈ 4.3 mNm, so holding the 50 g ball (0.49 N) on detent alone would need a
+spool of ≈ 18 mm diameter — well below 20 mm. The full NEMA-17 holds 50 g at
+40 mm, but its limit was not tested, so the 2× margin of `FR-MOT-008` is not
+demonstrated on detent. `FR-MOT-011` allows a de-energised descent, so the
+40 mm spool with a pancake is acceptable only where that descent is acceptable
+(or a brake is fitted).
 
 ---
 
@@ -220,6 +285,12 @@ Two-and-a-half metres of 0.5 mm thread (2 m travel plus margin):
 A single layer fits on a practical drum width, preferably with a level-wind
 (traverse) so the thread packs uniformly.
 
+**Thread guidance (lesson learned).** The thread must be constrained, not
+merely wound. On an open drum it can ride up the winding and jump off the
+spool, especially when the take-off point moves or the thread goes slack.
+Fit drum flanges and guide the thread, with a fairlead close to the drum, so
+it always leaves from a controlled point and cannot escape the winding.
+
 **Scale accuracy.** `NFR-PHYS-007` allows ≤ 50 µm of scale variation per grid
 pitch (≈ 300 mm), i.e. ≈ 0.017 %. A second layer adds one thread diameter to
 the radius — ≈ 4 % on a 25 mm drum, or ≈ 80 mm over the 2 m travel — far
@@ -261,9 +332,11 @@ There is no free-fall catch load.
 | Nominal fast speed | 0.44–0.59 m/s | 2 m in 4–5 s (ASM-015) |
 | Optional effect speed | 0.8–1.3 m/s | 2 m in 2–3 s, not essential |
 | Full-stroke time | ≈ 3.3–5 s nominal; 2–3 s optional | Most patterns much slower |
+| Sine at `a = g` | `f = (1/2π) √(g/A)` | 0.498 Hz at A = 1 m; crest tension is zero |
 | Worst motor force | ≈ 0.69 N (≈ 1.09 N equivalent with inertia) | Trivial torque |
 | Motor speed | 286–573 RPM @ 40 mm; 573–1,146 RPM @ 20 mm | Any small motor |
 | Step rate | 15.3–30.6 kstep/s @ 40 mm at 1/16 | Microstepping TBD. PIO ceiling 200 kstep/s; 2 ms chunk 64 kstep/s |
+| Power-off detent @ 40 mm | Pancake 22 g (< 30 g); full NEMA-17 ≥ 50 g | `FR-MOT-011` permits descent |
 | Thread stretch | ≈ 73 µm at 4 m/s² | Within IR-MECH-002 (100 µm) |
 | Thread strength | ≥ 5 N required; ≈ 100 N available | Large margin |
 | Air drag | ≈ 2.1 mN at 1.2 m/s | Negligible |

@@ -426,7 +426,7 @@ before using confidential material.
 |------|--------|
 | **Concept & Documentation** | ✅ Complete |
 | **Mechanical Design** | 🔄 In Progress |
-| **Controller Hardware** | Fly-Micro4 selected; desolder R39/R58 on every board. Waveshare CAN jumper set to 120 Ω; solder 120 Ω into a cable terminator |
+| **Controller Hardware** | Fly-Micro4 selected; insert J3 only on the last board (all others open, no 120 Ω). Waveshare CAN jumper set to 120 Ω; no desoldering |
 | **Show controller** | Waveshare ESP32-S3-Touch-LCD-7 selected; sources in `esp32gui/` (CAN mock until the bus is wired) |
 | **Firmware** | ⏳ Planned |
 | **Simulation** | ✅ 3D viewer uses the shared WASM core; pattern export in progress |

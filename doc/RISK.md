@@ -41,7 +41,6 @@ The cumulative acoustic and mechanical noise from 100–120 motors is still a si
 | **Dedicated stepper boards plus a few Pico 2 boards** | Significantly more work; introduces reliability concerns (loose cables, bad connections). |
 | **One custom PCB with 4/8/12 stepper drivers per board** | Best balance of integration and reliability. Reduces point-of-failure connections. |
 
-The selected node is the Mellow Fly-Micro4, a COTS 4-axis board. R39 and R58 are desoldered on every board. The two 120 Ω ends are the Waveshare CAN jumper, set to 120 Ω, and a resistor soldered into a cable terminator (`controller_analysis.md`, `esp32gui_whitepaper.md`). The custom carrier stays in that survey as the design that was not built.
 
 ### 2.2 PC Real-Time Limitation
 
@@ -112,14 +111,13 @@ At the optional 1.2 m/s tier, 21 ms of drift gives ≈ 25 mm after 5 minutes and
 | 6 | **Power supply heat dissipation** | Medium | Medium | Slow motion reduces duty; air cooling and thermal modelling of driver arrays |
 | 7 | **Current distribution across many motors** | Medium | Medium | Low-resistance bus design; voltage-drop analysis; local bulk capacitance |
 | 8 | **Module interconnect reliability** | Medium | Medium | Minimize connectors; use board-level interconnects; gold-plated contacts |
-| 9 | **ESP32 long-term stability (WiFi + FTM + stepper control)** | Medium | Medium | Watchdog management; task isolation; stress-test continuous operation with WiFi traffic and I2S DMA |
-| 10 | **X/Y pendulum swing from guide imperfections** | Low-Medium | Medium | Precision overhead guide design; transient swing modeling |
-| 11 | **Loss of inter-controller synchronization from quartz drift** | High | High | Global timebase with periodic SYNC; measure and correct drift (rest pause or clock trim); optional TCXO; verify ≤ 1 ms before each pattern |
-| 12 | **Grounding / EMI: ground loops and common-mode noise between motor power returns, controller ground, and bus reference** | High | Medium | Separate power and signal returns; single-point bonding; shielded or isolated bus; validate EMC; see `IR-ELEC-004` |
-| 13 | **Fire from an electrical fault or overheated driver array** | High | Medium | Overcurrent/short-circuit protection, thermal design, fire-retardant enclosure/cable/decorative materials; see `NFR-SAFE-010` |
-| 14 | **Position-scale error from multi-layer winding** | High | Medium | Level-wind single layer, or calibrate radius vs turns; second layer adds ≈4 % scale error (≈80 mm over the 2 m travel) vs the 50 µm/pitch limit (`NFR-PHYS-007`) |
-| 15 | **Hollow ornament detachment or cracking** | Medium | Medium | Containment (`NFR-SAFE-001`); inspect ornaments; secure the thread attachment |
-| 16 | **Step-rate ceiling at the optional 1.2 m/s tier** | Low | Low | Microstep count is TBD. Fly-Micro4 PIO ceiling is 200 kstep/s (80 ticks at 16 MHz). In the 1/16 worked case a 40 mm drum needs 30.6 kstep/s at 1.2 m/s (6.5×). A 2 ms FasTimed chunk caps playback at 64 kstep/s (2.1×). The 40 kHz I2S figure was the superseded ESP32 path. At 1/8, 30–40 mm fails the 50 µm resolution |
+| 9 | **X/Y pendulum swing from guide imperfections** | Low-Medium | Medium | Precision overhead guide design; transient swing modeling |
+| 10 | **Loss of inter-controller synchronization from quartz drift** | High | High | Global timebase with periodic SYNC; measure and correct drift (rest pause or clock trim); optional TCXO; verify ≤ 1 ms before each pattern |
+| 11 | **Grounding / EMI: ground loops and common-mode noise between motor power returns, controller ground, and bus reference** | High | Medium | Separate power and signal returns; single-point bonding; shielded or isolated bus; validate EMC; see `IR-ELEC-004` |
+| 12 | **Fire from an electrical fault or overheated driver array** | High | Medium | Overcurrent/short-circuit protection, thermal design, fire-retardant enclosure/cable/decorative materials; see `NFR-SAFE-010` |
+| 13 | **Position-scale error from multi-layer winding** | High | Medium | Level-wind single layer, or calibrate radius vs turns; second layer adds ≈4 % scale error (≈80 mm over the 2 m travel) vs the 50 µm/pitch limit (`NFR-PHYS-007`) |
+| 14 | **Hollow ornament detachment or cracking** | Medium | Medium | Containment (`NFR-SAFE-001`); inspect ornaments; secure the thread attachment |
+| 15 | **Step-rate ceiling at the optional 1.2 m/s tier** | Low | Low | Microstep count is TBD. Fly-Micro4 PIO ceiling is 200 kstep/s (80 ticks at 16 MHz). In the 1/16 worked case a 40 mm drum needs 30.6 kstep/s at 1.2 m/s (6.5×). A 2 ms FasTimed chunk caps playback at 64 kstep/s (2.1×). The 40 kHz I2S figure was the superseded ESP32 path. At 1/8, 30–40 mm fails the 50 µm resolution |
 
 
 ---

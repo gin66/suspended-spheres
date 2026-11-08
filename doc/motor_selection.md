@@ -69,7 +69,9 @@ rejected. The motors that remain have the spool on the shaft.
 
 `FR-MOT-011` allows balls to be either held by de-energised detent torque or
 to descend to the lower limit, so detent is a preference, not a hard
-pass/fail.
+pass/fail. Measured detent on a 40 mm spool (`mechanical_analysis.md` §3.1):
+the NEMA-17 pancake holds only 22 g (not 30 g), the full NEMA-17 holds 50 g
+with the limit untested.
 
 ### 1.5 Noise
 

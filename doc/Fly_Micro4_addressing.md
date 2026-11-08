@@ -1,12 +1,11 @@
 # Fly-Micro4 — node identity and CAN addressing
 
-> The installation node is the Mellow Fly-Micro4 V1.0. The selection, the
-> termination rework and the physical-layer limits are in
-> `controller_analysis.md`: R39 and R58 are desoldered from every board, and
-> the 120 Ω ends are the Waveshare CAN jumper, set to 120 Ω, and a resistor
-> soldered into a cable terminator. This file owns board identity, discovery, the
-> volatile board ID, and CAN-ID allocation. The host owns the map from a
-> board axis to a grid position. A board does not.
+> The installation node is the Mellow Fly-Micro4 V1.0. Selection, termination and
+> physical-layer limits are in `controller_analysis.md`: termination is
+> jumper-selectable — J3 inserted only on the last board, open on every other
+> node. R39/R58 stay fitted; no desoldering is needed. This file owns board
+> identity, discovery, the volatile board ID, and CAN-ID allocation. The host
+> owns the map from a board axis to a grid position. A board does not.
 >
 > Motion payloads, sample timing and the bus budget stay in
 > `motion_streaming_whitepaper.md`. Do not copy the ID layout back into that

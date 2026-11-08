@@ -176,11 +176,12 @@ The installation bitrate is 1 Mbit/s, the rate in `controller_analysis.md`.
 The TJA1051 is a high-speed transceiver and is specified for that rate. It
 has not been measured yet on the Fly-Micro4 bus.
 
-The bus has two 120 Ω ends, and neither is a Fly-Micro4. R39 and R58 are
-desoldered from every Fly board (`controller_analysis.md`). C63 stays, and
-J3 stays fitted. This panel needs no soldering for termination: the onboard
-CAN jumper is set to 120 Ω. The other position, NC, disconnects that
-resistor. The far end is a 120 Ω resistor soldered into a cable terminator.
+The bus has two 120 Ω ends: this panel and the last Fly-Micro4. This panel needs
+no soldering for termination — its onboard CAN jumper is set to 120 Ω; the NC
+position disconnects that resistor. The far end is the last Fly-Micro4 with
+termination jumper J3 inserted. Every other Fly-Micro4 leaves J3 open and
+presents no 120 Ω, and R39/R58 stay fitted — no desoldering
+(`controller_analysis.md`).
 
 The panel's CAN connector is CANH/CANL. The nodes already share one 24 V
 star ground; the panel ground joins that same star.
