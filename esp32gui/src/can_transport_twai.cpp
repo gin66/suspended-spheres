@@ -4,6 +4,7 @@
 
 #include <Arduino.h>
 #include <driver/twai.h>
+#include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -40,7 +41,15 @@ void refresh_status() {
 }
 
 void can_rx_task(void *) {
-  while (s_running) {
+  /* The task outlives a stop/start cycle. It only touches TWAI while
+   * s_running is true, so can_transport_stop() can uninstall the driver
+   * without deleting and later recreating a task (heap is tight after the
+   * LVGL UI is built). */
+  while (true) {
+    if (!s_running) {
+      vTaskDelay(pdMS_TO_TICKS(20));
+      continue;
+    }
     twai_message_t msg;
     if (twai_receive(&msg, pdMS_TO_TICKS(50)) == ESP_OK) {
       if (!msg.extd && !msg.rtr && msg.identifier <= 0x7FFu) {
@@ -58,7 +67,7 @@ void can_rx_task(void *) {
       refresh_status();
       /* Manual bus-off recovery. Controller_analysis.md asks for detection and
        * a hold, not silent retries forever. */
-      if (s_stats.bus_off &&
+      if (s_running && s_stats.bus_off &&
           (uint32_t)(millis() - s_last_recovery_ms) > 1000u) {
         s_last_recovery_ms = millis();
         SS_LOGW("can", "bus-off; starting recovery");
@@ -71,8 +80,6 @@ void can_rx_task(void *) {
       }
     }
   }
-  s_task = nullptr;
-  vTaskDelete(nullptr);
 }
 
 }  // namespace
@@ -120,14 +127,20 @@ bool can_transport_start(uint32_t bitrate, ss_can_rx_fn cb, void *ctx) {
   s_running = true;
   s_stats.running = true;
   s_last_recovery_ms = 0;
-  if (xTaskCreatePinnedToCore(can_rx_task, "can_rx", 4096, nullptr, 5,
-                              &s_task, 0) != pdPASS) {
-    SS_LOGE("can", "CAN RX task creation failed");
-    s_running = false;
-    s_stats.running = false;
-    twai_stop();
-    twai_driver_uninstall();
-    return false;
+  if (s_task == nullptr) {
+    SS_LOGI("can", "starting RX task: internal free=%u largest=%u",
+            (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+    if (xTaskCreatePinnedToCore(can_rx_task, "can_rx", 4096, nullptr, 5,
+                                &s_task, 0) != pdPASS) {
+      SS_LOGE("can", "CAN RX task creation failed");
+      s_running = false;
+      s_stats.running = false;
+      s_task = nullptr;
+      twai_stop();
+      twai_driver_uninstall();
+      return false;
+    }
   }
 
   SS_LOGI("can", "TWAI started at 1 Mbit/s (TX=%d RX=%d)",
@@ -139,7 +152,7 @@ void can_transport_stop(void) {
   if (!s_running) return;
   s_running = false;
   s_stats.running = false;
-  vTaskDelay(pdMS_TO_TICKS(80));
+  vTaskDelay(pdMS_TO_TICKS(150));
   twai_stop();
   twai_driver_uninstall();
   board_ws7_set_usb_mode(true);

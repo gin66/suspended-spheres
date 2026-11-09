@@ -406,6 +406,11 @@ void setup() {
   board_ws7_set_usb_mode(true);
   board_ws7_backlight(false);
 
+  /* Start CAN before LVGL builds the widget tree. The persistent RX task
+   * needs a 4 KiB stack, and internal heap is fragmented after ui_init(). */
+  action_can_start();
+  app_watchdog_set_can_expected(!can_transport_is_mock());
+
   WATCH(2);
   board_ws7_panel_reset();
   const bool touch_ok = (board_ws7_touch_init() == ESP_OK);
@@ -463,8 +468,6 @@ void setup() {
     board_ws7_backlight(true);
   }
 
-  action_can_start();
-  app_watchdog_set_can_expected(!can_transport_is_mock());
   WATCH(3);
   SS_LOGI("boot", "ready: %s transport, %d position capacity",
           can_transport_is_mock() ? "mock" : "TWAI",

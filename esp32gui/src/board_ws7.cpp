@@ -42,6 +42,10 @@ static const char* TAG __attribute__((unused)) = "board_ws7";
 #ifndef BOARD_WS7_PCLK_IDLE_HIGH
 #define BOARD_WS7_PCLK_IDLE_HIGH 1
 #endif
+#ifndef BOARD_WS7_PCLK_ACTIVE_NEG
+/* Waveshare's reference config for this panel samples on the falling edge. */
+#define BOARD_WS7_PCLK_ACTIVE_NEG 1
+#endif
 #ifndef BOARD_WS7_PCLK_HZ
 #define BOARD_WS7_PCLK_HZ (16 * 1000 * 1000)
 #endif
@@ -321,7 +325,7 @@ static esp_err_t ws7_rgb_panel_create(void) {
   panel_config.timings.flags.hsync_idle_low = 0;  // active high
   panel_config.timings.flags.vsync_idle_low = 0;  // active high
   panel_config.timings.flags.de_idle_high = 0;
-  panel_config.timings.flags.pclk_active_neg = 0;
+  panel_config.timings.flags.pclk_active_neg = BOARD_WS7_PCLK_ACTIVE_NEG;
   panel_config.timings.flags.pclk_idle_high = BOARD_WS7_PCLK_IDLE_HIGH;
   panel_config.data_width = 16;
 #if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5, 0, 0)
@@ -382,6 +386,9 @@ static esp_err_t ws7_rgb_panel_create(void) {
   }
 
   ESP_LOGI(TAG, "RGB panel initialized successfully");
+  SS_LOGI("ws7", "RGB panel ready: %u Hz, pclk_active_neg=%d, bounce %d px",
+          (unsigned)BOARD_WS7_PCLK_HZ, BOARD_WS7_PCLK_ACTIVE_NEG,
+          (int)(BOARD_WS7_SCREEN_WIDTH * BOARD_WS7_BOUNCE_LINES));
   return ESP_OK;
 
 }
