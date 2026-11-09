@@ -55,9 +55,10 @@ review artifacts for screen changes.
 ## Operator flow
 
 1. **Nodes** — the panel sends `ASK` (type 11) every 5 s. Each unidentified
-   board answers `DISC` (type 8) with its 64-bit QSPI flash ID. The master
-   answers `ASSIGN` (type 10) with the board ID. The list shows the flash ID,
-   board ID, online state and how many positions each board owns.
+   board answers `DISC` (type 8) with its 6-byte UUID and two zero bytes.
+   The master answers `ASSIGN` (type 10) with the board ID. The list shows
+   the UUID, board ID, online state and how many positions each board owns.
+   The running image still stores an 8-byte id (`katapult_whitepaper.md` §9).
 2. **Motor** — select a board, select axis 0–3, then `HOME`, `UP`, `DOWN` or
    `STOP`. `UP`/`DOWN` jog 10 mm at the configured test speed. Axes that
    already own a position are green. Tap a cell in the scrolling grid to pick
@@ -66,7 +67,7 @@ review artifacts for screen changes.
    a fault, dark = free. Row 0 is the back row, column 0 is the left column.
 4. **Config** — grid size (10 × 10 or 10 × 12), test-run drop/speed/gap,
    serpentine, and `SAVE TO SPIFFS`. The mapping and
-   `(flash_id → board_id)` map persist in `/config.bin`.
+   `(uuid → board_id)` map persist in `/config.bin`.
 5. **Animations** — lists HBP2 files with name, size, duration and validity;
    tap a row to select it, `LOAD SELECTED` loads it. SD enumeration and HBP2
    load/playback are still backend work; the firmware reports that state.
@@ -82,7 +83,8 @@ review artifacts for screen changes.
 8. **Upgrade** — `QUERY ALL` sends a `VERSION_REQ` (type 12) to every board;
    each answer (`VERSION_RSP`, type 13) fills the board's software version.
    `UPGRADE SELECTED` is present but reports that the CAN transfer is not
-   implemented in the Fly-Micro4 firmware yet.
+   implemented in the Fly-Micro4 firmware yet. The procedure is
+   `../doc/katapult_whitepaper.md`: one board at a time.
 9. **Settings** — read-only WiFi/SSID/IP/RSSI and CAN state, firmware, boot
    count, uptime, capacity and the CH9102 service path. This build has no
    WiFi stack, so the network fields report `not compiled`.
@@ -102,7 +104,7 @@ HOME (type 5), field = board 0–29:
   [1..7] zero
 
 COMMAND (type 4), field = board 0–29 or 127:
-  [0] op: 1 = UP, 2 = DOWN, 3 = STOP
+  [0] op: 1 = UP, 2 = DOWN, 3 = STOP, 4 = ENTER_BOOTLOADER
   [1] axis mask
   [2..3] u16 distance_mm, little-endian
   [4..5] u16 speed_mm_s, little-endian
@@ -110,7 +112,8 @@ COMMAND (type 4), field = board 0–29 or 127:
   [7] zero
 ```
 
-`ASSIGN` (type 10) carries the 64-bit flash ID and the board ID in the field.
+`ENTER_BOOTLOADER` goes to one board ID. `ASSIGN` (type 10) carries the
+6-byte UUID plus two zero bytes, and the board ID in the field.
 Grid positions are host-side only; the board never learns one.
 
 ## Files

@@ -44,6 +44,7 @@ All technical Markdown lives in [`doc/`](doc/). Only this file and [`AGENTS.md`]
 | [**ESP32 panel white paper**](doc/esp32gui_whitepaper.md) | Waveshare 7" ESP32-S3 show controller and LVGL operator UI; sources in `esp32gui/` |
 | [**Motion streaming host TDD**](doc/motion_streaming_tdd.md) | Test-first plan for the motion core and the designer loop, with no hardware |
 | [**Fly-Micro4 addressing**](doc/Fly_Micro4_addressing.md) | Node identity, commissioning and CAN-ID allocation for the selected board |
+| [**Katapult white paper**](doc/katapult_whitepaper.md) | CAN bootloader build, BOOTSEL recovery, and in-place update of the Fly-Micro4 |
 | [**Risk Register**](doc/RISK.md) | Dynamic loads, noise, architecture risks, and mitigations |
 | [**Fly-Micro4 GPIO Map**](boards/Fly-Micro4/Fly-Micro4.h) | RP2040 pin assignments for the motion controller board |
 | [**AGENTS.md**](AGENTS.md) | Mission and development-environment notes |
@@ -87,6 +88,7 @@ Suspended_Spheres/
     ├── esp32gui_whitepaper.md     # Waveshare panel: show controller and UI
     ├── motion_streaming_tdd.md    # Host tests that need no hardware
     ├── Fly_Micro4_addressing.md   # Node identity and CAN-ID allocation
+    ├── katapult_whitepaper.md     # CAN bootloader and in-place firmware update
     ├── BOM_summary.md
     ├── BOM_priced.csv
     └── RISK.md

@@ -60,7 +60,10 @@ is 50 ms.
 - Sync frame, 10 Hz status frame, and the version-1 `.anim.json` schema,
   including `patterns/golden_sine.anim.json`: whitepaper §4.5 and §6.9.
 - `ASK`, `DISC`, and `ASSIGN`: `Fly_Micro4_addressing.md` §3. The board ID
-  is volatile. The host map `(flash_id, axis) → position` is not on the wire.
+  is volatile. The host map `(uuid, axis) → position` is not on the wire.
+  The checks below still lock the previous 8-byte flash ID and the motor
+  field `board_id × 4 + axis` with no hole at 63. `katapult_whitepaper.md`
+  §9 records that the host tests have not moved.
 - The other clean cadences and the violation case are built in the test from
   that golden, as §6.9 describes.
 - `tests/fixtures/write_sine.py` is the generator in A8. The checker never

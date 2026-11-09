@@ -252,7 +252,7 @@ to a PNG before it is treated as done; the PNGs live in
 | Show | Pattern name, play / stop, elapsed time, bus state, discovered/assigned/online counts, unassigned steppers, test-run state |
 | Animations | HBP2 files on the card: name, size, duration, validity; refresh, select and load |
 | Grid | One cell per ball: assigned, free, fault; click a cell to select its board |
-| Nodes | Discovered boards by 64-bit flash ID, board ID, online state, assigned positions |
+| Nodes | Discovered boards by 6-byte UUID, board ID, online state, assigned positions |
 | Motor | Selected board and axis (assigned axes are green); HOME, UP, DOWN, STOP; tap a grid cell to choose the position, then assign/unassign |
 | Config | Grid size, test-run drop/speed/gap, serpentine, save/reset/clear, SPIFFS state |
 | Log | Recent PSRAM log ring, boot count, last watchpoint, last safe hold |
@@ -272,9 +272,10 @@ version traffic need headroom on top. Only received frames are counted.
 
 `QUERY ALL` sends `VERSION_REQ` (type 12) to field 127. Boards answer with
 `VERSION_RSP` (type 13) and the panel keeps the last version per board; see
-`motion_streaming_whitepaper.md` §4.5. The CAN firmware-transfer path is not
-implemented on the Fly-Micro4 yet, so `UPGRADE SELECTED` currently reports
-that the transfer is pending and makes no bus transaction.
+`motion_streaming_whitepaper.md` §4.5. In-place update is
+`katapult_whitepaper.md`: one board at a time, over Katapult. The CAN
+transfer is not implemented on the Fly-Micro4 yet, so `UPGRADE SELECTED`
+currently reports that the transfer is pending and makes no bus transaction.
 
 This build has no WiFi stack. The Settings network fields are fed from the
 snapshot and report `not compiled` until a net-status source exists; the
@@ -283,8 +284,9 @@ short and the log is English-only.
 
 Commissioning text uses the rules in `Fly_Micro4_addressing.md`. The panel
 is the master that sends ASK and ASSIGN. It stores the host map
-`(flash_id, axis) → position`. The nodes still do not know the grid
-position.
+`(uuid, axis) → position`. The nodes still do not know the grid
+position. The checked-in image still persists an 8-byte id; the move to the
+6-byte UUID is `katapult_whitepaper.md` §9.
 
 The screen flows are in §9.
 
@@ -307,15 +309,15 @@ The screen flows are in §9.
 ### 9.1 Workflow
 
 1. **Discover.** The master sends `ASK` (type 11, field 0) every 5 s. A board
-   without a board ID answers `DISC` (type 8, field 0) with its 64-bit QSPI
-   flash ID. The master sends `ASSIGN` (type 10) with the board ID in the
-   field and the flash ID in the payload. A known flash ID keeps the board ID
-   it had in the host map. This is `Fly_Micro4_addressing.md` §3, unchanged.
+   without a board ID answers `DISC` (type 8, field 0) with its 6-byte UUID
+   and two zero bytes. The master sends `ASSIGN` (type 10) with the board ID
+   in the field and that same payload. A known UUID keeps the board ID it
+   had in the host map. This is `Fly_Micro4_addressing.md` §3.
 2. **Assign steppers.** The Nodes list shows every discovered board, its
    board ID and how many positions it owns. The Motor screen selects one
    board and one local axis (0–3) and assigns it to a grid position. The map
    is one-to-one: assigning a position removes the position's previous owner
-   and any previous position of the same `(flash_id, axis)`.
+   and any previous position of the same `(uuid, axis)`.
 3. **Jog and home.** The Motor screen sends `HOME` (type 5) or `COMMAND`
    (type 4) with a 10 mm jog at the configured test speed. These are
    commissioning moves, not playback. The node does not use the cubic
@@ -327,12 +329,12 @@ The screen flows are in §9.
    `test_step_delay_ms`. The default is 100 mm at 20 mm/s with a 300 ms gap.
    The run refuses to start if a position has no live board.
 5. **Save.** `SAVE TO SPIFFS` writes the grid size, the position map, the
-   `(flash_id → board_id)` map and the test parameters to `/config.bin`.
+   `(uuid → board_id)` map and the test parameters to `/config.bin`.
 
 The grid is row-major with **row 0 = back** and **column 0 = left**. Position
 `p = row × cols + column`. The Fly-Micro4 never learns `p`; it only sees the
-motor field `board_id × 4 + axis` on motion frames and its board ID on the
-housekeeping frames.
+motor field from `Fly_Micro4_addressing.md` §2 on motion frames and its
+board ID on the housekeeping frames.
 
 ### 9.2 Persistent configuration
 
@@ -343,8 +345,8 @@ housekeeping frames.
 | `grid_cols`, `grid_rows` | 10 × 10 or 10 × 12 in normal use (`1..12` accepted) |
 | `test_drop_mm`, `test_speed_mm_s`, `test_step_delay_ms`, `test_serpentine` | Commissioning cascade |
 | `brightness` | 10–100 % (reserved; CH422G backlight is on/off today) |
-| `positions[120]` | `assigned`, `flash_id`, `axis` per grid position |
-| `boards[30]` | `flash_id → board_id`, so a returning board keeps its motor fields |
+| `positions[120]` | `assigned`, 6-byte `uuid`, `axis` per grid position |
+| `boards[30]` | `uuid → board_id`, so a returning board keeps its motor fields |
 
 A missing or invalid file writes defaults: 10 × 12, 100 mm, 20 mm/s, 300 ms,
 serpentine on. The HBP2 playback file remains read-only on SD and is not part
@@ -364,13 +366,17 @@ HOME (type 5), field = board 0–29, exactly 8 bytes:
   [1..7]   zero
 
 COMMAND (type 4), field = board 0–29 or 127, exactly 8 bytes:
-  [0]      op: 1 = UP, 2 = DOWN, 3 = STOP
+  [0]      op: 1 = UP, 2 = DOWN, 3 = STOP, 4 = ENTER_BOOTLOADER
   [1]      axis mask, bits 0–3
   [2..3]   u16 distance_mm, little-endian
   [4..5]   u16 speed_mm_s, little-endian
   [6]      sequence, wraps at 256
   [7]      zero
 ```
+
+`ENTER_BOOTLOADER` is sent to one board ID, never to field 127. The distance
+and speed bytes are zero. It does not jog: the speed and distance checks
+apply to opcodes 1 and 2. The handler is `katapult_whitepaper.md` §6.2.
 
 `STOP` with field 127 and mask `0x0F` is the operational stop-all. It is not
 the hardwired E-stop of `FR-MOT-011`. A node must reject an axis mask outside
