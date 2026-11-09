@@ -248,6 +248,20 @@ The drivers sit on the column board and are not network nodes. Only the ESP32 is
 
 **Recommendation:** **TMC5160** for production. It provides StallGuard2, an on-driver ramp, and generates the step edges locally. TMC2209 is the cheaper quiet alternative where its step/dir rate is adequate.
 
+### 6.1 TMC2209 current-sense mode (do not enable in the wrong mode)
+
+The TMC2209 can measure coil current either across external sense resistors or across its own RDSon. `GCONF.internal_Rsense` (bit 1) selects the mode; its reset default is the OTP bit `otp0.6` (`0` = external sense, `1` = internal RDSon). OTP bits are factory-clear, and programming can only set a bit, never clear it.
+
+| Mode | `BRA` / `BRB` (QFN-28: 23 / 27) | `VREF` (17) | `internal_Rsense` |
+|------|----------------------------------|-------------|-------------------|
+| External sense | One resistor per pin to GND: `0.110 Ω` (Fly-Micro4), `0.47 Ω` (carrier) | Analog current reference | `0` — **selected** |
+| Internal RDSon | Tied directly to GND | `RREF` from `5VOUT` (8) to VREF, `2.2 µF` VREF→GND | `1` |
+
+- **Decision:** both boards fit external sense resistors, so the driver stays in external mode. Forcing `internal_Rsense = 1` on them would drive VREF to GND internally and expect an `RREF` path they do not have, so the coil current would be wrong. Do not program `otp0.6` on the Fly-Micro4 or the carrier: OTP is irreversible, and the external resistors are the chosen current path.
+- **Firmware guarantee:** before the first enable, drive every `ENN` high (disabled) and, over the TMC UART, read `GCONF` and `OTP_READ`, force `GCONF.1 = 0`, write it back and require the read-back to match; require `OTP_READ` bit 6 = 0. Only then write the chopper/current registers, verify them, and pull `ENN` low. Repeat every boot; never rely on the OTP default.
+
+The datasheet's "set `otp_internalRsense = 1` before enabling the driver" note (§3.2, Rev. 1.09) applies only to the resistor-less RDSon circuit; it must not be applied to these boards.
+
 ---
 
 ## 7. Per-Controller Block Diagram (ESP32-S3, WiFi)
