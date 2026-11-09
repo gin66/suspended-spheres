@@ -22,6 +22,7 @@ enum Type : uint8_t {
     kAsk = 11,
     kVersionReq = 12,
     kVersionRsp = 13,
+    kHealth = 14,
 };
 
 struct Frame {
@@ -41,5 +42,12 @@ void begin();
 bool ready();
 bool poll(Frame* out);
 Stats stats();
+
+// Discovery state and transmit. board_id is -1 until ASSIGN matches this
+// board's flash id. tick() services the delayed DISC advertisement.
+bool assigned();
+int assigned_board_id();
+bool send(uint16_t id, const uint8_t data[8], uint8_t dlc);
+void tick();
 
 }  // namespace can_node

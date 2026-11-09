@@ -65,7 +65,8 @@ int mc_um_in_range(int32_t um);
  *   type 11    ASK           field = 0               (I5)
  *   type 12    VERSION_REQ   field = board 0…29 or 127
  *   type 13    VERSION_RSP   field = board 0…29
- *   type 14–15 reserved       rejected
+ *   type 14    HEALTH        field = board 0…29
+ *   type 15    reserved       rejected
  */
 int mc_id_make(int field, int type);
 
@@ -75,7 +76,7 @@ int mc_id_field(int id);   /* 0…127 for any id ≤ 0x7FF */
 int mc_id_type(int id);    /* 0…15 for any id ≤ 0x7FF */
 
 /* Entity decode (I7): the field is a motor for type 0, a board for
- * types 3–7 and 10. The other kinds return -1. */
+ * types 3–7, 10 and 12–14. The other kinds return -1. */
 int mc_id_motor(int id);
 int mc_id_board(int id);
 int mc_id_node(int id);    /* legacy alias for mc_id_board */
@@ -209,6 +210,34 @@ typedef struct {
 int mc_pack_version_req(uint8_t buf[8]);
 int mc_pack_version_rsp(const mc_version_t *v, uint8_t buf[8]);
 int mc_unpack_version_rsp(const uint8_t buf[8], mc_version_t *v);
+
+/* Health / temperature frame, type 14, exactly 8 bytes, little-endian:
+ *   [0] mcu_temp_c (s8) [1] otpw_mask low nibble | ot_mask high nibble
+ *   [2] diag_mask low nibble [3] ntc_t0_c (s8) [4] ntc_bed_c (s8)
+ *   [5] valid_mask [6] seq [7] reserved (0)
+ * The frame is periodic telemetry, not the fault path. */
+#define MC_TYPE_HEALTH 14
+
+#define MC_HEALTH_VALID_MCU        (1u << 0)
+#define MC_HEALTH_VALID_NTC_T0     (1u << 1)
+#define MC_HEALTH_VALID_NTC_BED    (1u << 2)
+#define MC_HEALTH_VALID_DRV_STATUS (1u << 3)
+
+#define MC_HEALTH_DRIVERS 4
+
+typedef struct {
+    int8_t  mcu_temp_c;
+    uint8_t otpw_mask;    /* bits 0…3, driver pre-warning */
+    uint8_t ot_mask;      /* bits 0…3, driver shutdown */
+    uint8_t diag_mask;    /* bits 0…3, 1 = DIAG asserted */
+    int8_t  ntc_t0_c;
+    int8_t  ntc_bed_c;
+    uint8_t valid_mask;
+    uint8_t seq;
+} mc_health_t;
+
+int mc_pack_health(const mc_health_t *h, uint8_t buf[8]);
+int mc_unpack_health(const uint8_t buf[8], mc_health_t *h);
 
 /* DISC and ASSIGN carry the 64-bit flash ID; ASK is eight zero bytes. */
 int mc_pack_flash_id(const uint8_t flash_id[8], uint8_t buf[8]);

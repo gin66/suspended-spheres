@@ -1,9 +1,9 @@
 # Memory map — Waveshare 7" show controller
 
-Measured from the `esp32usb` build on 2026-11-03, after the CAN scope and
-node-firmware screens. The numbers are link-time figures; runtime heap and
-task stacks are lower because LVGL and the CAN consumer allocate from the
-remaining internal RAM.
+Measured from the `esp32usb` build on 2026-11-09, after the CAN scope,
+node-firmware screens and the type-14 health telemetry. The numbers are
+link-time figures; runtime heap and task stacks are lower because LVGL and the
+CAN consumer allocate from the remaining internal RAM.
 
 Regenerate after a build:
 
@@ -75,11 +75,11 @@ The largest internal-RAM objects in this build:
 |--------|-------|-------|
 | `s_draw_buf` | 32 000 | LVGL partial RGB565 draw buffer, 20 lines |
 | `s_can_buf` | 24 576 | CAN scope text snapshot, 256 × 96 B |
-| `s_snapshot` | 16 708 | UI snapshot, including 256 CAN rows |
+| `s_snapshot` | 18 952 | UI snapshot, including 256 CAN rows and node health |
 | CAN monitor table | 14 336 | 256 × 56 B identifier rows |
 | CAN snapshot scratch | 14 336 | 256 × 56 B copy before the UI snapshot |
+| Commission node registry | 2 640 | 30 nodes, including health |
 | CAN monitor ring | 2 560 | 128 queued RX frames |
-| Commission node registry | 2 160 | 30 nodes |
 | SPIFFS config | 1 490 | `/config.bin` |
 | Config test order | 480 | 120 positions |
 

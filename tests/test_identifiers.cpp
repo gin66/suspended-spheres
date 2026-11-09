@@ -14,10 +14,10 @@
 /* I1 — id construction and the 0…0x7FF domain. */
 static int test_i1_make_and_range(void) {
     /* Field 0 is legal for motor 0 and for the system/broadcast types. */
-    for (int type : {0, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13})
+    for (int type : {0, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14})
         ASSERT(mc_id_make(0, type) == type);
     /* reserved types and motion fields above the motor range are rejected */
-    for (int type : {1, 9, 14, 15})
+    for (int type : {1, 9, 15})
         ASSERT(mc_id_make(0, type) == -1);
 
     ASSERT(mc_id_make(5, 0) == 80);          /* (5<<4)|0 */
@@ -90,7 +90,8 @@ static int test_i5_commissioning_types(void) {
     return 0;
 }
 
-/* I6 — types 12 and 13 carry board 0…29 or 127; 14–15 are reserved. */
+/* I6 — types 12 and 13 carry board 0…29 or 127; type 14 carries board
+ * 0…29; type 15 is reserved. */
 static int test_i6_reserved_types(void) {
     for (int type : {MC_TYPE_VERSION_REQ, MC_TYPE_VERSION_RSP}) {
         ASSERT(mc_id_valid(mc_id_make(0, type)) == 1);
@@ -99,10 +100,13 @@ static int test_i6_reserved_types(void) {
         ASSERT(mc_id_make(30, type) == -1);
         ASSERT(mc_id_make(126, type) == -1);
     }
-    for (int type = 14; type <= 15; ++type) {
-        ASSERT(mc_id_make(0, type) == -1);
-        ASSERT(mc_id_make(5, type) == -1);
-    }
+    ASSERT(mc_id_valid(mc_id_make(0, MC_TYPE_HEALTH)) == 1);
+    ASSERT(mc_id_valid(mc_id_make(29, MC_TYPE_HEALTH)) == 1);
+    ASSERT(mc_id_make(30, MC_TYPE_HEALTH) == -1);
+    ASSERT(mc_id_make(126, MC_TYPE_HEALTH) == -1);
+    ASSERT(mc_id_make(127, MC_TYPE_HEALTH) == -1);
+    ASSERT(mc_id_make(0, 15) == -1);
+    ASSERT(mc_id_make(5, 15) == -1);
     return 0;
 }
 
@@ -123,6 +127,7 @@ static int test_i7_decoder_entities(void) {
     ASSERT(mc_id_board(mc_id_make(127, 4)) == 127);
     ASSERT(mc_id_board(mc_id_make(5, 10)) == 5);
     ASSERT(mc_id_board(mc_id_make(5, MC_TYPE_VERSION_RSP)) == 5);
+    ASSERT(mc_id_board(mc_id_make(5, MC_TYPE_HEALTH)) == 5);
     ASSERT(mc_id_board(motor_id) == -1);
     ASSERT(mc_id_board(mc_id_make(5, 9)) == -1);
     ASSERT(mc_id_node(board_id) == 5);
@@ -179,6 +184,9 @@ static int test_i9_acceptance(void) {
     ASSERT(mc_board_accepts_id(board, mc_id_make(board, 12)) == 1);
     ASSERT(mc_board_accepts_id(board, mc_id_make(127, 12)) == 1);
     ASSERT(mc_board_accepts_id(board, mc_id_make(board + 1, 12)) == 0);
+
+    /* Type 14 is node → master telemetry; a board ignores received frames. */
+    ASSERT(mc_board_accepts_id(board, mc_id_make(board, MC_TYPE_HEALTH)) == 0);
 
     ASSERT(mc_board_accepts_id(board, 0x800) == 0);
     ASSERT(mc_board_accepts_id(board, mc_id_make(5, 1)) == 0);

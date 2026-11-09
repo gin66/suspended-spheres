@@ -246,6 +246,10 @@ Whitepaper §4.2, §4.3, §4.5. Addressing §3.
 - [x] **P11** `VERSION_REQ` is 8 zero bytes. `VERSION_RSP` carries
   `major, minor, patch, flags, build_u32` in the whitepaper §4.5 layout,
   little-endian; pack and unpack are inverses.
+- [x] **P12** The type-14 `HEALTH` payload is exactly 8 bytes: signed MCU
+  temperature, `OTPW`/`OT` driver masks, DIAG mask, optional NTC
+  temperatures, validity mask and sequence counter. Pack and unpack are
+  inverses; field 127 is not a valid health identifier.
 
 ---
 

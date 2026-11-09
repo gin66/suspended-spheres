@@ -83,7 +83,9 @@ int mc_id_make(int field, int type) {
     case 13:  /* VERSION_RSP: board 0…29 */
         return (field <= 29 || field == MC_BOARD_ALL)
                    ? ((field << 4) | type) : -1;
-    default:  /* types 14–15 reserved */
+    case 14:  /* HEALTH: board 0…29; 127 is not valid */
+        return (field <= 29) ? ((field << 4) | type) : -1;
+    default:  /* type 15 reserved */
         return -1;
     }
 }
@@ -120,7 +122,7 @@ int mc_id_board(int id) {
         return -1;
     int type = mc_id_type(id);
     if ((type >= 3 && type <= 7) || type == 10 ||
-        (type >= 12 && type <= 13))
+        (type >= 12 && type <= 14))
         return mc_id_field(id);
     return -1;
 }
@@ -351,6 +353,37 @@ int mc_unpack_version_rsp(const uint8_t buf[8], mc_version_t *v) {
     tmp.build = (uint32_t)buf[4] | ((uint32_t)buf[5] << 8) |
                 ((uint32_t)buf[6] << 16) | ((uint32_t)buf[7] << 24);
     *v = tmp;
+    return 0;
+}
+
+int mc_pack_health(const mc_health_t *h, uint8_t buf[8]) {
+    if (h == 0 || buf == 0)
+        return -1;
+    buf[0] = (uint8_t)h->mcu_temp_c;
+    buf[1] = (uint8_t)((h->otpw_mask & 0x0Fu) |
+                       ((h->ot_mask & 0x0Fu) << 4));
+    buf[2] = (uint8_t)(h->diag_mask & 0x0Fu);
+    buf[3] = (uint8_t)h->ntc_t0_c;
+    buf[4] = (uint8_t)h->ntc_bed_c;
+    buf[5] = h->valid_mask;
+    buf[6] = h->seq;
+    buf[7] = 0;
+    return 0;
+}
+
+int mc_unpack_health(const uint8_t buf[8], mc_health_t *h) {
+    if (buf == 0 || h == 0)
+        return -1;
+    mc_health_t tmp;
+    tmp.mcu_temp_c = (int8_t)buf[0];
+    tmp.otpw_mask = (uint8_t)(buf[1] & 0x0Fu);
+    tmp.ot_mask = (uint8_t)((buf[1] >> 4) & 0x0Fu);
+    tmp.diag_mask = (uint8_t)(buf[2] & 0x0Fu);
+    tmp.ntc_t0_c = (int8_t)buf[3];
+    tmp.ntc_bed_c = (int8_t)buf[4];
+    tmp.valid_mask = buf[5];
+    tmp.seq = buf[6];
+    *h = tmp;
     return 0;
 }
 

@@ -23,6 +23,7 @@ enum : int {
   kTypeAsk = 11,
   kTypeVersionReq = MC_TYPE_VERSION_REQ,
   kTypeVersionRsp = MC_TYPE_VERSION_RSP,
+  kTypeHealth = MC_TYPE_HEALTH,
 };
 
 enum : uint8_t {
@@ -223,6 +224,45 @@ void handle_status(const ss_can_frame_t *frame) {
   portEXIT_CRITICAL(&s_lock);
 }
 
+void handle_health(const ss_can_frame_t *frame) {
+  const int board_id = mc_id_field((int)frame->id);
+  if (board_id < 0 || board_id >= SS_MAX_BOARDS || frame->len != 8) return;
+
+  mc_health_t h;
+  if (mc_unpack_health(frame->data, &h) != 0) return;
+
+  portENTER_CRITICAL(&s_lock);
+  const int idx = find_board_locked(board_id);
+  if (idx >= 0) {
+    ss_node_t *node = &s_nodes[idx];
+    const uint8_t old_otpw = node->otpw_mask;
+    const uint8_t old_ot = node->ot_mask;
+
+    node->health_seen = true;
+    node->last_health_ms = frame->timestamp_ms;
+    node->mcu_temp_c = h.mcu_temp_c;
+    node->otpw_mask = h.otpw_mask;
+    node->ot_mask = h.ot_mask;
+    node->diag_mask = h.diag_mask;
+    node->ntc_t0_c = h.ntc_t0_c;
+    node->ntc_bed_c = h.ntc_bed_c;
+    node->health_valid = h.valid_mask;
+    node->health_seq = h.seq;
+    portEXIT_CRITICAL(&s_lock);
+
+    if (h.otpw_mask != old_otpw) {
+      SS_LOGW("health", "board %d OTPW mask 0x%02x -> 0x%02x", board_id,
+              (unsigned)old_otpw, (unsigned)h.otpw_mask);
+    }
+    if (h.ot_mask != old_ot) {
+      SS_LOGE("health", "board %d OT mask 0x%02x -> 0x%02x", board_id,
+              (unsigned)old_ot, (unsigned)h.ot_mask);
+    }
+  } else {
+    portEXIT_CRITICAL(&s_lock);
+  }
+}
+
 void handle_version(const ss_can_frame_t *frame) {
   const int board_id = mc_id_field((int)frame->id);
   if (board_id < 0 || board_id >= SS_MAX_BOARDS) return;
@@ -321,6 +361,9 @@ void commission_on_frame(const ss_can_frame_t *frame, void *ctx) {
       break;
     case kTypeVersionRsp:
       handle_version(frame);
+      break;
+    case kTypeHealth:
+      handle_health(frame);
       break;
     case kTypeFault:
       SS_LOGW("commission", "fault frame id=0x%03lx board=%d",

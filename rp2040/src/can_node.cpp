@@ -4,10 +4,13 @@
 #include <hardware/clocks.h>
 #include <hardware/irq.h>
 #include <hardware/pio.h>
+#include <hardware/timer.h>
 #include <pico/multicore.h>
 #include <pico/stdlib.h>
+#include <pico/unique_id.h>
 
 #include "board_pins.h"
+#include "motion_core.h"
 
 extern "C" {
 #include "can2040.h"
@@ -29,15 +32,37 @@ volatile uint32_t error_count = 0;
 volatile uint32_t drop_count = 0;
 volatile bool ready_flag = false;
 
+uint8_t own_flash_id[8] = {};
+volatile int board_id = -1;
+volatile bool disc_pending = false;
+volatile uint32_t disc_due_us = 0;
+
 void on_can(struct can2040*, uint32_t notify, struct can2040_msg* msg) {
     if (notify == CAN2040_NOTIFY_RX) {
         rx_count++;
+        const uint16_t id = (uint16_t)msg->id;
+        const uint8_t frame_type = type(id);
+
+        if (frame_type == kAsk && field(id) == 0 && board_id < 0) {
+            /* The addressing document staggers advertisements by up to
+             * 9 ms so unidentified boards do not all answer at once. */
+            disc_due_us = time_us_32() + 1000u * (own_flash_id[0] % 10u);
+            disc_pending = true;
+        } else if (frame_type == kAssign) {
+            int assigned = board_id;
+            if (mc_assign_board(&assigned, field(id), msg->data,
+                                own_flash_id) == 0) {
+                board_id = assigned;
+                disc_pending = false;
+            }
+        }
+
         uint8_t next = (uint8_t)((head + 1) % kQueueLength);
         if (next == tail) {
             drop_count++;
             return;
         }
-        queue[head].id = (uint16_t)msg->id;
+        queue[head].id = id;
         queue[head].dlc = msg->dlc > 8 ? 8 : msg->dlc;
         for (uint8_t i = 0; i < 8; i++) {
             queue[head].data[i] = msg->data[i];
@@ -70,6 +95,12 @@ void begin() {
         pio_sm_claim(pio1, sm);
     }
 
+    pico_unique_board_id_t uid;
+    pico_get_unique_board_id(&uid);
+    for (uint8_t i = 0; i < 8; i++) {
+        own_flash_id[i] = uid.id[i];
+    }
+
     can2040_callback_config(&cbus, on_can);
     irq_set_exclusive_handler(PIO1_IRQ_0, pio1_irq);
     irq_set_priority(PIO1_IRQ_0, 1);
@@ -94,6 +125,43 @@ bool poll(Frame* out) {
     *out = queue[tail];
     tail = (uint8_t)((tail + 1) % kQueueLength);
     return true;
+}
+
+bool assigned() {
+    return assigned_board_id() >= 0;
+}
+
+int assigned_board_id() {
+    int id = board_id;
+    __dmb();
+    return id;
+}
+
+bool send(uint16_t id, const uint8_t data[8], uint8_t dlc) {
+    struct can2040_msg msg;
+    msg.id = id;
+    msg.dlc = dlc > 8 ? 8 : dlc;
+    for (uint8_t i = 0; i < 8; i++) {
+        msg.data[i] = i < msg.dlc ? data[i] : 0;
+    }
+    return can2040_transmit(&cbus, &msg) == 0;
+}
+
+void tick() {
+    if (!disc_pending || board_id >= 0) {
+        return;
+    }
+    if ((int32_t)(time_us_32() - disc_due_us) < 0) {
+        return;
+    }
+
+    uint8_t payload[8];
+    mc_pack_flash_id(own_flash_id, payload);
+    if (send((uint16_t)mc_id_make(0, kDisc), payload, 8)) {
+        disc_pending = false;
+    } else {
+        disc_due_us = time_us_32() + 1000u;
+    }
 }
 
 Stats stats() {

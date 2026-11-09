@@ -51,6 +51,16 @@ typedef struct {
   uint8_t last_seq;
   uint32_t last_seen_ms;
   uint32_t last_status_ms;
+  bool health_seen;
+  uint32_t last_health_ms;
+  int8_t mcu_temp_c;
+  uint8_t otpw_mask;
+  uint8_t ot_mask;
+  uint8_t diag_mask;
+  int8_t ntc_t0_c;
+  int8_t ntc_bed_c;
+  uint8_t health_valid;
+  uint8_t health_seq;
   bool version_seen;
   char sw_version[24];
   uint32_t last_version_ms;

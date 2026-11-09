@@ -42,8 +42,8 @@ DIAG and a separate endstop.
 | Fan2 | always-on VCC/GND | no GPIO |
 | Bed heater | GPIO21 | |
 | Heat0 | GPIO20 | |
-| E0 thermistor | GPIO28 | |
-| Bed thermistor | GPIO29 | |
+| E0 thermistor | GPIO28 | external NTC input, 4.7 kΩ pull-up; no NTC fitted |
+| Bed thermistor | GPIO29 | external NTC input, 4.7 kΩ pull-up; no NTC fitted |
 | BLTouch | GPIO18 signal, GPIO19 servo, 5V/GND | not used |
 | GPIO12–15 header | DIAG pins plus VCC/GND | exposes the four DIAG signals |
 
@@ -78,10 +78,26 @@ DIAG and a separate endstop.
 
 ## 5. Local status indicator
 
-The RGB LED connector (GPIO11, 5V, GND) can carry a WS2812/NeoPixel for local
-node status (`FR-MON-005`): ready/OK, homing, fault. It is not used by the
-official Klipper config. Confirm the LED type and current before driving it;
-GPIO11 is also listed for an optional filament runout, so choose one function.
+The local status indicator is the on-board single-colour LED **D5 on GPIO8**,
+active high through `R65` (1 kΩ). The blink scheme for `FR-MON-005`
+(ready/OK, no board ID, homing, playing, holding, fault) is in
+`../../doc/motion_streaming_whitepaper.md` §5.8.1. The schematic lists D1–D5;
+the fitted population may vary by board revision.
+
+The other on-board LEDs are not free status outputs:
+
+- D1 is the `HEAT0` indicator (`GPIO20`).
+- D2 is the `BED` indicator (`GPIO21`).
+- D3 is the `FAN0` indicator (`GPIO16`).
+- D4 is the `FAN1` indicator (`GPIO17`).
+
+Each sits on the corresponding MOSFET gate net, so driving it also enables
+that heater/fan output.
+
+The RGB connector (GPIO11, 5V, GND) is a 3-pin header for an optional external
+WS2812/NeoPixel; no RGB LED is fitted and the firmware does not drive it.
+GPIO11 is also listed for an optional filament runout, so only one function
+can be used.
 
 ## 6. Files
 

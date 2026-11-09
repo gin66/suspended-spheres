@@ -249,13 +249,13 @@ to a PNG before it is treated as done; the PNGs live in
 
 | Screen | Shows |
 |--------|--------|
-| Show | Pattern name, play / stop, elapsed time, bus state, discovered/assigned/online counts, unassigned steppers, test-run state |
+| Show | Pattern name, play / stop, elapsed time, bus state, discovered/assigned/online counts, unassigned steppers, thermal summary, test-run state |
 | Animations | HBP2 files on the card: name, size, duration, validity; refresh, select and load |
-| Grid | One cell per ball: assigned, free, fault; click a cell to select its board |
-| Nodes | Discovered boards by 6-byte UUID, board ID, online state, assigned positions |
-| Motor | Selected board and axis (assigned axes are green); HOME, UP, DOWN, STOP; tap a grid cell to choose the position, then assign/unassign |
+| Grid | One cell per ball: assigned, free, thermal warning, fault; click a cell to select its board |
+| Nodes | Discovered boards by 6-byte UUID, board ID, online state, assigned positions, MCU temperature, TMC OTPW/OT, health age |
+| Motor | Selected board and axis (assigned axes are green); board health; HOME, UP, DOWN, STOP; tap a grid cell to choose the position, then assign/unassign |
 | Config | Grid size, test-run drop/speed/gap, serpentine, save/reset/clear, SPIFFS state |
-| Log | Recent PSRAM log ring, boot count, last watchpoint, last safe hold |
+| Log | Recent PSRAM log ring, boot count, last watchpoint, last safe hold, thermal transitions |
 | CAN | Received-frame scope by identifier (raw ID, type, count, last data), TX sent/rejected, RX drops, bus-off state; clear |
 | Upgrade | Per-board software version, `QUERY ALL` (type-12 request), selected board, upgrade status and progress |
 | Settings | WiFi/SSID/IP/RSSI and CAN state, firmware, boot, uptime, position capacity, service path |
@@ -267,8 +267,9 @@ sample files. The screen reads only from the snapshot, so the backend can fill
 it without changing the LVGL code.
 
 The CAN scope keeps 256 identifiers: a running show already uses 120
-per-motor type-0 IDs plus 30 status IDs and the sync ID, and commissioning and
-version traffic need headroom on top. Only received frames are counted.
+per-motor type-0 IDs plus 30 status IDs, 30 health IDs and the sync ID, and
+commissioning and version traffic need headroom on top. Only received frames
+are counted.
 
 `QUERY ALL` sends `VERSION_REQ` (type 12) to field 127. Boards answer with
 `VERSION_RSP` (type 13) and the panel keeps the last version per board; see
@@ -287,6 +288,33 @@ is the master that sends ASK and ASSIGN. It stores the host map
 `(uuid, axis) → position`. The nodes still do not know the grid
 position. The checked-in image still persists an 8-byte id; the move to the
 6-byte UUID is `katapult_whitepaper.md` §9.
+
+### 7.1 Node health telemetry
+
+Each board sends the type-14 `HEALTH` frame from
+`motion_streaming_whitepaper.md` §4.5 at 1 Hz once it has a board ID. The
+panel consumes it for display and logging; it is not the fault path. DIAG and
+the 10 Hz type-3 status frame remain the fast indication.
+
+The node registry carries `mcu_temp_c`, `otpw_mask`, `ot_mask`, `diag_mask`,
+`ntc_t0_c`, `ntc_bed_c`, `valid_mask`, `health_seq` and `health_age_ms`.
+Presentation:
+
+- Nodes list: `MCU 42 °C`, a TMC aggregate (`OK`, `OTPW`, `OT`) and the health
+  age. Show `--` when no health frame has arrived or it is older than 3 s.
+  The TMC aggregate is also `--` while `valid_mask` bit 3 is clear, because
+  the driver `DRV_STATUS` has not been read.
+- Motor detail: per-driver `OTPW`/`OT` and `DIAG` masks, the NTC values when
+  `valid_mask` says they are fitted, and the last health age.
+- Grid: amber for `OTPW` (thermal warning); `OT` is red/fault.
+- Show: a thermal summary (`0 warn`, `max MCU 47 °C`) next to the bus and node
+  counts.
+- Log: `OTPW`/`OT` transitions with global-timeline timestamps.
+- CAN scope: type-14 frames appear like any other received identifier.
+
+A missing health frame is not a fault. The type-3 status frame is the primary
+online/fault indication; the health view is read-only and only reflects the
+snapshot.
 
 The screen flows are in §9.
 

@@ -50,6 +50,7 @@ lv_obj_t *s_show_online;
 lv_obj_t *s_show_positions;
 lv_obj_t *s_show_unassigned;
 lv_obj_t *s_show_testrun;
+lv_obj_t *s_show_thermal;
 lv_obj_t *s_show_hold;
 lv_obj_t *s_show_run_btn;
 
@@ -660,6 +661,8 @@ void build_show(void) {
   lv_obj_set_pos(s_show_unassigned, 12, 8);
   s_show_testrun = make_label(stat, "", &lv_font_montserrat_12, C_MUTED);
   lv_obj_set_pos(s_show_testrun, 12, 34);
+  s_show_thermal = make_label(stat, "", &lv_font_montserrat_12, C_MUTED);
+  lv_obj_set_pos(s_show_thermal, 400, 34);
 
   lv_obj_t *actions = make_panel(s, 12, 310, 688, 82);
   s_show_run_btn = make_button(actions, "START TEST RUN", 200, 46, on_test_start,
@@ -1215,6 +1218,39 @@ void ui_update(const ui_snapshot_t *snapshot) {
                         "%lu steppers unassigned, %lu positions free",
                         (unsigned long)s_snap.unassigned_steppers,
                         (unsigned long)s_snap.unassigned_positions);
+
+  uint32_t ot_count = 0;
+  uint32_t otpw_count = 0;
+  int max_temp = -128;
+  bool any_health = false;
+  for (int i = 0; i < s_snap.node_count; ++i) {
+    const ui_node_t *n = &s_snap.nodes[i];
+    if (!n->health_seen || n->health_age_ms > 3000u) continue;
+    any_health = true;
+    if (n->mcu_temp_c > max_temp) max_temp = n->mcu_temp_c;
+    if ((n->health_valid & UI_HEALTH_VALID_DRV_STATUS) != 0) {
+      if (n->ot_mask != 0) ot_count++;
+      else if (n->otpw_mask != 0) otpw_count++;
+    }
+  }
+  lv_color_t thermal_color = C_MUTED;
+  if (!any_health) {
+    lv_label_set_text(s_show_thermal, "thermal --");
+  } else if (ot_count != 0) {
+    lv_label_set_text_fmt(s_show_thermal, "%lu OT, %lu OTPW, max %dC",
+                          (unsigned long)ot_count,
+                          (unsigned long)otpw_count, max_temp);
+    thermal_color = C_ERR;
+  } else if (otpw_count != 0) {
+    lv_label_set_text_fmt(s_show_thermal, "%lu OTPW, max %dC",
+                          (unsigned long)otpw_count, max_temp);
+    thermal_color = C_WARN;
+  } else {
+    lv_label_set_text_fmt(s_show_thermal, "OK, max %dC", max_temp);
+    thermal_color = C_OK;
+  }
+  lv_obj_set_style_text_color(s_show_thermal, thermal_color, 0);
+
   lv_label_set_text_fmt(
       s_show_testrun, "test run: %s%s  |  rx %lu tx %lu err %lu",
       s_snap.test_run_active ? "ACTIVE " : "idle",
@@ -1312,7 +1348,16 @@ void ui_update(const ui_snapshot_t *snapshot) {
     if (c->node_index >= 0 && c->node_index < s_snap.node_count) {
       n = &s_snap.nodes[c->node_index];
     }
-    if (n != nullptr && n->status_seen && n->fault_flags != 0) bg = C_ERR;
+    const bool has_fault =
+        n != nullptr && n->status_seen && n->fault_flags != 0;
+    if (has_fault) bg = C_ERR;
+    if (n != nullptr && n->health_seen && n->health_age_ms <= 3000u &&
+        (n->health_valid & UI_HEALTH_VALID_DRV_STATUS) != 0) {
+      if (n->ot_mask != 0)
+        bg = C_ERR;
+      else if (n->otpw_mask != 0 && !has_fault)
+        bg = C_WARN;
+    }
     lv_obj_set_style_bg_color(cell, bg, 0);
     lv_obj_set_style_border_width(cell, (i == s_grid_selected) ? 2 : 1, 0);
     lv_obj_set_style_border_color(
@@ -1332,6 +1377,13 @@ void ui_update(const ui_snapshot_t *snapshot) {
     hash = (hash ^ n->fault_flags) * 16777619u;
     hash = (hash ^ (n->online ? 1u : 0u)) * 16777619u;
     hash = (hash ^ (uint32_t)n->assigned_positions) * 16777619u;
+    hash = (hash ^ (n->health_seen ? 1u : 0u)) * 16777619u;
+    hash = (hash ^ (uint32_t)(n->health_age_ms / 1000u)) * 16777619u;
+    hash = (hash ^ (uint32_t)(uint8_t)n->mcu_temp_c) * 16777619u;
+    hash = (hash ^ n->otpw_mask) * 16777619u;
+    hash = (hash ^ n->ot_mask) * 16777619u;
+    hash = (hash ^ n->diag_mask) * 16777619u;
+    hash = (hash ^ n->health_valid) * 16777619u;
   }
   hash = (hash ^ (uint32_t)s_snap.selected_node) * 16777619u;
   if (hash != s_nodes_shown_hash) {
@@ -1378,11 +1430,32 @@ void ui_update(const ui_snapshot_t *snapshot) {
                     n->status_seen ? "" : " (no status)");
       char pos[24];
       std::snprintf(pos, sizeof(pos), "%d pos", n->assigned_positions);
+      char health[40];
+      lv_color_t health_color = C_MUTED;
+      if (!n->health_seen) {
+        std::snprintf(health, sizeof(health), "health --");
+      } else if (n->health_age_ms > 3000u) {
+        std::snprintf(health, sizeof(health), "health stale");
+        health_color = C_WARN;
+      } else {
+        const bool drv =
+            (n->health_valid & UI_HEALTH_VALID_DRV_STATUS) != 0;
+        const char *tmc =
+            !drv ? "--" : (n->ot_mask ? "OT" : (n->otpw_mask ? "OTPW" : "OK"));
+        std::snprintf(health, sizeof(health), "%dC TMC %s %lu.%lus",
+                      (int)n->mcu_temp_c, tmc,
+                      (unsigned long)(n->health_age_ms / 1000u),
+                      (unsigned long)((n->health_age_ms % 1000u) / 100u));
+        health_color = (drv && n->ot_mask)
+                           ? C_ERR
+                           : ((drv && n->otpw_mask) ? C_WARN : C_MUTED);
+      }
       make_label(row, flash, &lv_font_montserrat_12, C_TEXT);
       make_label(row, board, &lv_font_montserrat_14,
                  n->board_id >= 0 ? C_OK : C_WARN);
       make_label(row, state, &lv_font_montserrat_12, C_MUTED);
       make_label(row, pos, &lv_font_montserrat_12, C_MUTED);
+      make_label(row, health, &lv_font_montserrat_12, health_color);
     }
   }
   lv_label_set_text_fmt(s_nodes_summary, "%lu discovered, %lu online, %lu assigned",
@@ -1409,10 +1482,40 @@ void ui_update(const ui_snapshot_t *snapshot) {
     } else {
       lv_label_set_text(s_motor_board, "board unassigned");
     }
+    char health[64];
+    if (!sel->health_seen) {
+      std::snprintf(health, sizeof(health), "no health frame");
+    } else if (sel->health_age_ms > 3000u) {
+      std::snprintf(health, sizeof(health), "health stale %lus",
+                    (unsigned long)(sel->health_age_ms / 1000u));
+    } else {
+      const bool drv = (sel->health_valid & UI_HEALTH_VALID_DRV_STATUS) != 0;
+      const char *tmc =
+          !drv ? "--" : (sel->ot_mask ? "OT" : (sel->otpw_mask ? "OTPW" : "OK"));
+      const bool ntc0 = (sel->health_valid & UI_HEALTH_VALID_NTC_T0) != 0;
+      const bool ntc1 = (sel->health_valid & UI_HEALTH_VALID_NTC_BED) != 0;
+      const unsigned long age_s =
+          (unsigned long)(sel->health_age_ms / 1000u);
+      const unsigned long age_t =
+          (unsigned long)((sel->health_age_ms % 1000u) / 100u);
+      if (ntc0 || ntc1) {
+        std::snprintf(health, sizeof(health),
+                      "MCU %dC TMC %s %lu.%lus\nDIAG 0x%x NTC %d/%d",
+                      (int)sel->mcu_temp_c, tmc, age_s, age_t,
+                      (unsigned)sel->diag_mask,
+                      ntc0 ? (int)sel->ntc_t0_c : -128,
+                      ntc1 ? (int)sel->ntc_bed_c : -128);
+      } else {
+        std::snprintf(health, sizeof(health),
+                      "MCU %dC TMC %s %lu.%lus\nDIAG 0x%x",
+                      (int)sel->mcu_temp_c, tmc, age_s, age_t,
+                      (unsigned)sel->diag_mask);
+      }
+    }
     lv_label_set_text_fmt(s_motor_result,
-                          "%d positions assigned to this board, buffer %u, faults 0x%02x",
+                          "%d pos, buf %u, faults 0x%02x\n%s",
                           sel->assigned_positions, (unsigned)sel->buffer_depth,
-                          (unsigned)sel->fault_flags);
+                          (unsigned)sel->fault_flags, health);
   } else {
     lv_label_set_text(s_motor_node, "no board selected");
     lv_label_set_text(s_motor_flash, "");

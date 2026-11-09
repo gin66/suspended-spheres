@@ -97,6 +97,17 @@ void add_node(ui_snapshot_t *s, int index, uint8_t tag, int board, bool online,
   n->state = state;
   n->fault_flags = fault;
   n->buffer_depth = 3;
+  n->health_seen = true;
+  n->health_age_ms = 200u + (uint32_t)board * 100u;
+  n->mcu_temp_c = (int8_t)(41 + board * 3);
+  n->otpw_mask = (board == 1) ? 0x02 : 0;
+  n->ot_mask = (board == 3) ? 0x01 : 0;
+  n->diag_mask = (board == 1) ? 0x02 : ((board == 3) ? 0x01 : 0);
+  n->ntc_t0_c = (board == 1) ? 28 : 0;
+  n->ntc_bed_c = 0;
+  n->health_valid = UI_HEALTH_VALID_MCU | UI_HEALTH_VALID_DRV_STATUS;
+  if (board == 1) n->health_valid |= UI_HEALTH_VALID_NTC_T0;
+  n->health_seq = (uint8_t)(10 + board);
   n->version_seen = true;
   std::snprintf(n->sw_version, sizeof(n->sw_version), "%s",
                 (board == 3) ? "1.1.0-dirty" : "1.1.0");
@@ -190,8 +201,8 @@ ui_snapshot_t make_snapshot() {
   s.can_bus_off = false;
   s.can_rate_1s = 350;
   s.can_dropped = 0;
-  s.can_unique_ids = 6;
-  s.can_entry_count = 6;
+  s.can_unique_ids = 7;
+  s.can_entry_count = 7;
   const struct {
     uint32_t id;
     uint8_t type;
@@ -199,11 +210,12 @@ ui_snapshot_t make_snapshot() {
     uint32_t interval;
     uint8_t len;
     uint8_t data[8];
-  } can_rows[6] = {
+  } can_rows[7] = {
       {0x000, 0, 1200, 10, 8, {0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}},
       {0x010, 0, 1200, 10, 8, {0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}},
       {0x002, 2, 50, 20, 8, {0x24, 0x1A, 0x10, 0x27, 0x10, 0x27, 0x04, 0x5A}},
       {0x033, 3, 30, 100, 8, {0x03, 0x00, 0x00, 0x00, 0x00, 0x03, 0x05, 0x5A}},
+      {0x01E, 14, 1, 1000, 8, {0x2A, 0x00, 0x00, 0x00, 0x00, 0x09, 0x01, 0x00}},
       {0x00B, 11, 12, 5000, 8, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}},
       {0x7FC, 12, 12, 5000, 8, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}},
   };
@@ -238,7 +250,8 @@ ui_snapshot_t make_snapshot() {
                 "[15.002][W][commission] fault frame id=0x0337 board=51\n"
                 "[18.441][I][motor] position 3 <- board 0 axis 3\n"
                 "[22.100][I][cfg] saved: 10x12, 12 positions, test 100mm @ "
-                "20mm/s, 300ms\n");
+                "20mm/s, 300ms\n"
+                "[24.500][W][health] board 1 OTPW mask 0x00 -> 0x02\n");
   return s;
 }
 

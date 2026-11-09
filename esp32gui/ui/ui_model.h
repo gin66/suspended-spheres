@@ -26,6 +26,13 @@ extern "C" {
 #define UI_MAX_ANIMATIONS 32
 #define UI_ANIM_NAME_LEN  40
 
+/* Mirrors MC_HEALTH_VALID_* in motion_core.h. The UI model stays free of
+ * the shared core header so the host harness compiles without it. */
+#define UI_HEALTH_VALID_MCU        0x01u
+#define UI_HEALTH_VALID_NTC_T0     0x02u
+#define UI_HEALTH_VALID_NTC_BED    0x04u
+#define UI_HEALTH_VALID_DRV_STATUS 0x08u
+
 typedef struct {
   bool used;
   uint8_t flash_id[8];
@@ -35,6 +42,16 @@ typedef struct {
   uint8_t state;      /* mc_status state */
   uint8_t fault_flags;
   uint8_t buffer_depth;
+  bool health_seen;
+  uint32_t health_age_ms;
+  int8_t mcu_temp_c;
+  uint8_t otpw_mask;
+  uint8_t ot_mask;
+  uint8_t diag_mask;
+  int8_t ntc_t0_c;
+  int8_t ntc_bed_c;
+  uint8_t health_valid;
+  uint8_t health_seq;
   bool version_seen;
   char sw_version[24];
   int assigned_positions;

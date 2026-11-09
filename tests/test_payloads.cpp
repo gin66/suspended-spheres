@@ -172,4 +172,57 @@ static int reg_p2 = add_test("P2", test_p2_type1_reserved);
 static int reg_p3 = add_test("P3", test_p3_length_rejected);
 static int reg_p9 = add_test("P9", test_p9_per_node_frame);
 static int reg_p10 = add_test("P10", test_p10_variants_through_abi);
+/* P12 — the type-14 health payload packs the MCU temperature, per-driver
+ * OTPW/OT masks, DIAG mask, optional NTC temperatures, validity mask and
+ * sequence counter into exactly 8 bytes. */
+static int test_p12_health_payload(void) {
+    const mc_health_t in = {
+        -12,
+        0x05,
+        0x03,
+        0x0A,
+        25,
+        -5,
+        MC_HEALTH_VALID_MCU | MC_HEALTH_VALID_NTC_T0,
+        77
+    };
+    const uint8_t expect[8] = {
+        0xF4,  /* −12 °C */
+        0x35,  /* otpw 0x05 | ot 0x03 << 4 */
+        0x0A,  /* DIAG mask */
+        0x19,  /* 25 °C */
+        0xFB,  /* −5 °C */
+        0x03,  /* valid mask */
+        0x4D,  /* seq */
+        0x00,  /* reserved */
+    };
+    uint8_t buf[8];
+    mc_health_t out = {0, 0, 0, 0, 0, 0, 0, 0};
+
+    ASSERT(mc_pack_health(&in, buf) == 0);
+    for (int i = 0; i < 8; ++i)
+        ASSERT(buf[i] == expect[i]);
+
+    ASSERT(mc_unpack_health(buf, &out) == 0);
+    ASSERT(out.mcu_temp_c == in.mcu_temp_c);
+    ASSERT(out.otpw_mask == in.otpw_mask);
+    ASSERT(out.ot_mask == in.ot_mask);
+    ASSERT(out.diag_mask == in.diag_mask);
+    ASSERT(out.ntc_t0_c == in.ntc_t0_c);
+    ASSERT(out.ntc_bed_c == in.ntc_bed_c);
+    ASSERT(out.valid_mask == in.valid_mask);
+    ASSERT(out.seq == in.seq);
+
+    ASSERT(mc_pack_health(0, buf) == -1);
+    ASSERT(mc_pack_health(&in, 0) == -1);
+    ASSERT(mc_unpack_health(0, &out) == -1);
+    ASSERT(mc_unpack_health(buf, 0) == -1);
+
+    /* The health type uses a board field; 127 is not a health broadcast. */
+    ASSERT(mc_id_make(7, MC_TYPE_HEALTH) == ((7 << 4) | MC_TYPE_HEALTH));
+    ASSERT(mc_id_make(127, MC_TYPE_HEALTH) == -1);
+    return 0;
+}
+
 static int reg_p11 = add_test("P11", test_p11_version_payloads);
+static int reg_p12 = add_test("P12", test_p12_health_payload);

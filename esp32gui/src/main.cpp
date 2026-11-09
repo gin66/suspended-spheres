@@ -325,6 +325,17 @@ void build_snapshot(ui_snapshot_t *snap) {
     u->state = n.state;
     u->fault_flags = n.fault_flags;
     u->buffer_depth = n.buffer_depth;
+    u->health_seen = n.health_seen;
+    u->health_age_ms =
+        n.health_seen ? (uint32_t)(millis() - n.last_health_ms) : 0u;
+    u->mcu_temp_c = n.mcu_temp_c;
+    u->otpw_mask = n.otpw_mask;
+    u->ot_mask = n.ot_mask;
+    u->diag_mask = n.diag_mask;
+    u->ntc_t0_c = n.ntc_t0_c;
+    u->ntc_bed_c = n.ntc_bed_c;
+    u->health_valid = n.health_valid;
+    u->health_seq = n.health_seq;
     u->version_seen = n.version_seen;
     std::snprintf(u->sw_version, sizeof(u->sw_version), "%s", n.sw_version);
     u->assigned_positions = n.assigned_positions;

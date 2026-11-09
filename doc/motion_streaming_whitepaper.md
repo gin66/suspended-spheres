@@ -414,6 +414,31 @@ node owns, and how a board is commissioned are in `Fly_Micro4_addressing.md`.
 
   On request or on failure, a separate command response carries per-ball
   position and velocity (`FR-MON-001`). The 10 Hz frame never does.
+- **Health / temperature** (node → master, 1 Hz). One 8-byte frame, type 14,
+  field = the answering board ID (0–29; field 127 is invalid). Little-endian:
+
+  | Offset | Type | Field |
+  |--------|------|--------|
+  | 0 | `int8` | `mcu_temp_c`, RP2040 die temperature in °C; ignored when `valid_mask` bit 0 is clear |
+  | 1 | `uint8` | `otpw_mask` bits 0–3 (1 = driver pre-warning), `ot_mask` bits 4–7 (1 = driver shutdown) |
+  | 2 | `uint8` | `diag_mask` bits 0–3 (1 = DIAG asserted) per driver; bits 4–7 reserved |
+  | 3 | `int8` | `ntc_t0_c`, external T0 NTC in °C; valid only when `valid_mask` bit 1 is set |
+  | 4 | `int8` | `ntc_bed_c`, external bed NTC in °C; valid only when `valid_mask` bit 2 is set |
+  | 5 | `uint8` | `valid_mask`: bit0 MCU temp, bit1 T0 NTC, bit2 bed NTC, bit3 `DRV_STATUS` read fresh; bits 4–7 reserved |
+  | 6 | `uint8` | `seq`, increments once per health frame, wraps at 256 |
+  | 7 | `uint8` | reserved, 0 |
+
+  The frame is periodic telemetry, not an alarm path. A TMC over-temperature
+  pre-warning asserts DIAG immediately; the DIAG handler and the 10 Hz status
+  frame carry the fault. The health frame is for logging, trend and the
+  panel’s thermal display. It is sent only after the board has a board ID.
+  Nodes phase-offset the 1 Hz period by `33 ms × board_id` so 30 health frames
+  do not arrive as a burst. The detailed `DRV_STATUS` is read on demand or
+  logged when an `otpw`/`ot` bit changes; this frame carries the
+  pre-warning/shutdown masks, not the threshold bits. The current node
+  firmware fills `mcu_temp_c` and `diag_mask`; `otpw_mask`, `ot_mask` and
+  `valid_mask` bit 3 stay zero/clear until the TMC2209 UART driver reads
+  `DRV_STATUS`. The payload does not change when that driver lands.
 - **Version query / response** (types 12/13). The master sends an 8-byte
   `VERSION_REQ` of zeros to field 127 (every board) or to one board. Each
   board answers `VERSION_RSP` in the same 8-byte layout, little-endian:
@@ -440,16 +465,16 @@ carry it, and per-motor or per-node frames already give natural grouping.
 ### 4.6 Bus budget
 
 Total bus budget for 120 motors. Motion frames are `120/(N·Δt)`; add the 50 Hz
-sync and 30 × 10 Hz status (350 frames/s).
+sync, 30 × 10 Hz status and 30 × 1 Hz health (380 frames/s).
 
 | Mode | `Δt` (ms) | Motion frames/s | Total frames/s | Bus load @ 1 Mbit/s |
 |------|-----------|-----------------|----------------|---------------------|
-| N=3 + speed | 10 | 4,000 | ~4,350 | **57 %** |
-| N=3 + speed | 11 | 3,636 | ~3,986 | **52 %** |
-| N=3 + speed | 15 | 2,667 | ~3,017 | **39 %** |
-| N=4 positions | 10 | 3,000 | ~3,350 | **44 %** |
-| N=4 positions | 11 | 2,727 | ~3,077 | **40 %** |
-| N=4 positions | 15 | 2,000 | ~2,350 | **31 %** |
+| N=3 + speed | 10 | 4,000 | ~4,380 | **57 %** |
+| N=3 + speed | 11 | 3,636 | ~4,016 | **52 %** |
+| N=3 + speed | 15 | 2,667 | ~3,047 | **40 %** |
+| N=4 positions | 10 | 3,000 | ~3,380 | **44 %** |
+| N=4 positions | 11 | 2,727 | ~3,107 | **40 %** |
+| N=4 positions | 15 | 2,000 | ~2,380 | **31 %** |
 
 At ~130 bits/frame. Keep the sustained target below 60 %: `N=3`/`Δt=10` is the
 tightest; `Δt=11` or `N=4` gives margin. If the design adds per-frame
@@ -741,7 +766,7 @@ StepperTask (FastAccelStepper internal, ~4 ms)
   └─ manage queues / PIO FIFOs
 
 Housekeeping (10–50 Hz)
-  ├─ status frame, heartbeat, temperature, DRV_STATUS
+  ├─ status frame (10 Hz), health frame (1 Hz), DRV_STATUS
   ├─ sync fit/PLL update
   └─ watchdog kick
 ```
@@ -778,6 +803,16 @@ Housekeeping (10–50 Hz)
 - **DIAG:** push-pull, asserts on stall, overtemperature pre-warning, short/
   open load. Route all four to interrupt-capable GPIOs. On a DIAG event, read
   `DRV_STATUS`/`SG_RESULT` and decide: hold, retry, or fault the board.
+- **Temperature:** the TMC2209 has no numeric temperature register.
+  `DRV_STATUS` exposes `otpw` (pre-warning) and `ot` (shutdown) plus threshold
+  flags, all boolean. The RP2040 internal sensor on ADC4 gives an approximate
+  die temperature (`analogReadTemp()`); it is uncalibrated and suitable for
+  trend/overtemperature, not ambient measurement. The board has two external
+  NTC inputs (T0 GPIO28/ADC2, BED GPIO29/ADC3) with 4.7 kΩ pull-ups; no NTC is
+  fitted. Use the internal sensor for local health and the TMC flags for driver
+  cutoff; add an external NTC or I²C sensor only if a numeric board/driver
+  temperature is required. Report the MCU temperature, TMC masks and any valid
+  NTC values in the 1 Hz type-14 health frame (§4.5).
 - **Direction:** configure a DIR setup/hold delay. FastAccelStepper inserts a
   pause on reversal (hundreds of µs). At 1.2 m/s that is 0.6–1.2 mm of delayed
   motion; keep reversals rare and account for the pause in the trajectory
@@ -869,6 +904,63 @@ sector or use a small key-value store; document the wear/erase strategy.
 The CAN protocol is **not** a safety function. The red button removes drive
 power (`FR-MOT-011`); software only provides orderly stops.
 
+#### 5.8.1 Local status LED (D5, GPIO8)
+
+`FR-MON-005` requires a local OK/fault indication. The Fly-Micro4 has one free
+single-colour LED, **D5 on GPIO8**, active high. D1–D4 are heater and fan
+indicators tied to the `HEAT0`, `BED`, `FAN0` and `FAN1` drive nets; they are
+not free status outputs. The RGB header on GPIO11 is a connector only: no RGB
+LED is fitted and no WS2812/PIO driver is used. This LED is the local
+maintenance indicator, separate from the operator-facing global indicator
+(`FR-MON-006`).
+
+The pattern is table-driven and non-blocking. It must not delay CAN, stepping
+or the main loop. Timings are `on/off` in milliseconds.
+
+| State | Pattern | Period | Meaning |
+|-------|---------|-------:|---------|
+| Boot | 500 on, then off | one-shot | self-test / firmware started |
+| Unidentified | 100/200, 100/200, 1400 off | 2 s | no board ID yet |
+| Idle, primed | 50 on, 1950 off | 2 s | OK, alive, waiting |
+| Homing | 250 on, 250 off | 0.5 s | busy homing/startup |
+| Playing | 50 on, 9950 off | 10 s | OK, running |
+| Holding | 100/200 × 3, 1100 off | 2 s | controlled stop, awaiting command |
+| Fault | 100 on, 100 off | 0.2 s | fault, latched |
+
+The mnemonic is **1 pulse = OK, 2 flashes = no board ID, 3 flashes =
+stopped, slow blink = homing, fast blink = fault, solid 0.5 s = boot, slow
+heartbeat = running**. Healthy states stay quiet; only exceptional states draw
+attention.
+
+State mapping:
+
+- Reset: `Boot` → `Unidentified`. The board ID is RAM
+  (`Fly_Micro4_addressing.md` §2), so every cold start begins unidentified.
+- `ASSIGN` received: `Unidentified` → `Idle`.
+- `HOME`: `Idle` → `Homing` → `Idle` or `Fault`.
+- First motion window: `Primed` → `Playing`.
+- Stop, lost master or buffer underrun: `Playing` → `Holding`.
+- Any fault, bus-off or driver fault: → `Fault`, latched until reset or an
+  explicit fault clear.
+- `Fault` overrides every other state.
+
+Implementation requirements:
+
+- `status_led::init()` configures D5; `status_led::set(state)` selects a
+  pattern and restarts it; `status_led::set_mc_state(state)` maps the type-3
+  status state; `status_led::clear_fault()` releases the fault latch;
+  `status_led::tick(now_ms)` advances the pattern from the main loop. No
+  `delay()`, no PIO and no hardware timer.
+- `set(Fault)` latches. Other states are ignored until `clear_fault()` or a
+  reset.
+- A 5–10 ms tick resolution is sufficient; the shortest pulse is 50 ms.
+- Do not drive the LED from the CAN ISR or the FastAccelStepper callback. Set
+  the desired state from the protocol/main-loop context.
+- The existing “flash on every CAN frame” behaviour in `main.cpp` is not part
+  of this scheme and is removed.
+- Timing tolerance is ±20%. The pattern table is pure and can be host-tested
+  if the engine is moved into `lib/`.
+
 ### 5.9 Bring-up tests (before the full build)
 
 1. **PIO coexistence:** can2040 + FastAccelStepper on one board, 4 axes,
@@ -897,7 +989,8 @@ rp2040/                       # firmware-only
 │   └── app_config.h          # node id, limits, timing
 ├── src/
 │   ├── main.cpp
-│   ├── can_node.cpp/.h       # can2040 adapter, RX ring, sync
+│   ├── can_node.cpp/.h       # can2040 adapter, RX ring, discovery, TX
+│   ├── status_led.cpp/.h     # D5/GPIO8 status patterns (§5.8.1)
 │   ├── motion_node.cpp/.h    # sample buffers, interpolator, chunker
 │   ├── homing.cpp/.h
 │   ├── tmc2209.cpp/.h

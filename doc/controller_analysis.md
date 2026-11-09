@@ -808,7 +808,7 @@ After 5 min: 10.5 ms drift → 12.6 mm position error at 1.2 m/s
 | **FYSETC E4** | **3 usable** (4 drivers) | ✅ **4 × TMC2209 soldered** | ✅ ESP32 on board (ESP3D) | ✅ DIAG on X/Y/Z; E axis has no DIAG. **With no mechanical switches, only 3 axes are usable** | **€30.39** |
 | **FYSETC Cheetah v2.0** | **3 usable** (4 drivers) | ✅ **4 × TMC2209 onboard** | ❌ no WiFi; ❌ no CAN (USB/UART only) | ⚠️ Sensorless homing on X/Y/Z; E0 has no endstop/DIAG | €35.39 |
 | **Mellow FLY-RPFMEX** | 4 | ✅ **4 × TMC2209 onboard** | ❌ no WiFi/CAN; **USB-C (USBSERIAL)** host link | ✅ **4/4 DIAG** on independent RP2040 GPIOs | ~€26.59 |
-| **Mellow FLY-Micro4 V1.0** | 4 | ✅ **4 × TMC2209 onboard** | ✅ **CAN** (bridging); **CAN: 2-pin PH2.0**; no WiFi | ✅ **4/4 DIAG** on independent RP2040 GPIOs; **no NTC inputs** — TMC2209 `otpw`/`otsd` only | ~€27 (free shipping; ~€24.33 net with €80 coupon at 30 boards) |
+| **Mellow FLY-Micro4 V1.0** | 4 | ✅ **4 × TMC2209 onboard** | ✅ **CAN** (bridging); **CAN: 2-pin PH2.0**; no WiFi | ✅ **4/4 DIAG** on independent RP2040 GPIOs; **two external NTC inputs** (T0 GPIO28/ADC2, BED GPIO29/ADC3, 4.7 kΩ pull-ups); no on-board NTC; TMC2209 `otpw`/`ot` flags only | ~€27 (free shipping; ~€24.33 net with €80 coupon at 30 boards) |
 | **FYSETC Spider V3.0 H7** | **6 usable** (8 sockets) | No — sockets | ❌ no WiFi; ✅ **CAN** + USB-C | ⚠️ **6/8 DIAG** (X/Y/Z/E0/E1/E2 via shared endstop pins); E3/E4 none; **CAN connector verify; remove 120 Ω on 18/20** | $34.90 |
 | **MKS Monster8 V1/V2** | **6 usable** (8 sockets) | No — sockets | ❌ no WiFi; ✅ **CAN** | ⚠️ **6/8 DIAG** (DIAG0–5 on six endstops); F407 @ 168 MHz | ~€45–55 (verify) |
 | **Mellow Fly-Super8 Pro H723** | 8 | No — sockets | ⚠️ WiFi for RRF; ✅ **CAN** | ✅ **8/8 DIAG** per driver (Fly-2209 switch) | ~$80–100 (verify) |
@@ -1102,7 +1102,7 @@ That does not force a mux: **bit-bang the third bus (or all three) on the second
 
 **Write-only option:** if every driver receives identical configuration, tie the three buses together and **broadcast from one TX pin**; no mux and no RX. This works because address 0–3 is repeated once per bus, so a write reaches all three drivers with that address. It removes readback, so you lose `SG_RESULT` tuning, `DRV_STATUS` fault/temperature flags, and configuration verification. Homing still works from the per-driver DIAG pins. Use this only after bench tuning, and keep a service header for readback; otherwise retain one bidirectional pin per bus (3 GPIO) or a mux.
 
-**Temperature:** TMC2209 reports over-temperature warning/shutdown flags in `DRV_STATUS`, but not necessarily an absolute temperature. If a numeric reading is required, add one I²C sensor per board near the driver array (2 GPIO); that is the 2-pin line above.
+**Temperature:** the TMC2209 reports only boolean over-temperature pre-warning/shutdown flags in `DRV_STATUS`; it has no numeric temperature register. If a numeric reading is required, add one I²C sensor per board near the driver array (2 GPIO); that is the 2-pin line above.
 
 **Pico 2 module limitation:** once CAN-FD, UART and a temperature sensor are added, the Pico 2 module's ~26 GPIO is too tight even with both shift registers: 12 STEP + 3 DIR + 3 DIAG + 5 CAN + 3 UART + 2 temp + 1 enable = 29. For a CAN node, use the **bare RP2354B** (48 GPIO); the Pico 2 module is better suited to the WiFi-only variant or to 8 axes.
 

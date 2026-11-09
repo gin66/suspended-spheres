@@ -139,6 +139,7 @@ Four identifiers are reserved for Katapult and are never a legal show frame.
 | 11 | `ASK` — master asks unidentified boards to advertise |
 | 12 | `VERSION_REQ` — field is a board ID or 127 for every board |
 | 13 | `VERSION_RSP` — field is the answering board ID |
+| 14 | `HEALTH` — periodic temperature/health record; field is the answering board ID |
 
 The 7-bit field is a motor field, a board ID, 127, or zero. The type says which:
 
@@ -151,6 +152,7 @@ The 7-bit field is a motor field, a board ID, 127, or zero. The type says which:
 | 10 (`ASSIGN`) | the board ID being given, 0–29 |
 | 12 (`VERSION_REQ`) | board ID 0–29, or 127 for every board |
 | 13 (`VERSION_RSP`) | the answering board ID, 0–29 |
+| 14 (`HEALTH`) | the answering board ID, 0–29; field 127 is invalid |
 
 - Type 0 carries a motor field, never a board ID by itself. Motor 0 is
   board 0 axis 0; it is a legal motion field. The same numeric value can
@@ -165,6 +167,9 @@ The 7-bit field is a motor field, a board ID, 127, or zero. The type says which:
   `motion_streaming_whitepaper.md` §5.5.
 - Identifiers `0x3E8`, `0x3E9`, `0x3F0`, and `0x3F1` are dropped even if a
   later type code would have produced them.
-- Types 12 and 13 are the version query and response. Types 14–15 remain
-  reserved.
+- Types 12 and 13 are the version query and response; type 14 is the periodic
+  health record. Type 15 remains reserved.
+- Type 14 (`HEALTH`) is node → master only. The board sends it at 1 Hz with a
+  `33 ms × board_id` phase offset after it has a board ID; it ignores received
+  type-14 frames. The payload is in `motion_streaming_whitepaper.md` §4.5.
 - The motion payload layout is in `motion_streaming_whitepaper.md` §4.2. Sync, status and command payloads are in §4.5 of that paper.
