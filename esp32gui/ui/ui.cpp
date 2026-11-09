@@ -381,6 +381,30 @@ void on_log_clear(lv_event_t *e) {
   if (s_actions.log_clear != nullptr) s_actions.log_clear();
 }
 
+void on_scroll_up(lv_event_t *e) {
+  lv_obj_t *target = static_cast<lv_obj_t *>(lv_event_get_user_data(e));
+  if (target != nullptr) lv_obj_scroll_by_bounded(target, 0, -160, LV_ANIM_ON);
+}
+
+void on_scroll_down(lv_event_t *e) {
+  lv_obj_t *target = static_cast<lv_obj_t *>(lv_event_get_user_data(e));
+  if (target != nullptr) lv_obj_scroll_by_bounded(target, 0, 160, LV_ANIM_ON);
+}
+
+/* The panel has no swipe gestures: clearing SCROLLABLE stops touch scrolling
+ * while the two buttons still move the content with lv_obj_scroll_by_bounded. */
+void add_scroll_buttons(lv_obj_t *parent, lv_obj_t *target, int x, int y,
+                        int w, int h, int gap, bool vertical) {
+  lv_obj_clear_flag(target, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scrollbar_mode(target, LV_SCROLLBAR_MODE_OFF);
+  lv_obj_t *up = make_button(parent, LV_SYMBOL_UP, w, h, on_scroll_up, target);
+  lv_obj_set_pos(up, x, y);
+  lv_obj_t *down = make_button(parent, LV_SYMBOL_DOWN, w, h, on_scroll_down,
+                               target);
+  lv_obj_set_pos(down, vertical ? x : x + w + gap,
+                 vertical ? y + h + gap : y);
+}
+
 void on_can_toggle(lv_event_t *e) {
   (void)e;
   if (s_snap.can_running) {
@@ -698,7 +722,7 @@ void build_animations(void) {
   s_anim_status = make_label(controls, "idle", &lv_font_montserrat_12, C_MUTED);
   lv_obj_set_pos(s_anim_status, 356, 10);
   lv_label_set_long_mode(s_anim_status, LV_LABEL_LONG_WRAP);
-  lv_obj_set_width(s_anim_status, 300);
+  lv_obj_set_width(s_anim_status, 200);
 
   lv_obj_t *list = lv_obj_create(s);
   lv_obj_remove_style_all(list);
@@ -716,6 +740,7 @@ void build_animations(void) {
   lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_ACTIVE);
   s_anim_list = list;
   s_anim_shown_hash = 0;
+  add_scroll_buttons(controls, list, 568, 8, 48, 48, 8, false);
 }
 
 void build_grid(void) {
@@ -779,7 +804,7 @@ void build_nodes(void) {
   lv_obj_t *head = make_panel(s, 12, 8, 688, 58);
   make_label(head, "DISCOVERED BOARDS", &lv_font_montserrat_20, C_TEXT);
   s_nodes_summary = make_label(head, "", &lv_font_montserrat_12, C_MUTED);
-  lv_obj_align(s_nodes_summary, LV_ALIGN_RIGHT_MID, -12, 0);
+  lv_obj_align(s_nodes_summary, LV_ALIGN_RIGHT_MID, -120, 0);
 
   lv_obj_t *list = lv_obj_create(s);
   lv_obj_remove_style_all(list);
@@ -797,6 +822,7 @@ void build_nodes(void) {
   lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_ACTIVE);
   s_nodes_list = list;
   s_nodes_shown_hash = 0;
+  add_scroll_buttons(head, list, 560, 2, 44, 30, 12, false);
 }
 
 void build_motor(void) {
@@ -841,7 +867,7 @@ void build_motor(void) {
   lv_obj_t *grid = lv_obj_create(assign);
   lv_obj_remove_style_all(grid);
   lv_obj_set_pos(grid, 8, 28);
-  lv_obj_set_size(grid, 430, 198);
+  lv_obj_set_size(grid, 430, 160);
   lv_obj_set_style_bg_color(grid, C_BG, 0);
   lv_obj_set_style_bg_opa(grid, LV_OPA_COVER, 0);
   lv_obj_set_style_radius(grid, 6, 0);
@@ -852,6 +878,7 @@ void build_motor(void) {
   s_motor_grid = grid;
   s_motor_cols = 0;
   s_motor_rows = 0;
+  add_scroll_buttons(assign, grid, 8, 194, 52, 30, 8, false);
 
   lv_obj_t *pos_lbl = make_label(assign, "POSITION", &lv_font_montserrat_12,
                                  C_MUTED);
@@ -988,15 +1015,18 @@ void build_log(void) {
 
   s_log_text = lv_textarea_create(s);
   lv_obj_set_pos(s_log_text, 12, 64);
-  lv_obj_set_size(s_log_text, 688, 380);
+  lv_obj_set_size(s_log_text, 624, 380);
   lv_textarea_set_text(s_log_text, "");
   lv_obj_set_style_bg_color(s_log_text, C_PANEL, 0);
   lv_obj_set_style_bg_opa(s_log_text, LV_OPA_COVER, 0);
   lv_obj_set_style_text_color(s_log_text, C_TEXT, 0);
   lv_obj_set_style_text_font(s_log_text, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_pad_left(s_log_text, 8, 0);
+  lv_obj_set_style_pad_top(s_log_text, 8, 0);
   lv_obj_set_style_border_color(s_log_text, C_LINE, 0);
   lv_obj_set_style_border_width(s_log_text, 1, 0);
   lv_obj_clear_flag(s_log_text, LV_OBJ_FLAG_CLICKABLE);
+  add_scroll_buttons(s, s_log_text, 644, 196, 48, 48, 18, true);
 }
 
 void build_can(void) {
@@ -1010,38 +1040,32 @@ void build_can(void) {
   lv_obj_t *clear = make_button(head, "CLEAR", 100, 36, on_can_clear, nullptr);
   lv_obj_align(clear, LV_ALIGN_RIGHT_MID, -12, 0);
 
-  char header[96];
-  std::snprintf(header, sizeof(header), "%-3s %-4s %5s %s", "ID", "TYPE",
-                "CNT", "DATA");
-  lv_obj_t *s_can_header = lv_textarea_create(s);
-  lv_obj_set_pos(s_can_header, 12, 62);
-  lv_obj_set_size(s_can_header, 688, 30);
-  lv_textarea_set_text(s_can_header, header);
-  lv_obj_set_style_bg_color(s_can_header, C_PANEL2, 0);
-  lv_obj_set_style_bg_opa(s_can_header, LV_OPA_COVER, 0);
-  lv_obj_set_style_text_color(s_can_header, C_MUTED, 0);
-  lv_obj_set_style_text_font(s_can_header, &lv_font_unscii_16, 0);
-  lv_obj_set_style_pad_left(s_can_header, 8, 0);
-  lv_obj_set_style_pad_top(s_can_header, 4, 0);
-  lv_obj_set_style_pad_bottom(s_can_header, 4, 0);
-  lv_obj_set_style_border_color(s_can_header, C_LINE, 0);
-  lv_obj_set_style_border_width(s_can_header, 1, 0);
-  lv_obj_set_style_radius(s_can_header, 6, 0);
-  lv_obj_clear_flag(s_can_header, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_clear_flag(s_can_header, LV_OBJ_FLAG_SCROLLABLE);
+  /* A label, not a text area, so the column headings are centred in their
+   * row and cannot be clipped by the widget's text cursor. */
+  lv_obj_t *header = make_panel(s, 12, 62, 624, 30);
+  lv_obj_set_style_pad_all(header, 0, 0);
+  lv_obj_set_style_bg_color(header, C_PANEL2, 0);
+  const char *cols[4] = {"ID", "TYPE", "CNT", "DATA"};
+  const int col_x[4] = {8, 46, 94, 156};
+  for (int i = 0; i < 4; ++i) {
+    lv_obj_t *l = make_label(header, cols[i], &lv_font_montserrat_12, C_MUTED);
+    lv_obj_set_pos(l, col_x[i], 7);
+  }
 
   s_can_text = lv_textarea_create(s);
   lv_obj_set_pos(s_can_text, 12, 96);
-  lv_obj_set_size(s_can_text, 688, 348);
+  lv_obj_set_size(s_can_text, 624, 348);
   lv_textarea_set_text(s_can_text, "");
   lv_obj_set_style_bg_color(s_can_text, C_PANEL, 0);
   lv_obj_set_style_bg_opa(s_can_text, LV_OPA_COVER, 0);
   lv_obj_set_style_text_color(s_can_text, C_TEXT, 0);
-  lv_obj_set_style_text_font(s_can_text, &lv_font_unscii_16, 0);
+  lv_obj_set_style_text_font(s_can_text, &lv_font_montserrat_12, 0);
   lv_obj_set_style_pad_left(s_can_text, 8, 0);
+  lv_obj_set_style_pad_top(s_can_text, 6, 0);
   lv_obj_set_style_border_color(s_can_text, C_LINE, 0);
   lv_obj_set_style_border_width(s_can_text, 1, 0);
   lv_obj_clear_flag(s_can_text, LV_OBJ_FLAG_CLICKABLE);
+  add_scroll_buttons(s, s_can_text, 644, 196, 48, 48, 18, true);
 }
 
 void build_upgrade(void) {
@@ -1061,7 +1085,7 @@ void build_upgrade(void) {
   s_upgrade_status = make_label(controls, "idle", &lv_font_montserrat_12, C_MUTED);
   lv_obj_set_pos(s_upgrade_status, 356, 10);
   lv_label_set_long_mode(s_upgrade_status, LV_LABEL_LONG_WRAP);
-  lv_obj_set_width(s_upgrade_status, 300);
+  lv_obj_set_width(s_upgrade_status, 190);
   s_upgrade_progress = lv_bar_create(controls);
   lv_obj_set_pos(s_upgrade_progress, 356, 44);
   lv_obj_set_size(s_upgrade_progress, 300, 8);
@@ -1088,6 +1112,7 @@ void build_upgrade(void) {
   lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_ACTIVE);
   s_upgrade_list = list;
   s_upgrade_shown_hash = 0;
+  add_scroll_buttons(controls, list, 568, 8, 48, 48, 8, false);
 }
 
 void build_settings(void) {
@@ -1615,15 +1640,16 @@ void ui_update(const ui_snapshot_t *snapshot) {
         char data[24];
         size_t dp = 0;
         for (int b = 0; b < e->data_len && b < 8; ++b) {
-          dp += (size_t)std::snprintf(data + dp, sizeof(data) - dp, "%02x",
-                                      e->data[b]);
+          dp += (size_t)std::snprintf(data + dp, sizeof(data) - dp, "%s%02x",
+                                      b ? " " : "", e->data[b]);
         }
         data[dp] = '\0';
-        off += (size_t)std::snprintf(
-            s_can_buf + off, sizeof(s_can_buf) - off,
-            "%03lx %-4u %5lu %s\n",
+        const int wrote = std::snprintf(
+            s_can_buf + off, sizeof(s_can_buf) - off, "%03lx %-4u %5lu  %s\n",
             (unsigned long)e->identifier, (unsigned)e->type,
             (unsigned long)e->frame_count, data);
+        if (wrote < 0) break;
+        off += (size_t)wrote;
         if (off >= sizeof(s_can_buf) - 1) break;
       }
       if (s_snap.can_entry_count == 0) {
