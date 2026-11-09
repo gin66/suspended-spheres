@@ -15,6 +15,16 @@ constexpr int kStatusH = 28;
 constexpr int kScreenW = kRailX;
 constexpr int kScreenH = kHeight - kStatusH;
 
+/* CAN scope: fixed columns and a paged row pool. A proportional font cannot
+ * keep space-padded columns aligned, so each field has its own label x. */
+constexpr int kCanRows = 16;
+constexpr int kCanRowH = 20;
+constexpr int kCanIdX = 8;
+constexpr int kCanTypeX = 56;
+constexpr int kCanCntX = 104;
+constexpr int kCanCntW = 60;
+constexpr int kCanDataX = 176;
+
 const lv_color_t C_BG = lv_color_hex(0x0E1116);
 const lv_color_t C_RAIL = lv_color_hex(0x0A0D12);
 const lv_color_t C_PANEL = lv_color_hex(0x171C24);
@@ -97,12 +107,16 @@ lv_obj_t *s_log_text;
 lv_obj_t *s_log_status;
 
 /* CAN scope screen */
-lv_obj_t *s_can_text;
 lv_obj_t *s_can_summary;
 lv_obj_t *s_can_bus;
+lv_obj_t *s_can_empty;
+lv_obj_t *s_can_row_id[kCanRows];
+lv_obj_t *s_can_row_type[kCanRows];
+lv_obj_t *s_can_row_cnt[kCanRows];
+lv_obj_t *s_can_row_data[kCanRows];
+int s_can_first = 0;
 uint32_t s_can_shown_hash = 0;
 uint32_t s_can_last_ms = 0;
-char s_can_buf[UI_MAX_CAN_IDS * 96];
 
 /* Upgrade screen */
 lv_obj_t *s_upgrade_list;
@@ -403,6 +417,67 @@ void add_scroll_buttons(lv_obj_t *parent, lv_obj_t *target, int x, int y,
                                target);
   lv_obj_set_pos(down, vertical ? x : x + w + gap,
                  vertical ? y + h + gap : y);
+}
+
+void can_refresh_rows(void) {
+  const int n = s_snap.can_entry_count;
+  const int max_first = n > kCanRows ? n - kCanRows : 0;
+  if (s_can_first > max_first) s_can_first = max_first;
+  if (s_can_first < 0) s_can_first = 0;
+
+  for (int i = 0; i < kCanRows; ++i) {
+    lv_obj_t *id = s_can_row_id[i];
+    lv_obj_t *type = s_can_row_type[i];
+    lv_obj_t *cnt = s_can_row_cnt[i];
+    lv_obj_t *data = s_can_row_data[i];
+    const int idx = s_can_first + i;
+    if (idx >= n) {
+      lv_obj_add_flag(id, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(type, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(cnt, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(data, LV_OBJ_FLAG_HIDDEN);
+      continue;
+    }
+
+    const ui_can_entry_t *e = &s_snap.can_entries[idx];
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%03lx", (unsigned long)e->identifier);
+    lv_label_set_text(id, buf);
+    std::snprintf(buf, sizeof(buf), "%u", (unsigned)e->type);
+    lv_label_set_text(type, buf);
+    std::snprintf(buf, sizeof(buf), "%lu", (unsigned long)e->frame_count);
+    lv_label_set_text(cnt, buf);
+    size_t dp = 0;
+    for (int b = 0; b < e->data_len && b < 8; ++b) {
+      dp += (size_t)std::snprintf(buf + dp, sizeof(buf) - dp, "%s%02x",
+                                  b ? " " : "", e->data[b]);
+    }
+    buf[dp] = '\0';
+    lv_label_set_text(data, buf);
+
+    lv_obj_clear_flag(id, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(type, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(cnt, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(data, LV_OBJ_FLAG_HIDDEN);
+  }
+
+  if (s_can_empty != nullptr) {
+    if (n == 0) lv_obj_clear_flag(s_can_empty, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(s_can_empty, LV_OBJ_FLAG_HIDDEN);
+  }
+}
+
+void on_can_page_up(lv_event_t *e) {
+  (void)e;
+  s_can_first -= kCanRows;
+  if (s_can_first < 0) s_can_first = 0;
+  can_refresh_rows();
+}
+
+void on_can_page_down(lv_event_t *e) {
+  (void)e;
+  s_can_first += kCanRows;
+  can_refresh_rows();
 }
 
 void on_can_toggle(lv_event_t *e) {
@@ -1040,32 +1115,63 @@ void build_can(void) {
   lv_obj_t *clear = make_button(head, "CLEAR", 100, 36, on_can_clear, nullptr);
   lv_obj_align(clear, LV_ALIGN_RIGHT_MID, -12, 0);
 
-  /* A label, not a text area, so the column headings are centred in their
-   * row and cannot be clipped by the widget's text cursor. */
-  lv_obj_t *header = make_panel(s, 12, 62, 624, 30);
+  /* Fixed label columns. A proportional font cannot keep space-padded
+   * columns aligned, so every field has its own x and the rows are a small
+   * pool of labels that is refilled from the first visible entry. */
+  const lv_font_t *can_font = &lv_font_montserrat_16;
+  lv_obj_t *header = make_panel(s, 12, 62, 624, 32);
   lv_obj_set_style_pad_all(header, 0, 0);
   lv_obj_set_style_bg_color(header, C_PANEL2, 0);
-  const char *cols[4] = {"ID", "TYPE", "CNT", "DATA"};
-  const int col_x[4] = {8, 46, 94, 156};
-  for (int i = 0; i < 4; ++i) {
-    lv_obj_t *l = make_label(header, cols[i], &lv_font_montserrat_12, C_MUTED);
-    lv_obj_set_pos(l, col_x[i], 7);
-  }
+  lv_obj_t *h_id = make_label(header, "ID", can_font, C_MUTED);
+  lv_obj_set_pos(h_id, kCanIdX, 5);
+  lv_obj_t *h_type = make_label(header, "TYPE", can_font, C_MUTED);
+  lv_obj_set_pos(h_type, kCanTypeX, 5);
+  lv_obj_t *h_cnt = make_label(header, "CNT", can_font, C_MUTED);
+  lv_obj_set_width(h_cnt, kCanCntW);
+  lv_obj_set_style_text_align(h_cnt, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_obj_set_pos(h_cnt, kCanCntX, 5);
+  lv_obj_t *h_data = make_label(header, "DATA", can_font, C_MUTED);
+  lv_obj_set_pos(h_data, kCanDataX, 5);
 
-  s_can_text = lv_textarea_create(s);
-  lv_obj_set_pos(s_can_text, 12, 96);
-  lv_obj_set_size(s_can_text, 624, 348);
-  lv_textarea_set_text(s_can_text, "");
-  lv_obj_set_style_bg_color(s_can_text, C_PANEL, 0);
-  lv_obj_set_style_bg_opa(s_can_text, LV_OPA_COVER, 0);
-  lv_obj_set_style_text_color(s_can_text, C_TEXT, 0);
-  lv_obj_set_style_text_font(s_can_text, &lv_font_montserrat_12, 0);
-  lv_obj_set_style_pad_left(s_can_text, 8, 0);
-  lv_obj_set_style_pad_top(s_can_text, 6, 0);
-  lv_obj_set_style_border_color(s_can_text, C_LINE, 0);
-  lv_obj_set_style_border_width(s_can_text, 1, 0);
-  lv_obj_clear_flag(s_can_text, LV_OBJ_FLAG_CLICKABLE);
-  add_scroll_buttons(s, s_can_text, 644, 196, 48, 48, 18, true);
+  lv_obj_t *body = lv_obj_create(s);
+  lv_obj_remove_style_all(body);
+  lv_obj_set_pos(body, 12, 98);
+  lv_obj_set_size(body, 624, 346);
+  lv_obj_set_style_bg_color(body, C_PANEL, 0);
+  lv_obj_set_style_bg_opa(body, LV_OPA_COVER, 0);
+  lv_obj_set_style_radius(body, 6, 0);
+  lv_obj_set_style_border_width(body, 1, 0);
+  lv_obj_set_style_border_color(body, C_LINE, 0);
+  lv_obj_clear_flag(body, LV_OBJ_FLAG_SCROLLABLE);
+
+  s_can_empty = make_label(body, "no CAN frames yet", can_font, C_MUTED);
+  lv_obj_align(s_can_empty, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_add_flag(s_can_empty, LV_OBJ_FLAG_HIDDEN);
+
+  for (int i = 0; i < kCanRows; ++i) {
+    const int y = 4 + i * kCanRowH;
+    s_can_row_id[i] = make_label(body, "", can_font, C_TEXT);
+    lv_obj_set_pos(s_can_row_id[i], kCanIdX, y);
+    s_can_row_type[i] = make_label(body, "", can_font, C_MUTED);
+    lv_obj_set_pos(s_can_row_type[i], kCanTypeX, y);
+    s_can_row_cnt[i] = make_label(body, "", can_font, C_TEXT);
+    lv_obj_set_width(s_can_row_cnt[i], kCanCntW);
+    lv_obj_set_style_text_align(s_can_row_cnt[i], LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_pos(s_can_row_cnt[i], kCanCntX, y);
+    s_can_row_data[i] = make_label(body, "", can_font, C_TEXT);
+    lv_obj_set_pos(s_can_row_data[i], kCanDataX, y);
+    lv_obj_add_flag(s_can_row_id[i], LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_can_row_type[i], LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_can_row_cnt[i], LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_can_row_data[i], LV_OBJ_FLAG_HIDDEN);
+  }
+  s_can_first = 0;
+
+  lv_obj_t *up = make_button(s, LV_SYMBOL_UP, 48, 48, on_can_page_up, nullptr);
+  lv_obj_set_pos(up, 644, 196);
+  lv_obj_t *down = make_button(s, LV_SYMBOL_DOWN, 48, 48, on_can_page_down,
+                               nullptr);
+  lv_obj_set_pos(down, 644, 262);
 }
 
 void build_upgrade(void) {
@@ -1188,7 +1294,10 @@ void ui_show_screen(int index) {
   if (index >= UI_SCREEN_COUNT) index = UI_SCREEN_COUNT - 1;
   s_screen = index;
   if (index == UI_SCREEN_LOG) s_log_last_ms = 0;
-  if (index == UI_SCREEN_CAN) s_can_last_ms = 0;
+  if (index == UI_SCREEN_CAN) {
+    s_can_last_ms = 0;
+    s_can_first = 0;
+  }
   for (int i = 0; i < UI_SCREEN_COUNT; ++i) {
     set_hidden(s_screens[i], i != index);
   }
@@ -1634,28 +1743,7 @@ void ui_update(const ui_snapshot_t *snapshot) {
     if (s_can_last_ms == 0 || (uint32_t)(can_now - s_can_last_ms) >= 1000u) {
       s_can_shown_hash = can_hash;
       s_can_last_ms = can_now;
-      size_t off = 0;
-      for (int i = 0; i < s_snap.can_entry_count; ++i) {
-        const ui_can_entry_t *e = &s_snap.can_entries[i];
-        char data[24];
-        size_t dp = 0;
-        for (int b = 0; b < e->data_len && b < 8; ++b) {
-          dp += (size_t)std::snprintf(data + dp, sizeof(data) - dp, "%s%02x",
-                                      b ? " " : "", e->data[b]);
-        }
-        data[dp] = '\0';
-        const int wrote = std::snprintf(
-            s_can_buf + off, sizeof(s_can_buf) - off, "%03lx %-4u %5lu  %s\n",
-            (unsigned long)e->identifier, (unsigned)e->type,
-            (unsigned long)e->frame_count, data);
-        if (wrote < 0) break;
-        off += (size_t)wrote;
-        if (off >= sizeof(s_can_buf) - 1) break;
-      }
-      if (s_snap.can_entry_count == 0) {
-        std::snprintf(s_can_buf, sizeof(s_can_buf), "no CAN frames yet");
-      }
-      lv_textarea_set_text(s_can_text, s_can_buf);
+      can_refresh_rows();
     }
   }
 
