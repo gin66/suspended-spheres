@@ -45,6 +45,13 @@ int s_test_count = 0;
 int s_test_index = 0;
 uint32_t s_test_next_ms = 0;
 volatile bool s_reidentify_pending = false;
+volatile int s_reidentify_board = -1;  /* -1 = broadcast */
+volatile uint32_t s_last_reidentify_ms = 0;
+constexpr uint32_t kReidentifyRetryMs = 1000u;
+/* Ignore orphan status frames for this long after a re-identify. Frames that
+ * were already in flight before the board cleared its ID would otherwise
+ * schedule another re-identify in a loop. */
+constexpr uint32_t kReidentifyHoldoffMs = 2000u;
 
 int find_node_locked(const uint8_t flash_id[SS_FLASH_ID_LEN]) {
   for (int i = 0; i < s_count; ++i) {
@@ -121,12 +128,14 @@ void send_ask(void) {
 }
 
 /* A rebooted master starts with an empty node table, but assigned boards
- * keep their RAM board ID and stay silent on ASK. The broadcast clears that
- * ID so the ASK that follows re-discovers every board. */
-bool send_reidentify(void) {
+ * keep their RAM board ID and stay silent on ASK. This clears that ID on one
+ * board (board_id >= 0) or on every board (-1) so the ASK that follows
+ * re-discovers them. */
+bool send_reidentify(int board_id) {
   ss_can_frame_t f;
   std::memset(&f, 0, sizeof(f));
-  f.id = (uint32_t)mc_id_make(MC_BOARD_ALL, kTypeCommand);
+  const int field = board_id < 0 ? MC_BOARD_ALL : board_id;
+  f.id = (uint32_t)mc_id_make(field, kTypeCommand);
   f.len = 8;
   mc_command_t cmd = {};
   cmd.action = MC_CMD_REIDENTIFY;
@@ -134,7 +143,11 @@ bool send_reidentify(void) {
   if (mc_pack_command(&cmd, f.data) != 0) return false;
   const bool ok = can_transport_send(&f);
   if (ok) {
-    SS_LOGI("commission", "re-identify broadcast sent");
+    if (board_id < 0) {
+      SS_LOGI("commission", "re-identify broadcast sent");
+    } else {
+      SS_LOGI("commission", "re-identify sent to board %d", board_id);
+    }
   } else {
     s_stats.tx_errors++;
   }
@@ -218,6 +231,7 @@ void handle_status(const ss_can_frame_t *frame) {
   mc_status_t st;
   if (mc_unpack_status(frame->data, &st) != 0) return;
 
+  const uint32_t now = millis();
   bool orphan = false;
   portENTER_CRITICAL(&s_lock);
   const int idx = find_board_locked(board_id);
@@ -232,8 +246,10 @@ void handle_status(const ss_can_frame_t *frame) {
                 sizeof(node->following_error));
     node->buffer_depth = st.buffer_depth;
     node->last_seq = st.last_seq;
-  } else if (!s_reidentify_pending) {
+  } else if (!s_reidentify_pending &&
+             (uint32_t)(now - s_last_reidentify_ms) >= kReidentifyHoldoffMs) {
     s_reidentify_pending = true;
+    s_reidentify_board = board_id;
     orphan = true;
   }
   portEXIT_CRITICAL(&s_lock);
@@ -252,6 +268,7 @@ void handle_health(const ss_can_frame_t *frame) {
   mc_health_t h;
   if (mc_unpack_health(frame->data, &h) != 0) return;
 
+  const uint32_t now = millis();
   portENTER_CRITICAL(&s_lock);
   const int idx = find_board_locked(board_id);
   if (idx >= 0) {
@@ -280,7 +297,11 @@ void handle_health(const ss_can_frame_t *frame) {
               (unsigned)old_ot, (unsigned)h.ot_mask);
     }
   } else {
-    if (!s_reidentify_pending) s_reidentify_pending = true;
+    if (!s_reidentify_pending &&
+        (uint32_t)(now - s_last_reidentify_ms) >= kReidentifyHoldoffMs) {
+      s_reidentify_pending = true;
+      s_reidentify_board = board_id;
+    }
     portEXIT_CRITICAL(&s_lock);
   }
 }
@@ -292,6 +313,7 @@ void handle_version(const ss_can_frame_t *frame) {
   mc_version_t v;
   if (mc_unpack_version_rsp(frame->data, &v) != 0) return;
 
+  const uint32_t now = millis();
   portENTER_CRITICAL(&s_lock);
   const int idx = find_board_locked(board_id);
   if (idx >= 0) {
@@ -306,8 +328,10 @@ void handle_version(const ss_can_frame_t *frame) {
       std::snprintf(node->sw_version, sizeof(node->sw_version), "%u.%u.%u",
                     (unsigned)v.major, (unsigned)v.minor, (unsigned)v.patch);
     }
-  } else if (!s_reidentify_pending) {
+  } else if (!s_reidentify_pending &&
+             (uint32_t)(now - s_last_reidentify_ms) >= kReidentifyHoldoffMs) {
     s_reidentify_pending = true;
+    s_reidentify_board = board_id;
   }
   portEXIT_CRITICAL(&s_lock);
 }
@@ -354,6 +378,7 @@ void commission_init(void) {
   commission_reload_config();
   s_last_ask_ms = millis() - kAskPeriodMs;  /* first ASK immediately */
   s_reidentify_pending = true;
+  s_reidentify_board = -1;
   s_selected = 0;
   s_test_active = false;
   s_test_count = 0;
@@ -402,12 +427,24 @@ void commission_on_frame(const ss_can_frame_t *frame, void *ctx) {
 void commission_poll(void) {
   const uint32_t now = millis();
 
-  if ((uint32_t)(now - s_last_ask_ms) >= kAskPeriodMs) {
-    s_last_ask_ms = now;
-    if (can_transport_running()) {
-      if (s_reidentify_pending && send_reidentify()) {
+  const bool ask_due = (uint32_t)(now - s_last_ask_ms) >= kAskPeriodMs;
+  bool sent_reidentify = false;
+  if (can_transport_running()) {
+    /* A status/health/version frame from an unknown board ID means the board
+     * kept its RAM ID while this table lost it. Recover that board at once,
+     * not only on the boot broadcast; the retry limit keeps the 10 Hz status
+     * stream from turning into a TX storm. */
+    const bool retry_ok =
+        (uint32_t)(now - s_last_reidentify_ms) >= kReidentifyRetryMs;
+    if (s_reidentify_pending && (ask_due || retry_ok)) {
+      if (send_reidentify(s_reidentify_board)) {
         s_reidentify_pending = false;
+        s_last_reidentify_ms = now;
+        sent_reidentify = true;
       }
+    }
+    if (ask_due || sent_reidentify) {
+      s_last_ask_ms = now;
       send_ask();
     }
   }

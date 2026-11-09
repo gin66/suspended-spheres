@@ -87,7 +87,9 @@ powered when the master rebooted. Without it an assigned board stays silent on
 `ASK` and the fresh master has an empty node table. The master also schedules
 the same broadcast when it receives a status, health or version frame from a
 board ID that is not in its node table, so a board that missed the boot
-broadcast is recovered on the next 5 s cycle.
+broadcast is recovered on the next cycle. That recovery is sent to the single
+board ID (`field = board ID`), not as a broadcast; a board accepts
+re-identify when the field is its own board ID or 127.
 
 | Step | Who | CAN ID | Payload |
 |------|-----|--------|---------|
@@ -166,9 +168,10 @@ The 7-bit field is a motor field, a board ID, 127, or zero. The type says which:
 | 14 (`HEALTH`) | the answering board ID, 0–29; field 127 is invalid |
 
 - Type 4 `COMMAND` carries `action, axis_mask, distance_mm, speed_mm_s,
-  seq` (whitepaper §4.5). Action `0x7F` on field 127 is re-identify; action
-  3 on field 127 with mask `0x0F` is the operational stop. Type 5 `HOME`
-  carries only the axis mask.
+  seq` (whitepaper §4.5). Action `0x7F` is re-identify: field 127 reaches
+  every board, a single board ID reaches one. Action 3 on field 127 with
+  mask `0x0F` is the operational stop. Type 5 `HOME` carries only the axis
+  mask.
 - Type 0 carries a motor field, never a board ID by itself. Motor 0 is
   board 0 axis 0; it is a legal motion field. The same numeric value can
   be motor 5 or board 5 because the type is different.

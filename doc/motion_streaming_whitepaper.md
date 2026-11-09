@@ -466,9 +466,10 @@ node owns, and how a board is commissioned are in `Fly_Micro4_addressing.md`.
   | 6 | `uint8` | `seq` |
   | 7 | `uint8` | reserved, 0 |
 
-  Field 127 addresses every board. `0x7F` with field 127 is re-identify: the
-  board stops its axes, drops its RAM board ID and answers the next `ASK`.
-  A stop on field 127 with mask `0x0F` is the operational stop.
+  Field 127 addresses every board; a single board ID addresses one. `0x7F`
+  is re-identify: the board stops its axes, drops its RAM board ID and
+  answers the next `ASK`. A stop on field 127 with mask `0x0F` is the
+  operational stop.
 - **Home** (master → node, type 5, field = board ID). One 8-byte frame:
   `[0]` axis mask, `[1..7]` reserved zero. Homing and calibration are on
   demand and are not part of the motion stream.

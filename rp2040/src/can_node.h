@@ -50,4 +50,9 @@ int assigned_board_id();
 bool send(uint16_t id, const uint8_t data[8], uint8_t dlc);
 void tick();
 
+// True once after a re-identify command addressed to this board (or to 127)
+// cleared the RAM board ID. The caller stops the axes; the next ASK then
+// re-advertises the board.
+bool take_reidentify_request();
+
 }  // namespace can_node

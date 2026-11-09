@@ -35,6 +35,7 @@ volatile bool ready_flag = false;
 uint8_t own_flash_id[8] = {};
 volatile int board_id = -1;
 volatile bool disc_pending = false;
+volatile bool reidentify_requested = false;
 volatile uint32_t disc_due_us = 0;
 
 void on_can(struct can2040*, uint32_t notify, struct can2040_msg* msg) {
@@ -55,13 +56,16 @@ void on_can(struct can2040*, uint32_t notify, struct can2040_msg* msg) {
                 board_id = assigned;
                 disc_pending = false;
             }
-        } else if (frame_type == kCommand && field(id) == MC_BOARD_ALL &&
-                   msg->dlc >= 1 && msg->data[0] == MC_CMD_REIDENTIFY) {
-            /* The master reboots into an empty node table. Dropping the RAM
-             * ID here, in the receive path, lets the ASK that follows the
-             * broadcast find this board. The main loop stops the axes. */
+        } else if (frame_type == kCommand && msg->dlc >= 1 &&
+                   msg->data[0] == MC_CMD_REIDENTIFY &&
+                   (field(id) == MC_BOARD_ALL || (int)field(id) == board_id)) {
+            /* The master reboots into an empty node table, or has a board ID
+             * it cannot map. Dropping the RAM ID here, in the receive path,
+             * lets the ASK that follows re-discover this board. The main
+             * loop stops the axes. */
             board_id = -1;
             disc_pending = false;
+            reidentify_requested = true;
         }
 
         uint8_t next = (uint8_t)((head + 1) % kQueueLength);
@@ -169,6 +173,14 @@ void tick() {
     } else {
         disc_due_us = time_us_32() + 1000u;
     }
+}
+
+bool take_reidentify_request() {
+    if (!reidentify_requested) {
+        return false;
+    }
+    reidentify_requested = false;
+    return true;
 }
 
 Stats stats() {

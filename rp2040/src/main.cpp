@@ -150,17 +150,6 @@ void handle_frame(const can_node::Frame& frame) {
         if (mc_unpack_command(frame.data, frame.dlc, &cmd) != 0) {
             return;
         }
-        if (cmd.action == MC_CMD_REIDENTIFY) {
-            if (mc_id_field(id) != MC_BOARD_ALL) {
-                return;
-            }
-            /* can_node dropped the RAM ID in the receive path. Leave the
-             * outputs enabled so a partly wound ball is held, not dropped. */
-            stepper_axes::stopAll();
-            s_node_state = MC_STATUS_IDLE;
-            Serial.println("command: re-identify; axes stopped");
-            return;
-        }
         if (board < 0 || mc_board_accepts_id(board, id) == 0) {
             return;
         }
@@ -225,6 +214,14 @@ void loop() {
     can_node::Frame frame;
     while (can_node::poll(&frame)) {
         handle_frame(frame);
+    }
+
+    if (can_node::take_reidentify_request()) {
+        /* can_node dropped the RAM ID in the receive path. Leave the
+         * outputs enabled so a partly wound ball is held, not dropped. */
+        stepper_axes::stopAll();
+        s_node_state = MC_STATUS_IDLE;
+        Serial.println("command: re-identify; axes stopped");
     }
 
     uint32_t now = millis();
