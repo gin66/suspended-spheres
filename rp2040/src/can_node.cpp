@@ -55,6 +55,13 @@ void on_can(struct can2040*, uint32_t notify, struct can2040_msg* msg) {
                 board_id = assigned;
                 disc_pending = false;
             }
+        } else if (frame_type == kCommand && field(id) == MC_BOARD_ALL &&
+                   msg->dlc >= 1 && msg->data[0] == MC_CMD_REIDENTIFY) {
+            /* The master reboots into an empty node table. Dropping the RAM
+             * ID here, in the receive path, lets the ASK that follows the
+             * broadcast find this board. The main loop stops the axes. */
+            board_id = -1;
+            disc_pending = false;
         }
 
         uint8_t next = (uint8_t)((head + 1) % kQueueLength);

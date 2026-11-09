@@ -60,6 +60,41 @@ void setEnabled(bool enabled) {
     }
 }
 
+void setSpeed(uint8_t index, uint32_t speed_hz) {
+    FastAccelStepper* stepper = axis(index);
+    if (stepper != nullptr) {
+        stepper->setSpeedInHz(speed_hz);
+    }
+}
+
+void setAcceleration(uint8_t index, uint32_t accel_steps_s2) {
+    FastAccelStepper* stepper = axis(index);
+    if (stepper != nullptr) {
+        stepper->setAcceleration((int32_t)accel_steps_s2);
+    }
+}
+
+bool move(uint8_t index, int32_t steps) {
+    FastAccelStepper* stepper = axis(index);
+    if (stepper == nullptr) {
+        return false;
+    }
+    return stepper->move(steps) == MOVE_OK;
+}
+
+void stop(uint8_t index) {
+    FastAccelStepper* stepper = axis(index);
+    if (stepper != nullptr) {
+        stepper->stopMove();
+    }
+}
+
+void stopAll() {
+    for (uint8_t i = 0; i < board::kDriveCount; i++) {
+        stop(i);
+    }
+}
+
 bool moveTo(uint8_t index, int32_t position) {
     FastAccelStepper* stepper = axis(index);
     if (stepper == nullptr) {

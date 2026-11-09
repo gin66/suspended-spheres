@@ -454,8 +454,24 @@ node owns, and how a board is commissioned are in `Fly_Micro4_addressing.md`.
   A board delays its response by `1 ms × (board_id mod 10)` so a query to all
   boards does not turn into a burst of identical identifiers. The panel keeps
   the last version per board; a missing answer is shown as `--`.
-- **Command/home/parameter**: on demand, acknowledged. Homing and calibration
-  are not in the motion stream.
+- **Command** (master → node, type 4, field = board ID or 127). One 8-byte
+  frame, little-endian:
+
+  | Offset | Type | Field |
+  |--------|------|--------|
+  | 0 | `uint8` | `action`: 1 up, 2 down, 3 stop, `0x7F` re-identify |
+  | 1 | `uint8` | `axis_mask`, bits 0–3 |
+  | 2–3 | `uint16` | `distance_mm` |
+  | 4–5 | `uint16` | `speed_mm_s` |
+  | 6 | `uint8` | `seq` |
+  | 7 | `uint8` | reserved, 0 |
+
+  Field 127 addresses every board. `0x7F` with field 127 is re-identify: the
+  board stops its axes, drops its RAM board ID and answers the next `ASK`.
+  A stop on field 127 with mask `0x0F` is the operational stop.
+- **Home** (master → node, type 5, field = board ID). One 8-byte frame:
+  `[0]` axis mask, `[1..7]` reserved zero. Homing and calibration are on
+  demand and are not part of the motion stream.
 - **E-stop**: the hardwired power removal remains the safety function
   (`FR-MOT-011`). A CAN stop is operational only.
 

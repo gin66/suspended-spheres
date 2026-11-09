@@ -224,5 +224,76 @@ static int test_p12_health_payload(void) {
     return 0;
 }
 
+/* P13 — the type-4 command payload: action, axis mask, distance, speed and
+ * sequence. The re-identify action is the broadcast that clears a RAM board
+ * ID so a rebooted master can discover the board again. */
+static int test_p13_command_payloads(void) {
+    const mc_command_t in = {MC_CMD_DOWN, 0x05, 1234, 56, 0xA5};
+    const uint8_t expect[8] = {
+        0x02,        /* down      */
+        0x05,        /* axes 0, 2 */
+        0xD2, 0x04,  /* 1234 mm   */
+        0x38, 0x00,  /* 56 mm/s   */
+        0xA5,        /* seq       */
+        0x00,        /* reserved  */
+    };
+    uint8_t buf[8];
+    mc_command_t out = {0, 0, 0, 0, 0};
+
+    ASSERT(mc_pack_command(&in, buf) == 0);
+    for (int i = 0; i < 8; ++i)
+        ASSERT(buf[i] == expect[i]);
+
+    ASSERT(mc_unpack_command(buf, 8, &out) == 0);
+    ASSERT(out.action == in.action);
+    ASSERT(out.axis_mask == in.axis_mask);
+    ASSERT(out.distance_mm == in.distance_mm);
+    ASSERT(out.speed_mm_s == in.speed_mm_s);
+    ASSERT(out.seq == in.seq);
+
+    const mc_command_t ri = {MC_CMD_REIDENTIFY, 0, 0, 0, 0};
+    ASSERT(mc_pack_command(&ri, buf) == 0);
+    ASSERT(buf[0] == 0x7F);
+    ASSERT(mc_unpack_command(buf, 8, &out) == 0);
+    ASSERT(out.action == MC_CMD_REIDENTIFY);
+
+    ASSERT(mc_pack_command(0, buf) == -1);
+    ASSERT(mc_pack_command(&in, 0) == -1);
+    mc_command_t bad = in;
+    bad.action = 0;
+    ASSERT(mc_pack_command(&bad, buf) == -1);
+    bad = in;
+    bad.axis_mask = 0x10;
+    ASSERT(mc_pack_command(&bad, buf) == -1);
+    ASSERT(mc_unpack_command(buf, 7, &out) == -1);
+    ASSERT(mc_unpack_command(0, 8, &out) == -1);
+    ASSERT(mc_unpack_command(buf, 8, 0) == -1);
+    return 0;
+}
+
+/* P14 — the type-5 home payload is an 8-byte frame carrying only the axis
+ * mask. HOME is not motion data and has no distance or speed. */
+static int test_p14_home_payload(void) {
+    uint8_t buf[8];
+    uint8_t mask = 0;
+
+    ASSERT(mc_pack_home(0x09, buf) == 0);
+    const uint8_t expect[8] = {0x09, 0, 0, 0, 0, 0, 0, 0};
+    for (int i = 0; i < 8; ++i)
+        ASSERT(buf[i] == expect[i]);
+
+    ASSERT(mc_unpack_home(buf, 8, &mask) == 0);
+    ASSERT(mask == 0x09);
+
+    ASSERT(mc_pack_home(0x10, buf) == -1);
+    ASSERT(mc_pack_home(0, 0) == -1);
+    ASSERT(mc_unpack_home(buf, 7, &mask) == -1);
+    ASSERT(mc_unpack_home(0, 8, &mask) == -1);
+    ASSERT(mc_unpack_home(buf, 8, 0) == -1);
+    return 0;
+}
+
 static int reg_p11 = add_test("P11", test_p11_version_payloads);
 static int reg_p12 = add_test("P12", test_p12_health_payload);
+static int reg_p13 = add_test("P13", test_p13_command_payloads);
+static int reg_p14 = add_test("P14", test_p14_home_payload);

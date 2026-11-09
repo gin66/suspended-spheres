@@ -80,6 +80,12 @@ sends the request every **5 s** for the life of the run, so a board that
 lost its RAM ID can rejoin. One 8-byte advertisement is negligible next to
 the motion stream.
 
+At boot the master broadcasts **re-identify** (type 4, field 127, action
+`0x7F`) before the first `ASK`. Every board drops its RAM board ID and stops
+its axes, so the `ASK` that follows re-discovers boards that were still
+powered when the master rebooted. Without it an assigned board stays silent on
+`ASK` and the fresh master has an empty node table.
+
 | Step | Who | CAN ID | Payload |
 |------|-----|--------|---------|
 | 1. Ask | master | field 0, type `ASK` (11) | 8 × `0x00` |
@@ -95,7 +101,9 @@ the motion stream.
 - A board accepts `ASSIGN` only when the first 6 bytes equal its own UUID
   and the last two bytes are zero. It then stores the 7-bit field as its
   board ID and stops answering `ASK`.
-- A board that already has a board ID stays silent on `ASK`.
+- A board that already has a board ID stays silent on `ASK`. The exception
+  is the re-identify broadcast: the board drops its ID, so it has none and
+  answers the next `ASK`.
 - `HELLO` and the two-frame `SET_ID` split are not part of this protocol.
   The board ID is in the `ASSIGN` identifier, and the payload is only the
   UUID, so one frame is enough.
@@ -154,6 +162,10 @@ The 7-bit field is a motor field, a board ID, 127, or zero. The type says which:
 | 13 (`VERSION_RSP`) | the answering board ID, 0–29 |
 | 14 (`HEALTH`) | the answering board ID, 0–29; field 127 is invalid |
 
+- Type 4 `COMMAND` carries `action, axis_mask, distance_mm, speed_mm_s,
+  seq` (whitepaper §4.5). Action `0x7F` on field 127 is re-identify; action
+  3 on field 127 with mask `0x0F` is the operational stop. Type 5 `HOME`
+  carries only the axis mask.
 - Type 0 carries a motor field, never a board ID by itself. Motor 0 is
   board 0 axis 0; it is a legal motion field. The same numeric value can
   be motor 5 or board 5 because the type is different.

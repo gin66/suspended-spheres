@@ -26,12 +26,6 @@ enum : int {
   kTypeHealth = MC_TYPE_HEALTH,
 };
 
-enum : uint8_t {
-  kCmdStop = 3,
-  kCmdUp = 1,
-  kCmdDown = 2,
-};
-
 constexpr uint32_t kAskPeriodMs = 5000u;
 constexpr uint32_t kOnlineWindowMs = 10000u;
 
@@ -50,11 +44,7 @@ int s_test_order[SS_MAX_POSITIONS];
 int s_test_count = 0;
 int s_test_index = 0;
 uint32_t s_test_next_ms = 0;
-
-void put_u16(uint8_t *p, uint16_t v) {
-  p[0] = (uint8_t)(v & 0xFFu);
-  p[1] = (uint8_t)(v >> 8);
-}
+bool s_reidentify_pending = false;
 
 int find_node_locked(const uint8_t flash_id[SS_FLASH_ID_LEN]) {
   for (int i = 0; i < s_count; ++i) {
@@ -128,6 +118,27 @@ void send_ask(void) {
   } else {
     s_stats.tx_errors++;
   }
+}
+
+/* A rebooted master starts with an empty node table, but assigned boards
+ * keep their RAM board ID and stay silent on ASK. The broadcast clears that
+ * ID so the ASK that follows re-discovers every board. */
+bool send_reidentify(void) {
+  ss_can_frame_t f;
+  std::memset(&f, 0, sizeof(f));
+  f.id = (uint32_t)mc_id_make(MC_BOARD_ALL, kTypeCommand);
+  f.len = 8;
+  mc_command_t cmd = {};
+  cmd.action = MC_CMD_REIDENTIFY;
+  cmd.axis_mask = 0;
+  if (mc_pack_command(&cmd, f.data) != 0) return false;
+  const bool ok = can_transport_send(&f);
+  if (ok) {
+    SS_LOGI("commission", "re-identify broadcast sent");
+  } else {
+    s_stats.tx_errors++;
+  }
+  return ok;
 }
 
 void send_version_req(void) {
@@ -329,6 +340,7 @@ void commission_init(void) {
 
   commission_reload_config();
   s_last_ask_ms = millis() - kAskPeriodMs;  /* first ASK immediately */
+  s_reidentify_pending = true;
   s_selected = 0;
   s_test_active = false;
   s_test_count = 0;
@@ -379,7 +391,12 @@ void commission_poll(void) {
 
   if ((uint32_t)(now - s_last_ask_ms) >= kAskPeriodMs) {
     s_last_ask_ms = now;
-    if (can_transport_running()) send_ask();
+    if (can_transport_running()) {
+      if (s_reidentify_pending && send_reidentify()) {
+        s_reidentify_pending = false;
+      }
+      send_ask();
+    }
   }
 
   /* Board IDs are assigned in the CAN callback but persisted here, on the
@@ -485,16 +502,18 @@ bool commission_test_motor(const uint8_t flash_id[8], uint8_t axis,
 
   if (action == SS_MOTOR_HOME) {
     f.id = (uint32_t)mc_id_make(node.board_id, kTypeHome);
-    f.data[0] = (uint8_t)(1u << axis);
+    mc_pack_home((uint8_t)(1u << axis), f.data);
   } else {
+    mc_command_t cmd = {};
+    cmd.action = (action == SS_MOTOR_STOP) ? MC_CMD_STOP
+                 : (action == SS_MOTOR_UP) ? MC_CMD_UP
+                                           : MC_CMD_DOWN;
+    cmd.axis_mask = (uint8_t)(1u << axis);
+    cmd.distance_mm = distance_mm;
+    cmd.speed_mm_s = speed_mm_s;
+    cmd.seq = s_cmd_seq++;
     f.id = (uint32_t)mc_id_make(node.board_id, kTypeCommand);
-    f.data[0] = (action == SS_MOTOR_STOP) ? kCmdStop
-                 : (action == SS_MOTOR_UP) ? kCmdUp
-                                           : kCmdDown;
-    f.data[1] = (uint8_t)(1u << axis);
-    put_u16(&f.data[2], distance_mm);
-    put_u16(&f.data[4], speed_mm_s);
-    f.data[6] = s_cmd_seq++;
+    mc_pack_command(&cmd, f.data);
   }
 
   const bool ok = can_transport_send(&f);
@@ -515,8 +534,10 @@ bool commission_stop_all(void) {
   std::memset(&f, 0, sizeof(f));
   f.id = (uint32_t)mc_id_make(MC_BOARD_ALL, kTypeCommand);
   f.len = 8;
-  f.data[0] = kCmdStop;
-  f.data[1] = 0x0Fu;
+  mc_command_t cmd = {};
+  cmd.action = MC_CMD_STOP;
+  cmd.axis_mask = MC_AXIS_MASK_ALL;
+  mc_pack_command(&cmd, f.data);
   const bool ok = can_transport_send(&f);
   if (!ok) s_stats.tx_errors++;
   return ok;

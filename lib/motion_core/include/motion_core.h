@@ -190,6 +190,34 @@ typedef struct {
 int mc_pack_status(const mc_status_t *s, uint8_t buf[8]);
 int mc_unpack_status(const uint8_t buf[8], mc_status_t *s);
 
+/* Command frame, type 4, exactly 8 bytes, little-endian:
+ *   [0] action: 1 up, 2 down, 3 stop, 0x7F re-identify
+ *   [1] axis_mask, bit n selects axis n
+ *   [2..3] distance_mm   [4..5] speed_mm_s   [6] seq   [7] reserved (0)
+ * A re-identify command is broadcast to field 127. It tells every board to
+ * drop its RAM board ID and stop; the board then answers the next ASK. */
+#define MC_CMD_UP          1
+#define MC_CMD_DOWN        2
+#define MC_CMD_STOP        3
+#define MC_CMD_REIDENTIFY  0x7F
+#define MC_AXIS_MASK_ALL   0x0F
+
+typedef struct {
+    uint8_t  action;
+    uint8_t  axis_mask;
+    uint16_t distance_mm;
+    uint16_t speed_mm_s;
+    uint8_t  seq;
+} mc_command_t;
+
+int mc_pack_command(const mc_command_t *c, uint8_t buf[8]);
+int mc_unpack_command(const uint8_t buf[8], int len, mc_command_t *c);
+
+/* Home frame, type 5, exactly 8 bytes:
+ *   [0] axis_mask   [1..7] reserved (0) */
+int mc_pack_home(uint8_t axis_mask, uint8_t buf[8]);
+int mc_unpack_home(const uint8_t buf[8], int len, uint8_t *axis_mask);
+
 /* Version query and response, types 12 and 13. The request is eight zeros;
  * the response carries a semantic version and a 32-bit build id,
  * little-endian:

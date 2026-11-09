@@ -320,6 +320,62 @@ int mc_unpack_status(const uint8_t buf[8], mc_status_t *s) {
     return 0;
 }
 
+static int command_action_valid(uint8_t action) {
+    return action == MC_CMD_UP || action == MC_CMD_DOWN ||
+           action == MC_CMD_STOP || action == MC_CMD_REIDENTIFY;
+}
+
+int mc_pack_command(const mc_command_t *c, uint8_t buf[8]) {
+    if (c == 0 || buf == 0)
+        return -1;
+    if (!command_action_valid(c->action))
+        return -1;
+    if ((c->axis_mask & (uint8_t)~MC_AXIS_MASK_ALL) != 0)
+        return -1;
+    buf[0] = c->action;
+    buf[1] = c->axis_mask;
+    put_u16le(buf + 2, c->distance_mm);
+    put_u16le(buf + 4, c->speed_mm_s);
+    buf[6] = c->seq;
+    buf[7] = 0;
+    return 0;
+}
+
+int mc_unpack_command(const uint8_t buf[8], int len, mc_command_t *c) {
+    if (buf == 0 || c == 0 || len != 8)
+        return -1;
+    if (!command_action_valid(buf[0]))
+        return -1;
+    if ((buf[1] & (uint8_t)~MC_AXIS_MASK_ALL) != 0)
+        return -1;
+    mc_command_t tmp;
+    tmp.action = buf[0];
+    tmp.axis_mask = buf[1];
+    tmp.distance_mm = get_u16le(buf + 2);
+    tmp.speed_mm_s = get_u16le(buf + 4);
+    tmp.seq = buf[6];
+    *c = tmp;
+    return 0;
+}
+
+int mc_pack_home(uint8_t axis_mask, uint8_t buf[8]) {
+    if (buf == 0 || (axis_mask & (uint8_t)~MC_AXIS_MASK_ALL) != 0)
+        return -1;
+    for (int i = 0; i < 8; ++i)
+        buf[i] = 0;
+    buf[0] = axis_mask;
+    return 0;
+}
+
+int mc_unpack_home(const uint8_t buf[8], int len, uint8_t *axis_mask) {
+    if (buf == 0 || axis_mask == 0 || len != 8)
+        return -1;
+    if ((buf[0] & (uint8_t)~MC_AXIS_MASK_ALL) != 0)
+        return -1;
+    *axis_mask = buf[0];
+    return 0;
+}
+
 int mc_pack_version_req(uint8_t buf[8]) {
     if (buf == 0)
         return -1;

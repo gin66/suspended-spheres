@@ -250,6 +250,12 @@ Whitepaper §4.2, §4.3, §4.5. Addressing §3.
   temperature, `OTPW`/`OT` driver masks, DIAG mask, optional NTC
   temperatures, validity mask and sequence counter. Pack and unpack are
   inverses; field 127 is not a valid health identifier.
+- [x] **P13** The type-4 `COMMAND` payload is exactly 8 bytes:
+  action, axis mask, `distance_mm`, `speed_mm_s`, sequence. Action `0x7F`
+  is the re-identify broadcast (field 127); pack and unpack accept it.
+  Unknown actions and mask bits above 3 are rejected.
+- [x] **P14** The type-5 `HOME` payload is exactly 8 bytes and carries only
+  the axis mask; bits above 3 are rejected.
 
 ---
 
