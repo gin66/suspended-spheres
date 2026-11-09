@@ -44,7 +44,7 @@ int s_test_order[SS_MAX_POSITIONS];
 int s_test_count = 0;
 int s_test_index = 0;
 uint32_t s_test_next_ms = 0;
-bool s_reidentify_pending = false;
+volatile bool s_reidentify_pending = false;
 
 int find_node_locked(const uint8_t flash_id[SS_FLASH_ID_LEN]) {
   for (int i = 0; i < s_count; ++i) {
@@ -218,6 +218,7 @@ void handle_status(const ss_can_frame_t *frame) {
   mc_status_t st;
   if (mc_unpack_status(frame->data, &st) != 0) return;
 
+  bool orphan = false;
   portENTER_CRITICAL(&s_lock);
   const int idx = find_board_locked(board_id);
   if (idx >= 0) {
@@ -231,8 +232,17 @@ void handle_status(const ss_can_frame_t *frame) {
                 sizeof(node->following_error));
     node->buffer_depth = st.buffer_depth;
     node->last_seq = st.last_seq;
+  } else if (!s_reidentify_pending) {
+    s_reidentify_pending = true;
+    orphan = true;
   }
   portEXIT_CRITICAL(&s_lock);
+
+  if (orphan) {
+    SS_LOGW("commission",
+            "board %d is active but has no node here; re-identify scheduled",
+            board_id);
+  }
 }
 
 void handle_health(const ss_can_frame_t *frame) {
@@ -270,6 +280,7 @@ void handle_health(const ss_can_frame_t *frame) {
               (unsigned)old_ot, (unsigned)h.ot_mask);
     }
   } else {
+    if (!s_reidentify_pending) s_reidentify_pending = true;
     portEXIT_CRITICAL(&s_lock);
   }
 }
@@ -295,6 +306,8 @@ void handle_version(const ss_can_frame_t *frame) {
       std::snprintf(node->sw_version, sizeof(node->sw_version), "%u.%u.%u",
                     (unsigned)v.major, (unsigned)v.minor, (unsigned)v.patch);
     }
+  } else if (!s_reidentify_pending) {
+    s_reidentify_pending = true;
   }
   portEXIT_CRITICAL(&s_lock);
 }

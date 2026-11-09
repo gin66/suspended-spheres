@@ -84,7 +84,10 @@ At boot the master broadcasts **re-identify** (type 4, field 127, action
 `0x7F`) before the first `ASK`. Every board drops its RAM board ID and stops
 its axes, so the `ASK` that follows re-discovers boards that were still
 powered when the master rebooted. Without it an assigned board stays silent on
-`ASK` and the fresh master has an empty node table.
+`ASK` and the fresh master has an empty node table. The master also schedules
+the same broadcast when it receives a status, health or version frame from a
+board ID that is not in its node table, so a board that missed the boot
+broadcast is recovered on the next 5 s cycle.
 
 | Step | Who | CAN ID | Payload |
 |------|-----|--------|---------|
