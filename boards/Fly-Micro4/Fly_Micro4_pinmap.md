@@ -35,8 +35,9 @@ DIAG and a separate endstop.
 GPIO9 is one half-duplex wire shared by all four `PDN_UART` pins. GPIO9 is a
 UART1 RX pin, not a TX pin, and both PIO blocks are allocated (can2040 and
 four step generators), so the core's PIO `SoftwareSerial` cannot be used. The
-node firmware bit-bangs TX through SIO and switches the pad to UART1 RX for
-the reply. See `doc/motion_streaming_whitepaper.md` §5.6.1.
+node firmware bit-bangs both the request and the oversampled reply through
+SIO; no UART peripheral or TMC library is used. See
+`doc/motion_streaming_whitepaper.md` §5.6.1.
 
 ## 2. Other connectors
 

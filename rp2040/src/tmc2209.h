@@ -2,7 +2,8 @@
 
 #include <stdint.h>
 
-// TMC2209 configuration over the shared single-wire UART (GPIO9).
+// TMC2209 configuration over the shared single-wire UART (GPIO9). The wire is
+// bit-banged end to end through SIO; no UART peripheral or TMC library is used.
 // Register semantics and the current calculation are in
 // doc/motion_streaming_whitepaper.md §5.6; the current-sense safety rule is in
 // doc/controller_analysis.md §6.1.
@@ -47,6 +48,8 @@ bool setTcoolthrs(uint8_t index, uint32_t value);
 bool setMicrosteps(uint8_t index, uint16_t microsteps, bool interpolate);
 bool setChopper(uint8_t index, uint32_t chopconf);
 bool setPwmConf(uint8_t index, uint32_t pwmconf);
+// SLAVECONF SENDDELAY, 0..15 bit times. Written as 2 during bring-up.
+bool setSendDelay(uint8_t index, uint8_t delay);
 
 bool readRegister(uint8_t index, uint8_t address, uint32_t* value);
 bool writeRegister(uint8_t index, uint8_t address, uint32_t value);
@@ -62,18 +65,17 @@ uint8_t otpwMask();
 uint8_t otMask();
 bool statusValid();
 
-// Bench self-test: UART1 internal loopback (proves the RX/FIFO/baud path)
-// followed by a SIO readback of the bit-banged TX waveform (proves the pad is
-// driven). It does not prove the TMC saw the request.
+// Bench self-test: bit-bang a pattern through SIO and sample the pad at every
+// bit centre. Proves the pin function and output path, not the TMC.
 void selftest();
 
 // Read GCONF at UART addresses 0..3 to find which strap addresses answer.
 // Read-only; useful when the configured drive addresses all fail.
 void scanAddresses();
 
-// Pure bit-banged test path (no TMCStepper, no hardware UART): drive the whole
-// GCONF-read datagram as one continuous bit stream, release the pad, then
-// bit-bang the reply. Proves whether the TMC answers at all.
+// Pure bit-banged test path: drive the whole GCONF-read datagram as one
+// continuous bit stream, release the pad, oversample the reply and decode it
+// with the production CRC-guided decoder (no TMC library).
 void bbProbe(uint8_t address);
 void bbProbeAll();
 

@@ -13,6 +13,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(MOTION_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib/motion_core")
 set(PATTERN_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib/pattern_core")
+set(TMC_UART_BITS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib/tmc_uart_bits")
 
 add_library(motion_core STATIC
     "${MOTION_CORE_DIR}/src/motion_core.cpp"
@@ -33,6 +34,13 @@ target_include_directories(pattern_core PUBLIC
 )
 target_link_libraries(pattern_core PUBLIC motion_core)
 
+add_library(tmc_uart_bits STATIC
+    "${TMC_UART_BITS_DIR}/src/tmc_uart_bits.cpp"
+)
+target_include_directories(tmc_uart_bits PUBLIC
+    "${TMC_UART_BITS_DIR}/include"
+)
+
 # One host executable.  test_runner.cpp is C++17; abi_c.c is the C caller
 # that proves H4 (unmangled names, matching integer widths).
 add_executable(motion_core_tests
@@ -49,10 +57,12 @@ add_executable(motion_core_tests
     test_commission.cpp
     test_pattern.cpp
     test_live.cpp
+    test_tmc_uart_bits.cpp
     abi_c.c
 )
 
-target_link_libraries(motion_core_tests PRIVATE motion_core pattern_core)
+target_link_libraries(motion_core_tests PRIVATE motion_core pattern_core
+    tmc_uart_bits)
 target_include_directories(motion_core_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )

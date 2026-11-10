@@ -78,9 +78,10 @@ void print_help() {
     Serial.println("  status [axis]              read DRV_STATUS, SG_RESULT, TSTEP");
     Serial.println("  reinit                     stop, re-run TMC bring-up, enable ready axes");
     Serial.println("  quiet [on|off]             silence periodic CAN stats and command logs");
-    Serial.println("  selftest                   UART RX loopback + TX pad readback");
+    Serial.println("  selftest                   bit-banged TX pad readback");
     Serial.println("  scan                       read GCONF at UART addresses 0..3");
-    Serial.println("  bbprobe [addr]             pure bit-banged GCONF read (no TMCStepper)");
+    Serial.println("  bbprobe [addr]             pure bit-banged GCONF read + raw samples");
+    Serial.println("  senddelay <axis> <0..15>   SLAVECONF SENDDELAY reply gap");
     Serial.println("  cur <axis> <run_ma> [hold_ma]");
     Serial.println("  sg <axis> <0..255>         SGTHRS");
     Serial.println("  tcool <axis> <value>       TCOOLTHRS (20 bit)");
@@ -201,6 +202,21 @@ void command_chop(int argc, char** argv) {
         return;
     }
     print_result(tmc2209::setChopper(axis, value));
+}
+
+void command_senddelay(int argc, char** argv) {
+    if (argc < 3) {
+        Serial.println("usage: senddelay <axis> <0..15>");
+        return;
+    }
+    uint8_t axis = 0;
+    uint32_t value = 0;
+    if (!parse_axis(argv[1], &axis) || !parse_u32(argv[2], &value) ||
+        value > 15) {
+        Serial.println("bad argument");
+        return;
+    }
+    print_result(tmc2209::setSendDelay(axis, (uint8_t)value));
 }
 
 void command_pwm(int argc, char** argv) {
@@ -415,6 +431,8 @@ void execute(char* line) {
         command_chop(argc, argv);
     } else if (strcmp(command, "pwm") == 0) {
         command_pwm(argc, argv);
+    } else if (strcmp(command, "senddelay") == 0) {
+        command_senddelay(argc, argv);
     } else if (strcmp(command, "raw") == 0) {
         command_raw(argc, argv);
     } else if (strcmp(command, "move") == 0) {

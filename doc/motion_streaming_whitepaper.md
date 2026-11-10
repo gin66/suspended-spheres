@@ -841,12 +841,13 @@ Housekeeping (10–50 Hz)
 The firmware implements §5.6 in `rp2040/src/tmc2209.cpp`. All four `PDN_UART`
 pins share GPIO9, and both PIO blocks are fully allocated (can2040 and four
 FastAccelStepper state machines), so the core's PIO-based `SoftwareSerial`
-cannot be used. GPIO9 is a UART1 **RX** pin, not a TX pin, so the `Stream`
-bit-bangs the request through SIO and then switches the pin mux to UART1 RX;
-the hardware receiver and its FIFO capture the 8-byte reply for TMCStepper.
-RXE is disabled while TX drives the line, and the RX FIFO/error flags are
-drained before it is re-enabled. No PIO state machine or background UART ISR
-is needed. The TMCStepper commit is pinned in `rp2040/platformio.ini`.
+cannot be used. GPIO9 is a UART1 **RX** pin, not a TX pin, and the firmware
+does not use a UART peripheral or a TMC library at all: SIO drives the whole
+request as one continuous bit stream, then releases the pad and samples the
+reply on the 1 µs tick. Masking interrupts across both halves keeps the
+request and the reply back-to-back; no PIO state machine or background UART
+ISR is involved. The pure bit-level code is in `lib/tmc_uart_bits/`, which is
+also built and tested on the host.
 
 The UART address is per drive, not the drive index: the official Klipper
 config uses 0, 1, 3, 2 for Drive0–Drive3, because Z is Drive3 and E0 is Drive2
@@ -863,14 +864,16 @@ interpolation, `PWMCONF = 0xC10D0024`, `TPWMTHRS = 0`,
 driver that fails any check is left disabled, and only drivers that pass are
 enabled by the node.
 
-The default is 300 mA RMS run and hold at `RSENSE = 0.110 Ω`. TMCStepper's
-`rms_current()` selects VSENSE and the IRUN/IHOLD codes. Hold equals run so
-the ball weight is still held with margin; do not reduce it without measuring
-the holding margin. At `RSENSE = 0.110 Ω` the high-sensitivity current step is
-about 30 mA, so the codes nearest 300 mA are 275 mA (`IRUN = 8`, selected by
-TMCStepper) and 306 mA (`IRUN = 9`). The bench console caps the run-current
-request at 800 mA, matching the official reference; this is above the
-250–300 mA design point and is only an experiment limit, not an operating
+The default is 300 mA RMS run and hold at `RSENSE = 0.110 Ω`. The firmware
+selects VSENSE and the IRUN/IHOLD codes with the integer form
+`CS + 1 = 588313 · mA / (10⁸ · V_fs)`, where `V_fs` is 0.325 V or 0.180 V;
+if `CS < 16` it switches to the high-sensitivity range and recomputes. Hold
+equals run so the ball weight is still held with margin; do not reduce it
+without measuring the holding margin. At `RSENSE = 0.110 Ω` the
+high-sensitivity current step is about 30 mA, so the codes nearest 300 mA are
+275 mA (`IRUN = 8`) and 306 mA (`IRUN = 9`). The bench console caps the
+run-current request at 800 mA, matching the official reference; this is above
+the 250–300 mA design point and is only an experiment limit, not an operating
 recommendation.
 
 **Bench console.** USB serial accepts the following commands
@@ -891,9 +894,10 @@ interface, and it can command motion.
 | `stop [axis]`, `enable <axis> <0\|1>`, `diag` | Stop, enable outputs, print DIAG pins |
 | `reinit` | Stop, re-run the TMC bring-up, enable the drivers that pass |
 | `quiet [on\|off]` | Silence the periodic CAN statistics and command logs; CAN traffic is unchanged |
-| `selftest` | UART1 RX internal loopback, then SIO readback of the bit-banged TX pad |
+| `selftest` | Bit-bang a pattern through SIO and sample the pad at every bit centre |
 | `scan` | Read `GCONF` at UART addresses 0–3 to find which strap addresses answer |
-| `bbprobe [addr]` | Pure bit-banged GCONF read: one continuous TX bit stream, then bit-banged RX; bypasses TMCStepper |
+| `bbprobe [addr]` | Pure bit-banged GCONF read plus the raw oversampled reply |
+| `senddelay <axis> <0..15>` | Set `SLAVECONF.SENDDELAY` (reply gap in bit times) |
 
 `raw` is for register diagnosis, not current control: use `cur` so the 800 mA
 cap and the VSENSE selection apply. The console can still command motion, so
@@ -901,25 +905,42 @@ keep the bench clear of the mechanism.
 
 `reinit` is the bring-up path after the motor supply is applied: the Fly-Micro4
 has no reset button, and unplugging USB loses the serial log. `quiet on` keeps
-the console readable. `selftest` separates the two UART halves: the internal
-loopback proves the UART1 RX/FIFO/baud path, and the SIO readback proves the
-bit-banged TX pad. If both pass and `GCONF read failed` remains, the fault is
-external (TMC supply, PDN bus, address, or wiring). None of these commands
-changes the CAN protocol.
+the console readable. `selftest` proves the SIO output path by driving a fresh
+pattern on GPIO9 and sampling every bit centre; if it passes and `GCONF read
+failed` remains, the fault is external (TMC supply, PDN bus, address, or
+wiring). None of these commands changes the CAN protocol.
 
-`bbprobe` is the pure bit-bang path: no TMCStepper and no UART1. It keeps the
-SIO output enabled across the whole datagram, so the stop bit of one byte is
+Bring-up writes `SLAVECONF.SENDDELAY = 2` (two extra bit times before each
+reply) and reads it back. That gives the reply a clean, known gap after our
+last stop bit; `senddelay` overrides it on the bench. `bbprobe` keeps the SIO
+output enabled across the whole datagram, so the stop bit of one byte is
 immediately followed by the start bit of the next, and releases the pad only
 after the final stop bit. The older per-byte bit-bang released the pad after
 every byte; the board's pull-down on `PDN_UART` then pulls the line low between
-bytes, which can break the TMC auto-baud and the power-down state. `bbprobe`
-also bit-bangs the reply at 200 kBaud and oversamples it five times (a 1 µs
-grid) over 128 bit times, covering the reply delay, the maximum `SENDDELAY`
-and the 8-byte reply. It prints the raw samples as `bbprobe: os <start>: …`
-lines so a host script can resynchronise on the `0x05` sync edge, then decodes
-8N1 from the first rising edge as a quick check. If `selftest` reports
-`idle=0`, the line is low even while idle and a pull-up is required before
-UART can work at all.
+bytes, which can break the TMC auto-baud and the power-down state.
+
+`bbprobe` bit-bangs the reply at 200 kBaud and samples it five times per bit (a
+1 µs grid) over 128 bit times, covering the reply delay, the maximum
+`SENDDELAY` and the 8-byte reply. The capture starts at the transmit release,
+so the decoder can treat the line-release 1→0 edge and the `0x05` sync edges
+as references. It prints the raw samples as `bbprobe: os <start>: …` lines,
+then `lib/tmc_uart_bits` scans the 1→0 edges for the reply start and fits the
+bit period: a candidate is accepted only when the frame starts with `0x05` and
+its CRC8 matches. This is why the earlier 3-bit period estimate failed — the
+TMC re-times the reply from our datagram and answers at roughly 4.75–4.90 µs
+per bit, so a fixed 5.00 µs grid walked off the CRC by the last byte. The
+host tests replay recorded captures through the same production function.
+
+**Baud and interrupt budget.** The TMC2209 auto-detects the rate and is
+specified for up to roughly 500 kbit/s, so 250 kBaud (4 µs per bit) is
+available. Interrupts are masked for one request plus one capture:
+`(4·10 + 4) · T` for the request and `128 · T` for the capture, i.e. 860 µs at
+200 kBaud and 688 µs at 250 kBaud (4× oversampling on the same 1 µs grid). The
+constant `kProbeBitUs` in `tmc2209.cpp` is the single switch; the decoder
+searches around the nominal period, so it does not need a second change. Verify
+250 kBaud on the bench before adopting it. If `selftest` reports `idle=0`, the
+line is low even while idle and a pull-up is required before UART can work at
+all.
 
 **StallGuard calibration.** At the intended homing current, run the axis free
 with `run <axis> <hz> 1` and sample `SG_RESULT` with `status <axis>`. Then
@@ -1140,7 +1161,8 @@ lib_deps =
     ; vendor that commit (or a pinned fork), do not track master
     https://github.com/.../FastAccelStepper.git#<commit-with-FasTimed>
     https://github.com/KevinOConnor/can2040.git#<commit>
-    https://github.com/teemuatlut/TMCStepper.git#<commit>
+    ; the TMC2209 wire is bit-banged in rp2040/src/tmc2209.cpp;
+    ; no TMC library is linked
 ```
 
 **Pin map.** Board pin assignment, DIAG routing and the official Klipper
