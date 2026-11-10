@@ -74,6 +74,9 @@ const UartStats& uartStats(uint8_t index);
 // Read IFCNT and compare its advance with the writes sent since the previous
 // check. Called periodically from poll(); the bench can call it on demand.
 bool checkIfcnt(uint8_t index);
+// Bench-only: time one SG_RESULT read and one full refresh() in microseconds,
+// including the interrupt-masked window and any retries. Prints min/mean/max.
+void timeUart(uint8_t index, uint16_t n);
 void printStats(uint8_t index);
 void printStats();
 

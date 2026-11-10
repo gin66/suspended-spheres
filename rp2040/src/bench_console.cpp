@@ -87,6 +87,7 @@ void print_help() {
     Serial.println("  idle [bits]                show/set idle high bits after request (0..12)");
     Serial.println("  senddelay <axis> <0..15>   SLAVECONF SENDDELAY reply gap");
     Serial.println("  monitor <axis> <s> [ms]    SG/PWM/current samples; 0 s = stop");
+    Serial.println("  timeuart <axis> [n]        time one SG read and one refresh, us");
     Serial.println("  cur <axis> <run_ma> [hold_ma]");
     Serial.println("  sg <axis> <0..255|off>     SGTHRS; off closes TCOOLTHRS");
     Serial.println("  mode <axis> <stealth|spread>  chopper mode, axis stopped");
@@ -305,6 +306,24 @@ void command_monitor(int argc, char** argv) {
         seconds = 3600u;
     }
     print_result(tmc2209::startMonitor(axis, seconds * 1000u, interval_ms));
+}
+
+void command_timeuart(int argc, char** argv) {
+    if (argc < 2) {
+        Serial.println("usage: timeuart <axis> [n]");
+        return;
+    }
+    uint8_t axis = 0;
+    uint32_t n = 20;
+    if (!parse_axis(argv[1], &axis)) {
+        Serial.println("bad axis");
+        return;
+    }
+    if (argc >= 3 && (!parse_u32(argv[2], &n) || n == 0 || n > 1000)) {
+        Serial.println("bad n");
+        return;
+    }
+    tmc2209::timeUart(axis, (uint16_t)n);
 }
 
 void command_line(int argc, char** argv) {
@@ -570,6 +589,8 @@ void execute(char* line) {
         command_senddelay(argc, argv);
     } else if (strcmp(command, "monitor") == 0) {
         command_monitor(argc, argv);
+    } else if (strcmp(command, "timeuart") == 0) {
+        command_timeuart(argc, argv);
     } else if (strcmp(command, "line") == 0) {
         command_line(argc, argv);
     } else if (strcmp(command, "idle") == 0) {

@@ -1548,6 +1548,70 @@ void printWriteOnlyLine(const char* name, uint32_t value) {
     printRegisterLine(name, true, value, true, value);
 }
 
+void timeUart(uint8_t index, uint16_t n) {
+    if (index >= kDriverCount) {
+        return;
+    }
+    if (n == 0) {
+        n = 20;
+    }
+    uint32_t sg_min = 0xFFFFFFFFu;
+    uint32_t sg_max = 0;
+    uint32_t sg_sum = 0;
+    uint16_t sg_ok = 0;
+    for (uint16_t i = 0; i < n; ++i) {
+        uint32_t value = 0;
+        const uint32_t start = micros();
+        const bool ok = readDriverReg(index, kSgResult, &value);
+        const uint32_t dt = micros() - start;
+        if (dt < sg_min) {
+            sg_min = dt;
+        }
+        if (dt > sg_max) {
+            sg_max = dt;
+        }
+        sg_sum += dt;
+        if (ok) {
+            sg_ok++;
+        }
+    }
+    uint32_t rf_min = 0xFFFFFFFFu;
+    uint32_t rf_max = 0;
+    uint32_t rf_sum = 0;
+    for (uint16_t i = 0; i < n; ++i) {
+        const uint32_t start = micros();
+        refresh(index);
+        const uint32_t dt = micros() - start;
+        if (dt < rf_min) {
+            rf_min = dt;
+        }
+        if (dt > rf_max) {
+            rf_max = dt;
+        }
+        rf_sum += dt;
+    }
+    Serial.print("timeuart tmc");
+    Serial.print(index);
+    Serial.print("@");
+    Serial.print(driverAddress(index));
+    Serial.print(" sg_read_us min=");
+    Serial.print(sg_min);
+    Serial.print(" mean=");
+    Serial.print(sg_sum / n);
+    Serial.print(" max=");
+    Serial.print(sg_max);
+    Serial.print(" ok=");
+    Serial.print(sg_ok);
+    Serial.print("/");
+    Serial.print(n);
+    Serial.print(" refresh_us min=");
+    Serial.print(rf_min);
+    Serial.print(" mean=");
+    Serial.print(rf_sum / n);
+    Serial.print(" max=");
+    Serial.println(rf_max);
+}
+
 void printRegisters(uint8_t index) {
     if (index >= kDriverCount) {
         return;
