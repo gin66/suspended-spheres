@@ -1474,6 +1474,12 @@ A likely outcome, based on the datasheet and field experience, is:
   a periodic read only after its mask time is measured. Measured 2026-11-10:
   one SG read 1.5–1.9 ms, one refresh 8.6–10.7 ms (retries included); at most
   one axis per 20 ms, or one four-axis round-robin per ~50–100 ms.
+  Keep 250 kBaud (`s_sample_cycles = clock/1e6`, 133 cycles at 133 MHz): it is
+  exactly 48 TMC clocks (12 MHz internal) and 133 CPU cycles/sample, so both
+  clocks divide exactly. Higher rates are not integer on both clocks, and the
+  4× capture loop overruns near 80 cycles/sample (~416 kBaud); 369–391 kBaud
+  were clean only in short runs. A higher baud needs a sampler change
+  (2 samples/bit, dithering, or a faster loop), not a constant.
 - Up/down from `SG_RESULT` is at best a small friction-and-ramp effect on a free
   hang. If it is not visible, the result is "StallGuard does not see direction
   on this mechanism," and no sensor is bought.

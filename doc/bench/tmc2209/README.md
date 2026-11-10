@@ -31,6 +31,7 @@ operator-confirmed by the sound/shaft stopping.
 | `2026-11-10-M2-SC-300-16-03` | **M2 StallGuard window:** stable ≥1000 step/s; ~half of M0, so per-axis `SGTHRS`. |
 | `2026-11-10-M0-valid-01` | Firmware `60acd5a` validation: mode, `sg off`, 20-bit TSTEP, IFCNT, 18k/74k smoke. |
 | `2026-11-10-M0-uart-01` | **G6:** SG read 1.5–1.9 ms, refresh 8.6–10.7 ms; no 5 ms sampler. |
+| `2026-11-10-M0-uart-02` | **Baud study:** 250 kBaud is the exact 12 MHz/48 divisor; 369–391 kBaud clean only in short runs; the 4× loop overruns near 80 cycles/sample. No change adopted. |
 
 ## Gates
 
@@ -41,7 +42,7 @@ operator-confirmed by the sound/shaft stopping.
 | G3 | partial — speed passes for 40 mm in SpreadCycle; 20/10 mm optional tiers outside margin; **acceleration unmeasured** |
 | G4 | partial — free-run window found for M0 and M2; **hard-stop repeatability pending** (rig not built) |
 | G5 | open — needs drum + 50 g load |
-| G6 | closed — SG read 1.5–1.9 ms, refresh 8.6–10.7 ms; DIAG-only |
+| G6 | closed — SG read 1.5–1.9 ms, refresh 8.6–10.7 ms; 250 kBaud is the max; DIAG-only |
 
 ## Open items
 
