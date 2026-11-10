@@ -14,6 +14,7 @@ namespace {
 
 FastAccelStepperEngine engine;
 FastAccelStepper* axes[board::kDriveCount] = {};
+bool s_enabled[board::kDriveCount] = {};
 
 }  // namespace
 
@@ -61,6 +62,11 @@ void setAxisEnabled(uint8_t index, bool enabled) {
     } else {
         stepper->disableOutputs();
     }
+    s_enabled[index] = enabled;
+}
+
+bool isAxisEnabled(uint8_t index) {
+    return index < board::kDriveCount && s_enabled[index];
 }
 
 void setEnabled(bool enabled) {

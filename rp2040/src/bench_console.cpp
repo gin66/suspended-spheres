@@ -76,13 +76,14 @@ void print_result(bool ok) {
 void print_help() {
     Serial.println("bench commands:");
     Serial.println("  status [axis]              read DRV_STATUS, SG_RESULT, TSTEP");
-    Serial.println("  reinit                     stop, re-run TMC bring-up, enable ready axes");
+    Serial.println("  reinit                     stop, re-run TMC bring-up; axes stay disabled");
     Serial.println("  quiet [on|off]             silence periodic CAN stats and command logs");
     Serial.println("  selftest                   bit-banged TX pad readback");
     Serial.println("  scan                       read GCONF at UART addresses 0..3");
     Serial.println("  bbprobe [addr]             pure bit-banged GCONF read + raw samples");
     Serial.println("  line [us]                  release GPIO9 and report bus level/edges");
     Serial.println("  bit [us]                   show/set bit time (4=250k, 5=200k)");
+    Serial.println("  idle [bits]                show/set idle high bits after request (0..12)");
     Serial.println("  senddelay <axis> <0..15>   SLAVECONF SENDDELAY reply gap");
     Serial.println("  cur <axis> <run_ma> [hold_ma]");
     Serial.println("  sg <axis> <0..255>         SGTHRS");
@@ -91,8 +92,8 @@ void print_help() {
     Serial.println("  chop <axis> <hex>          raw CHOPCONF, e.g. 0x14020054");
     Serial.println("  pwm <axis> <hex>           raw PWMCONF, e.g. 0xC10D0024");
     Serial.println("  raw <axis> <reg> [value]   register access, hex e.g. 0x6C");
-    Serial.println("  move <axis> <steps> <hz>");
-    Serial.println("  run <axis> <hz> [0|1]      continuous, 1 = forward");
+    Serial.println("  move <axis> <steps> <hz>   finite move (requires enable)");
+    Serial.println("  run <axis> <hz> [0|1]      continuous, 1 = forward (requires enable)");
     Serial.println("  stop [axis]");
     Serial.println("  enable <axis> <0|1>");
     Serial.println("  diag");
@@ -245,6 +246,19 @@ void command_bit(int argc, char** argv) {
     Serial.println(" Baud");
 }
 
+void command_idle(int argc, char** argv) {
+    if (argc >= 2) {
+        uint32_t bits = 0;
+        if (!parse_u32(argv[1], &bits) || !tmc2209::setIdleBits(bits)) {
+            Serial.println("usage: idle <0..12> bits");
+            return;
+        }
+    }
+    Serial.print("idle: ");
+    Serial.print(tmc2209::idleBits());
+    Serial.println(" bits");
+}
+
 void command_pwm(int argc, char** argv) {
     if (argc < 3) {
         Serial.println("usage: pwm <axis> <hex>");
@@ -314,9 +328,12 @@ void command_move(int argc, char** argv) {
         Serial.println("driver not ready");
         return;
     }
+    if (!stepper_axes::isAxisEnabled(axis)) {
+        Serial.println("driver disabled; use enable <axis> 1");
+        return;
+    }
     stepper_axes::setSpeed(axis, hz);
     stepper_axes::setAcceleration(axis, kBenchAccel);
-    stepper_axes::setAxisEnabled(axis, true);
     const bool ok = stepper_axes::move(axis, steps);
     if (ok) {
         Serial.print("queued ");
@@ -349,9 +366,12 @@ void command_run(int argc, char** argv) {
         Serial.println("driver not ready");
         return;
     }
+    if (!stepper_axes::isAxisEnabled(axis)) {
+        Serial.println("driver disabled; use enable <axis> 1");
+        return;
+    }
     stepper_axes::setSpeed(axis, hz);
     stepper_axes::setAcceleration(axis, kBenchAccel);
-    stepper_axes::setAxisEnabled(axis, true);
     print_result(stepper_axes::run(axis, forward != 0));
 }
 
@@ -463,6 +483,8 @@ void execute(char* line) {
         command_line(argc, argv);
     } else if (strcmp(command, "bit") == 0) {
         command_bit(argc, argv);
+    } else if (strcmp(command, "idle") == 0) {
+        command_idle(argc, argv);
     } else if (strcmp(command, "raw") == 0) {
         command_raw(argc, argv);
     } else if (strcmp(command, "move") == 0) {

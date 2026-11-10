@@ -209,16 +209,10 @@ void setup() {
     stepper_axes::begin();
 
     const uint8_t tmc_ready = tmc2209::begin();
-    uint8_t axes_enabled = 0;
     uint8_t axes_configured = 0;
     for (uint8_t i = 0; i < board::kDriveCount; i++) {
         if (stepper_axes::axis(i) != nullptr) {
             axes_configured++;
-        }
-        const bool ready = (tmc_ready & (uint8_t)(1u << i)) != 0;
-        stepper_axes::setAxisEnabled(i, ready);
-        if (ready) {
-            axes_enabled++;
         }
     }
     if (tmc_ready != (uint8_t)((1u << board::kDriveCount) - 1u)) {
@@ -234,8 +228,7 @@ void setup() {
     Serial.print(axes_configured);
     Serial.print(", TMC ready=0x");
     Serial.print(tmc_ready, HEX);
-    Serial.print(" enabled=");
-    Serial.println(axes_enabled);
+    Serial.println("; axes stay disabled until enable <axis> 1");
 }
 
 void setup1() {
@@ -267,14 +260,6 @@ void loop() {
     if (bench_console::take_reinit_request()) {
         stepper_axes::stopAll();
         const uint8_t ready = tmc2209::begin();
-        uint8_t enabled = 0;
-        for (uint8_t i = 0; i < board::kDriveCount; i++) {
-            const bool ok = (ready & (uint8_t)(1u << i)) != 0;
-            stepper_axes::setAxisEnabled(i, ok);
-            if (ok) {
-                enabled++;
-            }
-        }
         if (ready == (uint8_t)((1u << board::kDriveCount) - 1u)) {
             s_node_state = MC_STATUS_IDLE;
             status_led::clear_fault();
@@ -283,8 +268,7 @@ void loop() {
         }
         Serial.print("reinit: TMC ready=0x");
         Serial.print(ready, HEX);
-        Serial.print(" enabled=");
-        Serial.println(enabled);
+        Serial.println("; axes stay disabled");
     }
 
     const int board_id = can_node::assigned_board_id();

@@ -10,6 +10,7 @@ void begin();
 FastAccelStepper* axis(uint8_t index);
 void setEnabled(bool enabled);
 void setAxisEnabled(uint8_t index, bool enabled);
+bool isAxisEnabled(uint8_t index);
 void setSpeed(uint8_t index, uint32_t speed_hz);
 void setAcceleration(uint8_t index, uint32_t accel_steps_s2);
 bool move(uint8_t index, int32_t steps);

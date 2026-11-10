@@ -90,6 +90,12 @@ void sampleLine(uint32_t us);
 bool setBitTimeUs(uint32_t us);
 uint32_t bitTimeUs();
 
+// Idle high bits after the request stop bit, before the line is released.
+// The default is 4; the bench can sweep 0..12 to trade line-low time against
+// driving into the reply start.
+bool setIdleBits(uint32_t bits);
+uint32_t idleBits();
+
 void printDriver(uint8_t index);
 
 }  // namespace tmc2209
