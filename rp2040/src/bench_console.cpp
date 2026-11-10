@@ -88,7 +88,8 @@ void print_help() {
     Serial.println("  senddelay <axis> <0..15>   SLAVECONF SENDDELAY reply gap");
     Serial.println("  monitor <axis> <s> [ms]    SG/PWM/current samples; 0 s = stop");
     Serial.println("  cur <axis> <run_ma> [hold_ma]");
-    Serial.println("  sg <axis> <0..255>         SGTHRS");
+    Serial.println("  sg <axis> <0..255|off>     SGTHRS; off closes TCOOLTHRS");
+    Serial.println("  mode <axis> <stealth|spread>  chopper mode, axis stopped");
     Serial.println("  tcool <axis> <value>       TCOOLTHRS (20 bit)");
     Serial.println("  micro <axis> <2..256> [intpol 0|1]");
     Serial.println("  chop <axis> <hex>          raw CHOPCONF, e.g. 0x14020054");
@@ -174,17 +175,50 @@ void command_stats(int argc, char** argv) {
 
 void command_sg(int argc, char** argv) {
     if (argc < 3) {
-        Serial.println("usage: sg <axis> <0..255>");
+        Serial.println("usage: sg <axis> <0..255|off>");
         return;
     }
     uint8_t axis = 0;
+    if (!parse_axis(argv[1], &axis)) {
+        Serial.println("bad axis");
+        return;
+    }
+    if (strcmp(argv[2], "off") == 0) {
+        // SGTHRS = 0 is not "off"; it sets the threshold to 0. Close the
+        // velocity window instead so the StallGuard result cannot pulse DIAG.
+        print_result(tmc2209::setTcoolthrs(axis, 0));
+        return;
+    }
     uint32_t value = 0;
-    if (!parse_axis(argv[1], &axis) || !parse_u32(argv[2], &value) ||
-        value > 255) {
+    if (!parse_u32(argv[2], &value) || value > 255) {
         Serial.println("bad argument");
         return;
     }
     print_result(tmc2209::setStallGuard(axis, (uint8_t)value));
+}
+
+void command_mode(int argc, char** argv) {
+    if (argc < 3) {
+        Serial.println("usage: mode <axis> <stealth|spread>");
+        return;
+    }
+    uint8_t axis = 0;
+    if (!parse_axis(argv[1], &axis)) {
+        Serial.println("bad axis");
+        return;
+    }
+    bool spread = false;
+    if (strcmp(argv[2], "spread") == 0) {
+        spread = true;
+    } else if (strcmp(argv[2], "stealth") != 0) {
+        Serial.println("mode: stealth|spread");
+        return;
+    }
+    if (stepper_axes::isRunning(axis)) {
+        Serial.println("stop the axis before changing mode");
+        return;
+    }
+    print_result(tmc2209::setSpreadCycle(axis, spread));
 }
 
 void command_tcool(int argc, char** argv) {
@@ -522,6 +556,8 @@ void execute(char* line) {
         command_current(argc, argv);
     } else if (strcmp(command, "sg") == 0) {
         command_sg(argc, argv);
+    } else if (strcmp(command, "mode") == 0) {
+        command_mode(argc, argv);
     } else if (strcmp(command, "tcool") == 0) {
         command_tcool(argc, argv);
     } else if (strcmp(command, "micro") == 0) {

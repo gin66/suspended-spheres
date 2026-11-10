@@ -62,10 +62,20 @@ constexpr uint32_t kDefaultTpowerdown = 20;
 // bits 0/1 = 0 keep external current sensing and the digital current scale.
 constexpr uint32_t kInitGconf = (1u << 6) | (1u << 7) | (1u << 8);
 
+// Measured 2026-11-10: SpreadCycle holds ~4x the StealthChop step rate
+// (M0 74k vs 18k, M2 >=94k vs 21k at 300 mA). Motion therefore boots in
+// SpreadCycle; homing switches to StealthChop at standstill.
+constexpr bool kMotionSpreadCycle = true;
+constexpr uint32_t initGconfValue() {
+    return kInitGconf | (kMotionSpreadCycle ? (1u << 2) : 0u);
+}
+
 // SENDDELAY is written before any read so the reply always has a clean gap
 // after our last stop bit. The bench can override it per axis.
 constexpr uint8_t kDefaultSendDelay = 2;
 
+// CHOPCONF/PWMCONF tuning is still queued; the SpreadCycle numbers in
+// doc/tmc2209_characterization.md §8 Phase 4a use this bring-up chopper.
 // CHOPCONF reset value used by the TMC2208/2209: TOFF=3, HSTRT=5, HEND=0,
 // TBL=0, MRES=0, INTPOL=1. The bring-up then sets TOFF=4 and MRES=4.
 constexpr uint32_t kChopconfBase = 0x10000053;
@@ -370,7 +380,6 @@ bool readAddressReg(uint8_t address, uint8_t reg, uint32_t* value) {
 bool writeAddressReg(uint8_t address, uint8_t reg, uint32_t value) {
     UartStats& stats = statsFor(address);
     stats.writes++;
-    stats.writes_since_check++;
     uint8_t request[tmc_uart_bits::kReplyBytes];
     const uint32_t len =
         tmc_uart_bits::encode(address, reg, value, true, request);
@@ -393,6 +402,7 @@ bool writeAddressRegVerified(uint8_t address, uint8_t reg, uint32_t value) {
         if (have_before && readAddressReg(address, kIfcnt, &after) &&
             (uint8_t)(after - before) == 1u) {
             stats.write_verified++;
+            stats.writes_since_check++;
             return true;
         }
     }
@@ -506,16 +516,19 @@ bool configureDriver(uint8_t index) {
     // explicitly. Each write is verified through IFCNT, so a lost frame
     // disables the axis instead of silently keeping the reset default.
     // bit 0 = 0 I_scale_analog, bit 1 = 0 external sense resistors,
-    // bit 2 = 0 en_spreadcycle, bit 6 = 1 pdn_disable,
-    // bit 7 = 1 mstep_reg_select, bit 8 = 1 multistep_filt.
-    const uint32_t gconf = kInitGconf;
+    // bit 2 = 1 en_spreadcycle (motion; homing switches to StealthChop),
+    // bit 6 = 1 pdn_disable, bit 7 = 1 mstep_reg_select,
+    // bit 8 = 1 multistep_filt.
+    const uint32_t gconf = initGconfValue();
     bool ok = true;
     ok = writeDriverReg(index, kGconf, gconf) && ok;
     s_status[index].gconf = gconf;
     initPrefix(index);
     Serial.print("GCONF=0x");
     Serial.print(gconf, HEX);
-    Serial.println(" external sense, pdn_disable=1, mstep_reg_select=1 written");
+    Serial.print(" external sense, pdn_disable=1, mstep_reg_select=1, ");
+    Serial.print(kMotionSpreadCycle ? "SpreadCycle" : "StealthChop");
+    Serial.println(" written");
 
     bool vsense = false;
     uint32_t irun = 0;
@@ -783,8 +796,11 @@ bool checkIfcnt(uint8_t index) {
         stats.writes_since_check = 0;
         return true;
     }
+    // Only a smaller advance means a write we verified did not reach the
+    // driver. A larger advance is a retried frame that landed twice; the
+    // register already holds the value, so it is not a lost configuration.
     const uint8_t delta = (uint8_t)(now - stats.ifcnt_last);
-    if (delta != stats.writes_since_check) {
+    if (delta < stats.writes_since_check) {
         stats.ifcnt_mismatches++;
     }
     stats.ifcnt_last = now;
@@ -940,6 +956,18 @@ bool setPwmConf(uint8_t index, uint32_t pwmconf) {
         return false;
     }
     return writeDriverReg(index, kPwmconf, pwmconf);
+}
+
+bool setSpreadCycle(uint8_t index, bool enable) {
+    if (!ready(index)) {
+        return false;
+    }
+    const uint32_t gconf = kInitGconf | (enable ? (1u << 2) : 0u);
+    if (!writeDriverReg(index, kGconf, gconf)) {
+        return false;
+    }
+    s_status[index].gconf = gconf;
+    return true;
 }
 
 bool setSendDelay(uint8_t index, uint8_t delay) {
@@ -1176,18 +1204,25 @@ void poll(uint32_t now_ms) {
     }
 }
 
+bool stallArmed(uint8_t index) {
+    if (index >= kDriverCount) {
+        return false;
+    }
+    const DriverStatus& s = s_status[index];
+    const bool moving = (s.drv_status & (1u << 31)) == 0;
+    const bool stealth = (s.drv_status & (1u << 30)) != 0;
+    // Measured 2026-11-10: SGTHRS = 0 is not "off"; it sets the threshold to
+    // 0 and the DIAG pin still pulses when SG_RESULT reaches 0. Require a
+    // nonzero threshold and the TCOOLTHRS velocity window (TPWMTHRS is 0, so
+    // the window is TSTEP <= TCOOLTHRS).
+    return moving && stealth && s.sgthrs != 0 && s.tstep <= s.tcoolthrs;
+}
+
 void updateMotionFlags(uint8_t index) {
     DriverStatus& s = s_status[index];
     const bool moving = (s.drv_status & (1u << 31)) == 0;
-    const bool stealth = (s.drv_status & (1u << 30)) != 0;
     const uint16_t threshold = (uint16_t)(2u * s.sgthrs);
-    // StallGuard4 only drives the stall result in StealthChop. SGTHRS = 0 is
-    // the documented "off" setting, and DIAG is gated to
-    // TCOOLTHRS >= TSTEP > TPWMTHRS. TPWMTHRS is 0 here, so the upper limit is
-    // TSTEP <= TCOOLTHRS; this keeps a low-speed false stall from showing.
-    const bool sg_speed_ok = s.tstep <= s.tcoolthrs;
-    s.stall = moving && stealth && s.sgthrs != 0 && sg_speed_ok &&
-              s.sg_result <= threshold;
+    s.stall = stallArmed(index) && s.sg_result <= threshold;
     // CS_ACTUAL follows IHOLD/IRUN. A lower value while moving means the
     // driver is not delivering the set current; PWM_SCALE at 250+ means the
     // voltage-mode regulator has run out of headroom. Neither is a stall by
@@ -1218,7 +1253,7 @@ void refresh(uint8_t index) {
         any_ok = true;
     }
     if (readDriverReg(index, kTstep, &value)) {
-        s_status[index].tstep = (uint16_t)value;
+        s_status[index].tstep = value & 0xFFFFFu;
         any_ok = true;
     }
     // IHOLD_IRUN, SGTHRS and TCOOLTHRS are write-only on the TMC2209; their
@@ -1560,7 +1595,7 @@ void printRegisters(uint8_t index) {
         uint32_t init = 0;
         bool has_init = entry.has_init;
         if (entry.address == kGconf) {
-            init = kInitGconf;
+            init = initGconfValue();
         } else if (entry.address == kChopconf) {
             init = chopconfValue(s_status[index].vsense);
         } else if (entry.address == kPwmconf) {

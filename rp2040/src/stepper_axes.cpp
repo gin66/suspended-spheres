@@ -69,6 +69,11 @@ bool isAxisEnabled(uint8_t index) {
     return index < board::kDriveCount && s_enabled[index];
 }
 
+bool isRunning(uint8_t index) {
+    FastAccelStepper* stepper = axis(index);
+    return stepper != nullptr && stepper->isRunning();
+}
+
 void setEnabled(bool enabled) {
     for (uint8_t i = 0; i < board::kDriveCount; i++) {
         setAxisEnabled(i, enabled);

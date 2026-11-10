@@ -25,7 +25,7 @@ struct DriverStatus {
     uint32_t gconf;
     uint32_t drv_status;
     uint16_t sg_result;
-    uint16_t tstep;
+    uint32_t tstep;       // raw 20-bit TSTEP; 0xFFFFF at standstill
     uint8_t  irun;
     uint8_t  ihold;
     bool     vsense;
@@ -44,9 +44,9 @@ struct DriverStatus {
 };
 
 // Bit-banged UART health counters, one set per TMC2209 address. IFCNT is the
-// driver's count of accepted writes; writes_since_check is ours. A periodic
-// check compares the IFCNT delta with the writes we sent, so a lost write
-// shows up even when its register is write-only.
+// driver's count of accepted writes; writes_since_check counts writes we
+// verified. The periodic check flags the IFCNT delta only when it is smaller
+// than that count; a retried frame that landed twice is not a lost write.
 struct UartStats {
     uint32_t read_attempts;    // read frames sent, including retries
     uint32_t reads;            // read transactions decoded successfully
@@ -87,6 +87,13 @@ bool setTcoolthrs(uint8_t index, uint32_t value);
 bool setMicrosteps(uint8_t index, uint16_t microsteps, bool interpolate);
 bool setChopper(uint8_t index, uint32_t chopconf);
 bool setPwmConf(uint8_t index, uint32_t pwmconf);
+// GCONF.en_spreadCycle. Call only with the axis stopped; the caller checks
+// that. Motion uses SpreadCycle, homing uses StealthChop.
+bool setSpreadCycle(uint8_t index, bool enable);
+// True when StallGuard4 can be trusted for a stall: moving, StealthChop,
+// SGTHRS != 0, and TSTEP inside the TCOOLTHRS window. Does not mean the rotor
+// is turning; a high-speed stall can still leave SG_RESULT high.
+bool stallArmed(uint8_t index);
 // SLAVECONF SENDDELAY, 0..15 bit times. Written as 2 during bring-up.
 bool setSendDelay(uint8_t index, uint8_t delay);
 
