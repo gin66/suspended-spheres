@@ -59,17 +59,33 @@ constexpr uint32_t kChopconfMres = 4;  // 16 microsteps
 constexpr uint32_t kChopconfToff = 4;
 constexpr uint32_t kChopconfIntpol = 1;
 
-// 200 kBaud. A bit is 5 us, an exact number of time_us_64 ticks, and the
-// absolute per-bit deadline keeps our edges on that grid. The reply is
-// sampled on the 1 us tick (five samples per bit) so the decoder can fit the
-// period instead of trusting a short per-reply estimate.
-constexpr uint32_t kProbeBitUs = 5;
+// Default 250 kBaud (4 us per bit). The bit time is switchable on the bench
+// over 2..10 us (500..100 kBaud): the absolute per-bit deadline keeps our
+// edges on that grid, and the reply is sampled on the 1 us tick (four samples
+// per bit at 250 kBaud) so the decoder can fit the period instead of trusting
+// a short per-reply estimate.
 constexpr uint32_t kSampleUs = 1;
 constexpr uint32_t kCaptureBits = 128;
-constexpr uint32_t kCaptureSamples = kCaptureBits * kProbeBitUs / kSampleUs;
-constexpr uint32_t kNominalPeriodQ8 = kProbeBitUs * 256u / kSampleUs;
+constexpr uint32_t kMinProbeBitUs = 2;
+constexpr uint32_t kMaxProbeBitUs = 10;
+constexpr uint32_t kDefaultProbeBitUs = 4;
+constexpr uint32_t kCaptureSamplesMax =
+    kCaptureBits * kMaxProbeBitUs / kSampleUs;
+// Idle high bits between the last stop bit and the reply capture. The TMC's
+// base reply delay is 8 bit times, so this holds the master off the line for
+// exactly that window.
+constexpr uint32_t kIdleBits = 8;
 
-uint8_t s_samples[(kCaptureSamples + 7u) / 8u];
+uint32_t s_probe_bit_us = kDefaultProbeBitUs;
+uint8_t s_samples[(kCaptureSamplesMax + 7u) / 8u];
+
+uint32_t captureSamples() {
+    return kCaptureBits * s_probe_bit_us / kSampleUs;
+}
+
+uint32_t nominalPeriodQ8() {
+    return s_probe_bit_us * 256u / kSampleUs;
+}
 uint32_t s_irq = 0;
 bool s_irq_held = false;
 
@@ -86,18 +102,24 @@ void bb_release_irq() {
     }
 }
 
-void pin_init() {
-    gpio_init(board::kTmcUartPin);
-    gpio_set_dir(board::kTmcUartPin, GPIO_IN);
-    gpio_set_input_enabled(board::kTmcUartPin, true);
-    gpio_pull_up(board::kTmcUartPin);
+// The pin is an SIO output driving 1 at all times, except while the reply is
+// sampled. That keeps the line idle-high without injecting any extra bit and
+// removes the break-recovery wait between datagrams.
+void uart_line_high() {
+    gpio_put(board::kTmcUartPin, 1);
+    gpio_set_dir(board::kTmcUartPin, GPIO_OUT);
 }
 
-// Drive one datagram as a continuous bit stream, then sample the released
-// line at 1 us. Interrupts stay masked across both halves: restoring them
-// between the request and the reply lets USB run while the TMC is driving.
-void bb_exchange(const uint8_t* data, size_t len) {
-    uint8_t bits[8 * 10 + 8];
+void pin_init() {
+    gpio_init(board::kTmcUartPin);
+    gpio_set_function(board::kTmcUartPin, GPIO_FUNC_SIO);
+    gpio_set_input_enabled(board::kTmcUartPin, true);
+    gpio_pull_up(board::kTmcUartPin);
+    uart_line_high();
+}
+
+// Build the datagram bit stream (start/data/stop per byte, no trailing idle).
+size_t build_bits(const uint8_t* data, size_t len, uint8_t bits[8 * 10]) {
     size_t nbits = 0;
     for (size_t n = 0; n < len && n < 8; ++n) {
         bits[nbits++] = 0;  // start
@@ -106,63 +128,105 @@ void bb_exchange(const uint8_t* data, size_t len) {
         }
         bits[nbits++] = 1;  // stop
     }
-    // Four extra high bits keep the line idle-high; the TMC starts its reply
-    // after the fixed reply delay, so this does not collide with it.
-    for (uint32_t i = 0; i < 4; ++i) {
-        bits[nbits++] = 1;
-    }
+    return nbits;
+}
 
-    gpio_set_function(board::kTmcUartPin, GPIO_FUNC_SIO);
-    gpio_set_input_enabled(board::kTmcUartPin, true);
-    gpio_put(board::kTmcUartPin, 1);
-    gpio_set_dir(board::kTmcUartPin, GPIO_OUT);
-    // The pull-downs hold a break between probes. Idle high has to be longer
-    // than a break recovery at the slowest UART baud.
-    wait_until_us(time_us_64() + 5000);
+// Transmit a datagram, hold the line high for kIdleBits, then release it and
+// sample the reply on the 1 us tick. Interrupts stay masked through the hold
+// and the capture; the line is driven high again as soon as the read is done.
+// The pin is already an SIO output driving 1, so the first bit is the start
+// bit with no extra preamble.
+void bb_tx_read(const uint8_t* data, size_t len) {
+    uint8_t bits[8 * 10];
+    const size_t nbits = build_bits(data, len, bits);
 
+    uart_line_high();
     s_irq = save_and_disable_interrupts();
     s_irq_held = true;
-    const uint64_t start = time_us_64();
+    // Align the start bit to the 1 MHz tick. Without this, the fractional
+    // offset between time_us_64() and the first gpio_put shortens the start
+    // bit by up to 1 us; the TMC auto-baud then locks onto a rate that is
+    // wrong by up to 25 % and rejects the request (no reply, all-zero).
+    const uint64_t start = time_us_64() + 1u;
+    wait_until_us(start);
     for (size_t k = 0; k < nbits; ++k) {
         gpio_put(board::kTmcUartPin, bits[k]);
-        wait_until_us(start + (uint64_t)(k + 1) * kProbeBitUs);
+        wait_until_us(start + (uint64_t)(k + 1) * s_probe_bit_us);
     }
-    gpio_set_dir(board::kTmcUartPin, GPIO_IN);
 
+    // The last datagram bit is the stop bit, already high. Hold it for
+    // kIdleBits so the master is off the line during the reply delay.
+    gpio_put(board::kTmcUartPin, 1);
+    wait_until_us(start + (uint64_t)(nbits + kIdleBits) * s_probe_bit_us);
+
+    gpio_set_dir(board::kTmcUartPin, GPIO_IN);
     memset(s_samples, 0, sizeof(s_samples));
     const uint64_t t0 = time_us_64();
-    for (uint32_t i = 0; i < kCaptureSamples; ++i) {
+    for (uint32_t i = 0; i < captureSamples(); ++i) {
         wait_until_us(t0 + (uint64_t)i * kSampleUs);
         if (gpio_get(board::kTmcUartPin)) {
             s_samples[i >> 3] |= (uint8_t)(1u << (i & 7u));
         }
     }
+
+    // After the read, drive the line high again instead of leaving it released.
+    gpio_put(board::kTmcUartPin, 1);
+    gpio_set_dir(board::kTmcUartPin, GPIO_OUT);
     bb_release_irq();
 }
 
-bool bb_decode(uint8_t reply[tmc_uart_bits::kReplyBytes]) {
+// Transmit a datagram write-only. Enable interrupts before the kIdleBits high
+// hold (the stop bit already drives the line high), do not append those idle
+// bits to the buffer, and keep the output driving high afterwards.
+void bb_tx_only(const uint8_t* data, size_t len) {
+    uint8_t bits[8 * 10];
+    const size_t nbits = build_bits(data, len, bits);
+
+    uart_line_high();
+    s_irq = save_and_disable_interrupts();
+    s_irq_held = true;
+    // Align the start bit to the 1 MHz tick for the same reason as
+    // bb_tx_read: the first bit must not be shortened by the fractional tick.
+    const uint64_t start = time_us_64() + 1u;
+    wait_until_us(start);
+    for (size_t k = 0; k < nbits; ++k) {
+        gpio_put(board::kTmcUartPin, bits[k]);
+        wait_until_us(start + (uint64_t)(k + 1) * s_probe_bit_us);
+    }
+
+    bb_release_irq();
+    gpio_put(board::kTmcUartPin, 1);
+    wait_until_us(start + (uint64_t)(nbits + kIdleBits) * s_probe_bit_us);
+    // Leave the pin as an output driving high.
+}
+
+bool bb_decode(uint8_t reply[tmc_uart_bits::kReplyBytes],
+               tmc_uart_bits::Frame* out = nullptr) {
     tmc_uart_bits::Frame frame;
-    if (!tmc_uart_bits::decode_reply(s_samples, kCaptureSamples,
-                                     kNominalPeriodQ8, &frame)) {
+    if (!tmc_uart_bits::decode_reply(s_samples, captureSamples(),
+                                     nominalPeriodQ8(), &frame)) {
         return false;
     }
     memcpy(reply, frame.bytes, tmc_uart_bits::kReplyBytes);
+    if (out != nullptr) {
+        *out = frame;
+    }
     return true;
 }
 
 void bb_dump_samples() {
     constexpr uint32_t kLine = 128;
     Serial.print("bbprobe: oversample ");
-    Serial.print(kCaptureSamples);
+    Serial.print(captureSamples());
     Serial.print(" samples, ");
-    Serial.print(kProbeBitUs / kSampleUs);
+    Serial.print(s_probe_bit_us / kSampleUs);
     Serial.print("/bit, bit ");
-    Serial.print(kProbeBitUs);
+    Serial.print(s_probe_bit_us);
     Serial.println("us");
-    for (uint32_t start = 0; start < kCaptureSamples; start += kLine) {
-        const uint32_t stop = (start + kLine < kCaptureSamples)
+    for (uint32_t start = 0; start < captureSamples(); start += kLine) {
+        const uint32_t stop = (start + kLine < captureSamples())
                                   ? start + kLine
-                                  : kCaptureSamples;
+                                  : captureSamples();
         Serial.print("bbprobe: os ");
         Serial.print(start);
         Serial.print(": ");
@@ -177,39 +241,34 @@ uint8_t driverAddress(uint8_t index) {
     return board::kDrives[index].uart_address;
 }
 
-// Build a datagram for `address`, send it, and decode the 8-byte reply.
-bool transact(uint8_t address, uint8_t reg, uint32_t value, bool write,
-              uint8_t reply[tmc_uart_bits::kReplyBytes]) {
+// Send a read request and decode the 8-byte reply. Writes go through
+// writeAddressReg: they are write-only and their acknowledgement is not
+// decoded, so a missing or differently framed write echo cannot fail a write.
+bool readTransact(uint8_t address, uint8_t reg,
+                  uint8_t reply[tmc_uart_bits::kReplyBytes]) {
     uint8_t request[tmc_uart_bits::kReplyBytes];
-    const uint32_t len = tmc_uart_bits::encode(address, reg, value, write,
-                                               request);
-    bb_exchange(request, len);
+    const uint32_t len = tmc_uart_bits::encode(address, reg, 0, false, request);
+    bb_tx_read(request, len);
     return bb_decode(reply) && reply[2] == reg;
 }
 
 bool readAddressReg(uint8_t address, uint8_t reg, uint32_t* value) {
     uint8_t reply[tmc_uart_bits::kReplyBytes];
-    for (uint8_t attempt = 0; attempt < 2; ++attempt) {
-        if (transact(address, reg, 0, false, reply)) {
-            *value = ((uint32_t)reply[3] << 24) |
-                     ((uint32_t)reply[4] << 16) |
-                     ((uint32_t)reply[5] << 8) | reply[6];
-            return true;
-        }
-        delayMicroseconds(200);
+    if (!readTransact(address, reg, reply)) {
+        return false;
     }
-    return false;
+    *value = ((uint32_t)reply[3] << 24) |
+             ((uint32_t)reply[4] << 16) |
+             ((uint32_t)reply[5] << 8) | reply[6];
+    return true;
 }
 
 bool writeAddressReg(uint8_t address, uint8_t reg, uint32_t value) {
-    uint8_t reply[tmc_uart_bits::kReplyBytes];
-    for (uint8_t attempt = 0; attempt < 2; ++attempt) {
-        if (transact(address, reg, value, true, reply)) {
-            return true;
-        }
-        delayMicroseconds(200);
-    }
-    return false;
+    uint8_t request[tmc_uart_bits::kReplyBytes];
+    const uint32_t len =
+        tmc_uart_bits::encode(address, reg, value, true, request);
+    bb_tx_only(request, len);
+    return true;
 }
 
 bool readDriverReg(uint8_t index, uint8_t reg, uint32_t* value) {
@@ -302,7 +361,30 @@ bool failDriver(uint8_t index, const char* step) {
     return false;
 }
 
+void initPrefix(uint8_t index) {
+    Serial.print("tmc");
+    Serial.print(index);
+    Serial.print("@");
+    Serial.print(driverAddress(index));
+    Serial.print(": init ");
+}
+
 bool configureDriver(uint8_t index) {
+    uart_line_high();
+
+    // SENDDELAY first, before any read, so every reply already has the clean
+    // gap after our last stop bit. It is write-only; the log is the record.
+    uart_line_high();
+    const uint32_t slaveconf = (uint32_t)kDefaultSendDelay << 8;
+    writeDriverReg(index, kSlaveconf, slaveconf);
+    uart_line_high();
+    initPrefix(index);
+    Serial.print("SENDDELAY=");
+    Serial.print(kDefaultSendDelay);
+    Serial.print(" SLAVECONF=0x");
+    Serial.print(slaveconf, HEX);
+    Serial.println(" (UART line high)");
+
     uint32_t gconf = 0;
     uint32_t otp = 0;
     if (!readDriverReg(index, kGconf, &gconf)) {
@@ -311,40 +393,52 @@ bool configureDriver(uint8_t index) {
     if (!readDriverReg(index, kOtpRead, &otp)) {
         return failDriver(index, "OTP_READ read failed");
     }
+    initPrefix(index);
+    Serial.print("read GCONF=0x");
+    Serial.print(gconf, HEX);
+    Serial.print(" OTP_READ=0x");
+    Serial.println(otp, HEX);
 
     // OTP0.6 selects internal RDSon sensing. These boards fit external sense
     // resistors, and OTP can only be set, never cleared. Refuse the driver.
     if (otp & (1u << 6)) {
         return failDriver(index, "OTP internal_Rsense is set; refusing to enable");
     }
+    initPrefix(index);
+    Serial.println("OTP internal_Rsense=0, external sense resistors");
 
     // Force external current sensing first and require the read-back before
-    // changing any other bit (doc/controller_analysis.md §6.1).
+    // changing any other bit (doc/controller_analysis.md §6.1). This gates the
+    // current setting, so it stays a verified write.
     uint32_t want = gconf & 0x3FFu;
     want &= ~(1u << 1);
     if (!writeDriverReg(index, kGconf, want) ||
         !verifyDriverReg(index, kGconf, want, 0x3FFu)) {
-        return failDriver(index, "GCONF force-write verify failed");
+        return failDriver(index, "GCONF external-sense verify failed");
     }
+    initPrefix(index);
+    Serial.print("external sense GCONF=0x");
+    Serial.print(want, HEX);
+    Serial.println(" verified");
 
-    // Digital current scale, StealthChop, register microstepping.
+    // pdn_disable=1 makes PDN_UART a UART line only and removes its
+    // power-down function from the picture. The board pulls PDN_UART down
+    // through 20 kOhm when the line is released. Write it and verify it before
+    // relying on the UART.
     want &= ~(1u << 0);  // I_scale_analog = 0
     want &= ~(1u << 2);  // en_spreadcycle = 0
     want |= (1u << 6);   // pdn_disable
     want |= (1u << 7);   // mstep_reg_select
     want |= (1u << 8);   // multistep_filt
-    if (!writeDriverReg(index, kGconf, want) ||
-        !verifyDriverReg(index, kGconf, want, 0x3FFu)) {
-        return failDriver(index, "GCONF config verify failed");
+    writeDriverReg(index, kGconf, want);
+    if (!verifyDriverReg(index, kGconf, want, 0x1FFu)) {
+        return failDriver(index, "GCONF UART mode (pdn_disable) verify failed");
     }
     s_status[index].gconf = want;
-
-    // SENDDELAY must be configured before the reply timing is relied on.
-    const uint32_t slaveconf = (uint32_t)kDefaultSendDelay << 8;
-    if (!writeDriverReg(index, kSlaveconf, slaveconf) ||
-        !verifyDriverReg(index, kSlaveconf, slaveconf, 0xF00u)) {
-        return failDriver(index, "SLAVECONF SENDDELAY verify failed");
-    }
+    initPrefix(index);
+    Serial.print("GCONF=0x");
+    Serial.print(want, HEX);
+    Serial.println(" pdn_disable=1 mstep_reg_select=1 verified");
 
     bool vsense = false;
     uint32_t irun = 0;
@@ -354,34 +448,55 @@ bool configureDriver(uint8_t index) {
         (ihold & 0x1Fu) | ((irun & 0x1Fu) << 8) | (1u << 16);
     const uint32_t chopconf = chopconfValue(vsense);
 
-    if (!writeDriverReg(index, kChopconf, chopconf) ||
-        !verifyDriverReg(index, kChopconf, chopconf)) {
-        return failDriver(index, "CHOPCONF verify failed");
-    }
-    if (!writeDriverReg(index, kIholdIrun, ihold_irun) ||
-        !verifyDriverReg(index, kIholdIrun, ihold_irun)) {
-        return failDriver(index, "IHOLD_IRUN read-back mismatch");
-    }
-    if (!writeDriverReg(index, kPwmconf, kDefaultPwmconf) ||
-        !verifyDriverReg(index, kPwmconf, kDefaultPwmconf)) {
-        return failDriver(index, "PWMCONF verify failed");
-    }
-    if (!writeDriverReg(index, kTpowerdown, kDefaultTpowerdown) ||
-        !verifyDriverReg(index, kTpowerdown, kDefaultTpowerdown)) {
-        return failDriver(index, "TPOWERDOWN verify failed");
-    }
-    if (!writeDriverReg(index, kTpwmthrs, 0) ||
-        !verifyDriverReg(index, kTpwmthrs, 0)) {
-        return failDriver(index, "TPWMTHRS verify failed");
-    }
-    if (!writeDriverReg(index, kTcoolthrs, kDefaultTcoolthrs) ||
-        !verifyDriverReg(index, kTcoolthrs, kDefaultTcoolthrs)) {
-        return failDriver(index, "TCOOLTHRS verify failed");
-    }
-    if (!writeDriverReg(index, kSgthrs, kDefaultSgthrs) ||
-        !verifyDriverReg(index, kSgthrs, kDefaultSgthrs)) {
-        return failDriver(index, "SGTHRS verify failed");
-    }
+    writeDriverReg(index, kChopconf, chopconf);
+    writeDriverReg(index, kIholdIrun, ihold_irun);
+    writeDriverReg(index, kPwmconf, kDefaultPwmconf);
+    writeDriverReg(index, kTpowerdown, kDefaultTpowerdown);
+    writeDriverReg(index, kTpwmthrs, 0);
+    writeDriverReg(index, kTcoolthrs, kDefaultTcoolthrs);
+    writeDriverReg(index, kSgthrs, kDefaultSgthrs);
+
+    initPrefix(index);
+    Serial.print("CHOPCONF=0x");
+    Serial.print(chopconf, HEX);
+    Serial.print(" VSENSE=");
+    Serial.print(vsense ? 1 : 0);
+    Serial.print(" TOFF=");
+    Serial.print(kChopconfToff);
+    Serial.print(" MRES=");
+    Serial.print(1u << kChopconfMres);
+    Serial.println(" microsteps");
+
+    initPrefix(index);
+    Serial.print("IHOLD_IRUN=0x");
+    Serial.print(ihold_irun, HEX);
+    Serial.print(" run=");
+    Serial.print(kDefaultRunMa);
+    Serial.print("mA hold=");
+    Serial.print(kDefaultHoldMa);
+    Serial.print("mA IRUN=");
+    Serial.print(irun);
+    Serial.print(" IHOLD=");
+    Serial.println(ihold);
+
+    initPrefix(index);
+    Serial.print("PWMCONF=0x");
+    Serial.println(kDefaultPwmconf, HEX);
+
+    initPrefix(index);
+    Serial.print("TPOWERDOWN=");
+    Serial.println(kDefaultTpowerdown);
+
+    initPrefix(index);
+    Serial.println("TPWMTHRS=0");
+
+    initPrefix(index);
+    Serial.print("TCOOLTHRS=0x");
+    Serial.println(kDefaultTcoolthrs, HEX);
+
+    initPrefix(index);
+    Serial.print("SGTHRS=");
+    Serial.println(kDefaultSgthrs);
 
     // DRV_STATUS is telemetry, not part of the enable safety check. A missing
     // motor supply can make this read fail; configuration is still valid and
@@ -390,6 +505,9 @@ bool configureDriver(uint8_t index) {
     if (readDriverReg(index, kDrvStatus, &drv_status)) {
         s_status[index].drv_status = drv_status;
         s_seen_mask |= (uint8_t)(1u << index);
+        initPrefix(index);
+        Serial.print("DRV_STATUS=0x");
+        Serial.println(drv_status, HEX);
     } else {
         Serial.print("tmc");
         Serial.print(index);
@@ -407,6 +525,9 @@ bool configureDriver(uint8_t index) {
     s_status[index].tcoolthrs = kDefaultTcoolthrs;
     s_status[index].ready = true;
     s_status[index].online = true;
+    uart_line_high();
+    initPrefix(index);
+    Serial.println("complete, UART line high");
     return true;
 }
 
@@ -423,7 +544,7 @@ bool tx_pad_test(uint8_t value) {
     const uint64_t t0 = time_us_64();
     bool ok = true;
     for (uint32_t bit = 0; bit < 10; ++bit) {
-        wait_until_us(t0 + (2u * bit + 1u) * kProbeBitUs / 2u);
+        wait_until_us(t0 + (2u * bit + 1u) * s_probe_bit_us / 2u);
         const int expected = (bit == 0) ? 0
                              : (bit == 9) ? 1
                                           : ((value >> (bit - 1u)) & 1u);
@@ -431,19 +552,32 @@ bool tx_pad_test(uint8_t value) {
             ok = false;
         }
         if (bit < 9) {
-            wait_until_us(t0 + (bit + 1u) * kProbeBitUs);
+            wait_until_us(t0 + (bit + 1u) * s_probe_bit_us);
             const int next =
                 (bit + 1u == 9u) ? 1 : ((value >> bit) & 1u);
             gpio_put(board::kTmcUartPin, next);
         }
     }
-    wait_until_us(t0 + 10u * kProbeBitUs);
-    gpio_set_dir(board::kTmcUartPin, GPIO_IN);
+    wait_until_us(t0 + 10u * s_probe_bit_us);
+    gpio_put(board::kTmcUartPin, 1);
+    gpio_set_dir(board::kTmcUartPin, GPIO_OUT);
     restore_interrupts(save);
     return ok;
 }
 
 }  // namespace
+
+bool setBitTimeUs(uint32_t us) {
+    if (us < kMinProbeBitUs || us > kMaxProbeBitUs) {
+        return false;
+    }
+    s_probe_bit_us = us;
+    return true;
+}
+
+uint32_t bitTimeUs() {
+    return s_probe_bit_us;
+}
 
 uint8_t begin() {
     // All outputs off before the first UART access.
@@ -454,6 +588,14 @@ uint8_t begin() {
     s_seen_mask = 0;
     s_last_diag = 0;
     s_diag_valid = false;
+
+    Serial.print("tmc: init GPIO");
+    Serial.print(board::kTmcUartPin);
+    Serial.print(" SIO output high, ");
+    Serial.print(1000000u / s_probe_bit_us);
+    Serial.print(" Baud, ");
+    Serial.print(kDriverCount);
+    Serial.println(" drivers");
 
     for (uint8_t i = 0; i < kDriverCount; ++i) {
         s_config[i] = Config{kDefaultRunMa, kDefaultHoldMa, kDefaultSgthrs,
@@ -475,6 +617,10 @@ uint8_t begin() {
             Serial.println(": not configured, outputs stay disabled");
         }
     }
+    Serial.print("tmc: init done ready=0x");
+    Serial.print(s_ready_mask, HEX);
+    Serial.print("/0x");
+    Serial.println((1u << kDriverCount) - 1u, HEX);
     return s_ready_mask;
 }
 
@@ -515,24 +661,14 @@ bool setCurrents(uint8_t index, uint16_t run_ma, uint16_t hold_ma) {
         return false;
     }
     chopconf = (chopconf & ~(1u << 17)) | (vsense ? (1u << 17) : 0);
-    if (!writeDriverReg(index, kChopconf, chopconf)) {
-        return false;
-    }
-    if (!writeDriverReg(index, kIholdIrun, ihold_irun)) {
-        return false;
-    }
-    if (!verifyDriverReg(index, kIholdIrun, ihold_irun)) {
-        return false;
-    }
-    if (!readDriverReg(index, kChopconf, &chopconf)) {
-        return false;
-    }
+    writeDriverReg(index, kChopconf, chopconf);
+    writeDriverReg(index, kIholdIrun, ihold_irun);
 
     s_config[index].run_ma = run_ma;
     s_config[index].hold_ma = hold_ma;
     s_status[index].irun = (uint8_t)irun;
     s_status[index].ihold = (uint8_t)ihold;
-    s_status[index].vsense = ((chopconf >> 17) & 1u) != 0;
+    s_status[index].vsense = vsense;
     return true;
 }
 
@@ -540,10 +676,7 @@ bool setStallGuard(uint8_t index, uint8_t sgthrs) {
     if (!ready(index)) {
         return false;
     }
-    if (!writeDriverReg(index, kSgthrs, sgthrs) ||
-        !verifyDriverReg(index, kSgthrs, sgthrs)) {
-        return false;
-    }
+    writeDriverReg(index, kSgthrs, sgthrs);
     s_config[index].sgthrs = sgthrs;
     s_status[index].sgthrs = sgthrs;
     return true;
@@ -554,10 +687,7 @@ bool setTcoolthrs(uint8_t index, uint32_t value) {
         return false;
     }
     value &= 0xFFFFFu;
-    if (!writeDriverReg(index, kTcoolthrs, value) ||
-        !verifyDriverReg(index, kTcoolthrs, value)) {
-        return false;
-    }
+    writeDriverReg(index, kTcoolthrs, value);
     s_config[index].tcoolthrs = value;
     s_status[index].tcoolthrs = value;
     return true;
@@ -578,15 +708,8 @@ bool setMicrosteps(uint8_t index, uint16_t microsteps, bool interpolate) {
     chopconf = (chopconf & ~(0xFu << 24)) | ((uint32_t)mres << 24);
     chopconf = (chopconf & ~(1u << 28)) |
                ((interpolate ? 1u : 0u) << 28);
-    if (!writeDriverReg(index, kChopconf, chopconf)) {
-        return false;
-    }
-    uint32_t readback = 0;
-    if (!readDriverReg(index, kChopconf, &readback)) {
-        return false;
-    }
-    return ((readback >> 24) & 0xFu) == mres &&
-           (((readback >> 28) & 0x1u) != 0) == interpolate;
+    writeDriverReg(index, kChopconf, chopconf);
+    return true;
 }
 
 bool setChopper(uint8_t index, uint32_t chopconf) {
@@ -597,16 +720,14 @@ bool setChopper(uint8_t index, uint32_t chopconf) {
     // changing the current scale behind setCurrents().
     chopconf = (chopconf & ~(1u << 17)) |
                (s_status[index].vsense ? (1u << 17) : 0);
-    return writeDriverReg(index, kChopconf, chopconf) &&
-           verifyDriverReg(index, kChopconf, chopconf);
+    return writeDriverReg(index, kChopconf, chopconf);
 }
 
 bool setPwmConf(uint8_t index, uint32_t pwmconf) {
     if (!ready(index)) {
         return false;
     }
-    return writeDriverReg(index, kPwmconf, pwmconf) &&
-           verifyDriverReg(index, kPwmconf, pwmconf);
+    return writeDriverReg(index, kPwmconf, pwmconf);
 }
 
 bool setSendDelay(uint8_t index, uint8_t delay) {
@@ -614,8 +735,7 @@ bool setSendDelay(uint8_t index, uint8_t delay) {
         return false;
     }
     const uint32_t value = (uint32_t)delay << 8;
-    return writeDriverReg(index, kSlaveconf, value) &&
-           verifyDriverReg(index, kSlaveconf, value, 0xF00u);
+    return writeDriverReg(index, kSlaveconf, value);
 }
 
 bool readRegister(uint8_t index, uint8_t address, uint32_t* value) {
@@ -717,23 +837,11 @@ void refresh(uint8_t index) {
         s_status[index].tstep = (uint16_t)value;
         any_ok = true;
     }
-    if (readDriverReg(index, kIholdIrun, &value)) {
-        s_status[index].irun = (uint8_t)((value >> 8) & 0x1Fu);
-        s_status[index].ihold = (uint8_t)(value & 0x1Fu);
-        any_ok = true;
-    }
+    // IHOLD_IRUN, SGTHRS and TCOOLTHRS are write-only on the TMC2209; their
+    // values come from what setCurrents()/setStallGuard()/setTcoolthrs()
+    // wrote. Only CHOPCONF (VSENSE) is readable here.
     if (readDriverReg(index, kChopconf, &value)) {
         s_status[index].vsense = ((value >> 17) & 1u) != 0;
-        any_ok = true;
-    }
-    if (readDriverReg(index, kSgthrs, &value)) {
-        s_status[index].sgthrs = (uint8_t)value;
-        s_config[index].sgthrs = (uint8_t)value;
-        any_ok = true;
-    }
-    if (readDriverReg(index, kTcoolthrs, &value)) {
-        s_status[index].tcoolthrs = value & 0xFFFFFu;
-        s_config[index].tcoolthrs = value & 0xFFFFFu;
         any_ok = true;
     }
     s_status[index].online = any_ok;
@@ -820,11 +928,12 @@ void bbProbe(uint8_t address) {
     }
     Serial.println();
 
-    bb_exchange(request, len);
+    bb_tx_read(request, len);
     bb_dump_samples();
 
     uint8_t reply[tmc_uart_bits::kReplyBytes];
-    const bool got = bb_decode(reply) && reply[2] == kGconf;
+    tmc_uart_bits::Frame frame;
+    const bool got = bb_decode(reply, &frame) && reply[2] == kGconf;
     if (!got) {
         Serial.println("bbprobe: no reply");
         return;
@@ -850,12 +959,79 @@ void bbProbe(uint8_t address) {
     Serial.print(" got 0x");
     Serial.print(reply[tmc_uart_bits::kReplyBytes - 1], HEX);
     Serial.println(")");
+
+    const uint32_t period_x100 = (frame.period_q8 * 100u) / 256u;
+    Serial.print("bbprobe: frame start=");
+    Serial.print(frame.start);
+    Serial.print(" samples, period=");
+    Serial.print(period_x100 / 100u);
+    Serial.print('.');
+    if (period_x100 % 100u < 10u) {
+        Serial.print('0');
+    }
+    Serial.print(period_x100 % 100u);
+    Serial.print("us (Q8 ");
+    Serial.print(frame.period_q8);
+    Serial.println(")");
 }
 
 void bbProbeAll() {
     for (uint8_t address = 0; address < 4; ++address) {
         bbProbe(address);
     }
+}
+
+void sampleLine(uint32_t us) {
+    if (us == 0 || us > kCaptureSamplesMax) {
+        us = kCaptureSamplesMax;
+    }
+
+    // Release the line with the internal pulls off, so the result reflects the
+    // TMC and the external network rather than our own drive.
+    const uint32_t save = save_and_disable_interrupts();
+    gpio_set_dir(board::kTmcUartPin, GPIO_IN);
+    gpio_disable_pulls(board::kTmcUartPin);
+    memset(s_samples, 0, sizeof(s_samples));
+    const uint64_t t0 = time_us_64();
+    for (uint32_t i = 0; i < us; ++i) {
+        wait_until_us(t0 + (uint64_t)i * kSampleUs);
+        if (gpio_get(board::kTmcUartPin)) {
+            s_samples[i >> 3] |= (uint8_t)(1u << (i & 7u));
+        }
+    }
+    gpio_put(board::kTmcUartPin, 1);
+    gpio_set_dir(board::kTmcUartPin, GPIO_OUT);
+    gpio_pull_up(board::kTmcUartPin);
+    restore_interrupts(save);
+
+    uint32_t high = 0;
+    uint32_t edges = 0;
+    bool prev = tmc_uart_bits::level(s_samples, 0);
+    for (uint32_t i = 0; i < us; ++i) {
+        const bool current = tmc_uart_bits::level(s_samples, i);
+        if (current) {
+            ++high;
+        }
+        if (i > 0 && current != prev) {
+            ++edges;
+        }
+        prev = current;
+    }
+
+    Serial.print("line: ");
+    Serial.print(us);
+    Serial.print("us first=");
+    Serial.print(tmc_uart_bits::level(s_samples, 0) ? 1 : 0);
+    Serial.print(" last=");
+    Serial.print(tmc_uart_bits::level(s_samples, us - 1) ? 1 : 0);
+    Serial.print(" high=");
+    Serial.print(high);
+    Serial.print("/");
+    Serial.print(us);
+    Serial.print(" edges=");
+    Serial.print(edges);
+    Serial.print(" idle=");
+    Serial.println(tmc_uart_bits::level(s_samples, us - 1) ? "high" : "low");
 }
 
 void printDriver(uint8_t index) {

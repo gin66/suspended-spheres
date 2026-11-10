@@ -860,9 +860,12 @@ and verify it, then write `GCONF` with `I_scale_analog = 0`,
 `en_spreadcycle = 0`, `pdn_disable = 1`, `mstep_reg_select = 1` and
 `multistep_filt = 1`. The chopper is TOFF = 4, MRES = 4 (1/16) with
 interpolation, `PWMCONF = 0xC10D0024`, `TPWMTHRS = 0`,
-`TCOOLTHRS = 0xFFFFF`, `SGTHRS = 40`. Every key register is read back; a
-driver that fails any check is left disabled, and only drivers that pass are
-enabled by the node.
+`TCOOLTHRS = 0xFFFFF`, `SGTHRS = 40`. Only the `GCONF.1 = 0` external-sense
+write is read back (§6.1 safety gate). The remaining configuration registers
+are written without a read-back; `IHOLD_IRUN`, `TPOWERDOWN`, `TPWMTHRS`,
+`TCOOLTHRS` and `SGTHRS` are write-only in the TMC2209 register map, so a
+read-back would be meaningless. A driver left `not configured` is kept
+disabled, and only drivers that complete bring-up are enabled by the node.
 
 The default is 300 mA RMS run and hold at `RSENSE = 0.110 Ω`. The firmware
 selects VSENSE and the IRUN/IHOLD codes with the integer form
@@ -883,7 +886,7 @@ interface, and it can command motion.
 | Command | Meaning |
 |---------|---------|
 | `status [axis]` | Read and print `DRV_STATUS`, `SG_RESULT`, `TSTEP`, currents and DIAG |
-| `cur <axis> <run_ma> [hold_ma]` | Set run/hold current and read back |
+| `cur <axis> <run_ma> [hold_ma]` | Set run/hold current and print status |
 | `sg <axis> <0..255>` | Set `SGTHRS` |
 | `tcool <axis> <value>` | Set the 20-bit `TCOOLTHRS` |
 | `micro <axis> <2..256> [0\|1]` | Set microsteps and interpolation |
@@ -897,6 +900,8 @@ interface, and it can command motion.
 | `selftest` | Bit-bang a pattern through SIO and sample the pad at every bit centre |
 | `scan` | Read `GCONF` at UART addresses 0–3 to find which strap addresses answer |
 | `bbprobe [addr]` | Pure bit-banged GCONF read plus the raw oversampled reply |
+| `line [us]` | Release GPIO9 (pulls off) and report bus level, high count and edges |
+| `bit [us]` | Show/set the bit time: 4 µs = 250 kBaud (default), 5 µs = 200 kBaud |
 | `senddelay <axis> <0..15>` | Set `SLAVECONF.SENDDELAY` (reply gap in bit times) |
 
 `raw` is for register diagnosis, not current control: use `cur` so the 800 mA
@@ -911,36 +916,54 @@ failed` remains, the fault is external (TMC supply, PDN bus, address, or
 wiring). None of these commands changes the CAN protocol.
 
 Bring-up writes `SLAVECONF.SENDDELAY = 2` (two extra bit times before each
-reply) and reads it back. That gives the reply a clean, known gap after our
-last stop bit; `senddelay` overrides it on the bench. `bbprobe` keeps the SIO
-output enabled across the whole datagram, so the stop bit of one byte is
-immediately followed by the start bit of the next, and releases the pad only
-after the final stop bit. The older per-byte bit-bang released the pad after
-every byte; the board's pull-down on `PDN_UART` then pulls the line low between
-bytes, which can break the TMC auto-baud and the power-down state.
+reply) and does not read it back: writes are write-only, and only reads use the
+reply capture and CRC check. That gives the reply a clean, known gap after our
+last stop bit; `senddelay` overrides it on the bench. The line is driven high
+before and after that write.
 
-`bbprobe` bit-bangs the reply at 200 kBaud and samples it five times per bit (a
-1 µs grid) over 128 bit times, covering the reply delay, the maximum
+The board pulls `PDN_UART` down through 20 kΩ when the line is released, so the
+UART init sets and verifies `GCONF.pdn_disable = 1` (together with
+`mstep_reg_select` and `multistep_filt`) to take the pin's power-down function
+out of the picture. This is a firmware-only change, with no board change: the
+pin is an SIO output driving 1 whenever the firmware is not sampling a reply.
+`bbprobe` keeps the SIO output enabled across the whole datagram, so the stop
+bit of one byte is immediately followed by the start bit of the next, and
+releases the pad only after the final stop bit. The older per-byte bit-bang
+released the pad after every byte; the pull-down then pulled the line low
+between bytes. Bring-up logs every register it writes, the current scaling
+and the `pdn_disable`/SENDDELAY checks, so the serial log shows what was
+initialized on start and on `reinit`.
+
+`bbprobe` bit-bangs the reply at the selected bit time (default 250 kBaud,
+4 µs per bit) and samples it once per microsecond over 128 bit times (512
+samples at 250 kBaud, 640 at 200 kBaud), covering the reply delay, the maximum
 `SENDDELAY` and the 8-byte reply. The capture starts at the transmit release,
 so the decoder can treat the line-release 1→0 edge and the `0x05` sync edges
 as references. It prints the raw samples as `bbprobe: os <start>: …` lines,
 then `lib/tmc_uart_bits` scans the 1→0 edges for the reply start and fits the
 bit period: a candidate is accepted only when the frame starts with `0x05` and
 its CRC8 matches. This is why the earlier 3-bit period estimate failed — the
-TMC re-times the reply from our datagram and answers at roughly 4.75–4.90 µs
-per bit, so a fixed 5.00 µs grid walked off the CRC by the last byte. The
-host tests replay recorded captures through the same production function.
+TMC re-times the reply from our datagram and answers at roughly 0.95–0.98 of
+our bit time (4.75–4.90 µs at 5.00 µs, 3.8–3.9 µs at 4.00 µs), so a fixed
+grid walked off the CRC by the last byte. On a good reply `bbprobe` prints the
+fitted start and period, which shows how much margin the decoder had. The host
+tests replay recorded captures through the same production function.
 
 **Baud and interrupt budget.** The TMC2209 auto-detects the rate and is
-specified for up to roughly 500 kbit/s, so 250 kBaud (4 µs per bit) is
-available. Interrupts are masked for one request plus one capture:
-`(4·10 + 4) · T` for the request and `128 · T` for the capture, i.e. 860 µs at
-200 kBaud and 688 µs at 250 kBaud (4× oversampling on the same 1 µs grid). The
-constant `kProbeBitUs` in `tmc2209.cpp` is the single switch; the decoder
-searches around the nominal period, so it does not need a second change. Verify
-250 kBaud on the bench before adopting it. If `selftest` reports `idle=0`, the
-line is low even while idle and a pull-up is required before UART can work at
-all.
+specified for up to roughly 500 kbit/s. The default is 250 kBaud (4 µs per
+bit); `bit <us>` switches it at runtime for A/B tests on the same address
+(5 µs = 200 kBaud, 8 µs = 125 kBaud). Interrupts are masked for one request
+plus the 8-bit idle hold and one capture: `(4·10 + 8) · T + 128 · T`, i.e.
+880 µs at 200 kBaud and 704 µs at 250 kBaud (4× oversampling on the same 1 µs
+grid). The decoder searches around the nominal period, so it follows the
+runtime bit time automatically. Before the first edge the transmitter waits for
+the next 1 µs timer tick, so the start bit is not shortened by the fractional
+tick offset; without that alignment the first bit can be up to 1 µs short
+(25 % at 4 µs) and the TMC auto-baud can lock onto the wrong rate and reject
+the request. Verify a rate on the bench before relying on it. `selftest`
+reports the driven idle level; use `line` to release the pad and inspect the
+bus, and remember that the board's pull-down makes a released line read low by
+design.
 
 **StallGuard calibration.** At the intended homing current, run the axis free
 with `run <axis> <hz> 1` and sample `SG_RESULT` with `status <axis>`. Then

@@ -79,6 +79,17 @@ void scanAddresses();
 void bbProbe(uint8_t address);
 void bbProbeAll();
 
+// Release the shared line and observe it for `us` microseconds. Internal
+// pulls are disabled so the report shows what the TMC/external network does,
+// then the line is restored to output high. `us` is clamped to the capture
+// buffer (1280 samples at the 10 us bit time).
+void sampleLine(uint32_t us);
+
+// Benchmark bit time. 2 us = 500 kBaud, 4 us = 250 kBaud, 5 us = 200 kBaud.
+// Returns false outside 2..10 us. The default is 4 us.
+bool setBitTimeUs(uint32_t us);
+uint32_t bitTimeUs();
+
 void printDriver(uint8_t index);
 
 }  // namespace tmc2209

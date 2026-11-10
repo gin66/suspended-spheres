@@ -81,6 +81,8 @@ void print_help() {
     Serial.println("  selftest                   bit-banged TX pad readback");
     Serial.println("  scan                       read GCONF at UART addresses 0..3");
     Serial.println("  bbprobe [addr]             pure bit-banged GCONF read + raw samples");
+    Serial.println("  line [us]                  release GPIO9 and report bus level/edges");
+    Serial.println("  bit [us]                   show/set bit time (4=250k, 5=200k)");
     Serial.println("  senddelay <axis> <0..15>   SLAVECONF SENDDELAY reply gap");
     Serial.println("  cur <axis> <run_ma> [hold_ma]");
     Serial.println("  sg <axis> <0..255>         SGTHRS");
@@ -217,6 +219,30 @@ void command_senddelay(int argc, char** argv) {
         return;
     }
     print_result(tmc2209::setSendDelay(axis, (uint8_t)value));
+}
+
+void command_line(int argc, char** argv) {
+    uint32_t us = 0;
+    if (argc >= 2 && !parse_u32(argv[1], &us)) {
+        Serial.println("bad argument");
+        return;
+    }
+    tmc2209::sampleLine(us);
+}
+
+void command_bit(int argc, char** argv) {
+    if (argc >= 2) {
+        uint32_t us = 0;
+        if (!parse_u32(argv[1], &us) || !tmc2209::setBitTimeUs(us)) {
+            Serial.println("usage: bit <2..10> us");
+            return;
+        }
+    }
+    Serial.print("bit: ");
+    Serial.print(tmc2209::bitTimeUs());
+    Serial.print("us, ");
+    Serial.print(1000000u / tmc2209::bitTimeUs());
+    Serial.println(" Baud");
 }
 
 void command_pwm(int argc, char** argv) {
@@ -433,6 +459,10 @@ void execute(char* line) {
         command_pwm(argc, argv);
     } else if (strcmp(command, "senddelay") == 0) {
         command_senddelay(argc, argv);
+    } else if (strcmp(command, "line") == 0) {
+        command_line(argc, argv);
+    } else if (strcmp(command, "bit") == 0) {
+        command_bit(argc, argv);
     } else if (strcmp(command, "raw") == 0) {
         command_raw(argc, argv);
     } else if (strcmp(command, "move") == 0) {
