@@ -82,13 +82,8 @@ void bbProbeAll();
 // Release the shared line and observe it for `us` microseconds. Internal
 // pulls are disabled so the report shows what the TMC/external network does,
 // then the line is restored to output high. `us` is clamped to the capture
-// buffer (1280 samples at the 10 us bit time).
+// buffer (kCaptureSamplesMax samples, 4 per bit).
 void sampleLine(uint32_t us);
-
-// Benchmark bit time. 2 us = 500 kBaud, 4 us = 250 kBaud, 5 us = 200 kBaud.
-// Returns false outside 2..10 us. The default is 4 us.
-bool setBitTimeUs(uint32_t us);
-uint32_t bitTimeUs();
 
 // Idle high bits after the request stop bit, before the line is released.
 // The default is 4; the bench can sweep 0..12 to trade line-low time against

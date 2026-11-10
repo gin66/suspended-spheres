@@ -73,23 +73,23 @@ constexpr uint32_t kChopconfMres = 4;  // 16 microsteps
 constexpr uint32_t kChopconfToff = 4;
 constexpr uint32_t kChopconfIntpol = 1;
 
-// Default 250 kBaud (4 us per bit). The bit time is switchable on the bench
-// over 2..10 us (500..100 kBaud): every edge is placed on a cycle-resolution
-// deadline, advanced one bit at a time, so edges stay on that grid without
-// drift, and the reply is sampled every 1 us (four samples per bit at
-// 250 kBaud) so the decoder can fit the period instead of trusting a short
-// per-reply estimate.
-constexpr uint32_t kSampleUs = 1;
+// The reply is decoded at exactly 4 samples per bit. The sample period is
+// the 1 MHz tick expressed in clk_sys cycles (clk_sys / 1 000 000, exact at
+// an integer-MHz clock) and one bit is exactly 4 samples, so every deadline
+// and the decoder's nominal period are integers of one grid — no rounding
+// at all. At 125 MHz: 1 sample = 125 cycles, 1 bit = 500 cycles = 4 us
+// (fixed 250 kBaud); the TMC auto-baud locks on at any other integer-MHz
+// clk_sys, so the exact 4-us figure is not load-bearing.
+constexpr uint32_t kSamplesPerBit = 4;
 constexpr uint32_t kCaptureBits = 128;
-constexpr uint32_t kMinProbeBitUs = 2;
-constexpr uint32_t kMaxProbeBitUs = 10;
-constexpr uint32_t kDefaultProbeBitUs = 4;
-constexpr uint32_t kCaptureSamplesMax =
-    kCaptureBits * kMaxProbeBitUs / kSampleUs;
+constexpr uint32_t kCaptureSamplesMax = kCaptureBits * kSamplesPerBit;
+// Bit length in sample steps times 256: the decoder fits the reply period
+// against this nominal value.
+constexpr uint32_t kBitPeriodQ8 = kSamplesPerBit * 256u;
 // Idle high bits between the last stop bit and the reply capture. The TMC
 // starts its reply about 7 bit times after the stop bit. Holding 4 releases
-// the line early; the board pull-down then holds it low for a few bits, which
-// can disturb the TMC. The bench can sweep this with `idle`.
+// the line early; the board pull-down then holds it low for a few bits,
+// which can disturb the TMC. The bench can sweep this with `idle`.
 uint32_t s_idle_bits = 4;
 
 // Datasheet failure recovery: the line must be idle high for at least 12 bit
@@ -98,19 +98,15 @@ uint32_t s_idle_bits = 4;
 // can be discarded. This wait runs with interrupts enabled.
 constexpr uint32_t kPreIdleBits = 12;
 
-uint32_t s_probe_bit_us = kDefaultProbeBitUs;
+// Sample-grid timing, computed once in begin() and then left alone.
+uint32_t s_sample_cycles = 0;  // one sample period, in clk_sys cycles
+uint16_t s_bit_cycles = 0;     // kSamplesPerBit * s_sample_cycles
+
 uint8_t s_samples[(kCaptureSamplesMax + 7u) / 8u];
 tmc_uart_bits::CaptureReport s_capture = {};
 uint32_t s_capture_elapsed_us = 0;
 uint32_t s_capture_expected_us = 0;
 
-uint32_t captureSamples() {
-    return kCaptureBits * s_probe_bit_us / kSampleUs;
-}
-
-uint32_t nominalPeriodQ8() {
-    return s_probe_bit_us * 256u / kSampleUs;
-}
 uint32_t s_irq = 0;
 bool s_irq_held = false;
 
@@ -139,11 +135,6 @@ inline void wait_until_cycles16(uint16_t target) {
 // Telemetry only: the low half of the 1 MHz timer, in 16-bit µs.
 inline uint16_t us_raw16() {
     return (uint16_t)time_us_32();
-}
-
-// Convert microseconds to CPU cycles: 4 us at 125 MHz = 500 cycles.
-inline uint32_t cycles_for_us(uint32_t us, uint32_t hz) {
-    return (uint32_t)(((uint64_t)us * hz) / 1000000u);
 }
 
 void bb_release_irq() {
@@ -196,12 +187,9 @@ void bb_tx_read(const uint8_t* data, size_t len) {
     memset(s_samples, 0, sizeof(s_samples));
     memset(&s_capture, 0, sizeof(s_capture));
 
-    const uint32_t bit_cycles =
-        cycles_for_us(s_probe_bit_us, clock_get_hz(clk_sys));
-
     uart_line_high();
     wait_until_cycles16(
-        cycles_now16() + (uint16_t)(kPreIdleBits * bit_cycles));
+        cycles_now16() + (uint16_t)(kPreIdleBits * s_bit_cycles));
     s_irq = save_and_disable_interrupts();
     s_irq_held = true;
     // One start instant, one absolute grid: bit k ends at
@@ -210,17 +198,24 @@ void bb_tx_read(const uint8_t* data, size_t len) {
     // ahead, so a datagram spanning more than one 65,536-cycle wrap still
     // sits on the same absolute grid. No tick alignment is needed: cycle
     // deadlines place edges without shortening the start bit.
-    const uint16_t start = cycles_now16();
+    // One start instant, one absolute grid: bit k ends at
+    // bit_start + k*s_bit_cycles. uint16_t sums are exact modulo 2^16 and
+    // the signed decode inside wait_until_cycles16 only ever looks one bit
+    // ahead, so a datagram spanning more than one 65,536-cycle wrap still
+    // sits on the same absolute grid. No tick alignment is needed: cycle
+    // deadlines place edges without shortening the start bit.
+    uint16_t bit_start = cycles_now16();
     for (size_t k = 0; k < nbits; ++k) {
         gpio_put(board::kTmcUartPin, bits[k]);
-        wait_until_cycles16(start + (uint16_t)((k + 1) * bit_cycles));
+        bit_start += s_bit_cycles;
+        wait_until_cycles16(bit_start);
     }
 
     // The last datagram bit is the stop bit, already high. Hold it for
     // s_idle_bits so the master is off the line during the reply delay.
     gpio_put(board::kTmcUartPin, 1);
-    wait_until_cycles16(
-        start + (uint16_t)((nbits + s_idle_bits) * bit_cycles));
+    bit_start += s_idle_bits * s_bit_cycles;
+    wait_until_cycles16(bit_start);
 
     gpio_set_dir(board::kTmcUartPin, GPIO_IN);
 
@@ -228,17 +223,14 @@ void bb_tx_read(const uint8_t* data, size_t len) {
     // Feed it one sample at a time; it returns true on the sample where the
     // stop bit is in and the line is still high, so we can take the line back
     // before the TMC releases it.
-    tmc_uart_bits::CaptureTracker tracker(nominalPeriodQ8());
+    tmc_uart_bits::CaptureTracker tracker(kBitPeriodQ8);
     // Telemetry stays on the 1 MHz timer: the capture can span more than
     // one 16-bit cycle window, but the µs difference is far inside its own
     // 65,536 µs half-window decode.
     const uint16_t t0_us = us_raw16();
-    const uint32_t sample_cycles =
-        cycles_for_us(kSampleUs, clock_get_hz(clk_sys));
     const uint16_t t0 = cycles_now16();
-    const uint32_t samples = captureSamples();
-    for (uint32_t i = 0; i < samples; ++i) {
-        wait_until_cycles16(t0 + (uint16_t)(i * sample_cycles));
+    for (uint32_t i = 0; i < kCaptureSamplesMax; ++i) {
+        wait_until_cycles16(t0 + (uint16_t)(i * s_sample_cycles));
         const bool level = gpio_get(board::kTmcUartPin);
         if (level) {
             s_samples[i >> 3] |= (uint8_t)(1u << (i & 7u));
@@ -251,7 +243,8 @@ void bb_tx_read(const uint8_t* data, size_t len) {
     }
     tracker.finish();
     s_capture = tracker.report();
-    s_capture_expected_us = (s_capture.end + 1u) * kSampleUs;
+    // One sample is exactly the 1 MHz tick, so expected µs = sample index.
+    s_capture_expected_us = s_capture.end + 1u;
     s_capture_elapsed_us = (uint16_t)(us_raw16() - t0_us);
 
     // After the read, drive the line high again instead of leaving it released.
@@ -267,34 +260,32 @@ void bb_tx_only(const uint8_t* data, size_t len) {
     uint8_t bits[8 * 10];
     const size_t nbits = build_bits(data, len, bits);
 
-    const uint32_t bit_cycles =
-        cycles_for_us(s_probe_bit_us, clock_get_hz(clk_sys));
-
     uart_line_high();
     wait_until_cycles16(
-        cycles_now16() + (uint16_t)(kPreIdleBits * bit_cycles));
+        cycles_now16() + (uint16_t)(kPreIdleBits * s_bit_cycles));
     s_irq = save_and_disable_interrupts();
     s_irq_held = true;
     // The same incremental deadline as bb_tx_read: edges are placed on
     // cycle deadlines, one bit at a time.
-    uint16_t start = cycles_now16();
+    uint16_t bit_start = cycles_now16();
     for (size_t k = 0; k < nbits; ++k) {
         gpio_put(board::kTmcUartPin, bits[k]);
-        wait_until_cycles16(start + (uint16_t)((k + 1) * bit_cycles));
+        bit_start += s_bit_cycles;
+        wait_until_cycles16(bit_start);
     }
 
     bb_release_irq();
     gpio_put(board::kTmcUartPin, 1);
-    wait_until_cycles16(
-        start + (uint16_t)((nbits + s_idle_bits) * bit_cycles));
+    bit_start += s_idle_bits * s_bit_cycles;
+    wait_until_cycles16(bit_start);
     // Leave the pin as an output driving high.
 }
 
 bool bb_decode(uint8_t reply[tmc_uart_bits::kReplyBytes],
                tmc_uart_bits::Frame* out = nullptr) {
     tmc_uart_bits::Frame frame;
-    if (!tmc_uart_bits::decode_reply(s_samples, captureSamples(),
-                                     nominalPeriodQ8(), &frame)) {
+    if (!tmc_uart_bits::decode_reply(s_samples, kCaptureSamplesMax,
+                                     kBitPeriodQ8, &frame)) {
         return false;
     }
     memcpy(reply, frame.bytes, tmc_uart_bits::kReplyBytes);
@@ -306,16 +297,16 @@ bool bb_decode(uint8_t reply[tmc_uart_bits::kReplyBytes],
 
 void bb_dump_samples() {
     constexpr uint32_t kLine = 128;
-    const uint32_t captured = captureSamples();
     const uint32_t count =
-        (s_capture.end + 1u < captured) ? s_capture.end + 1u : captured;
+        (s_capture.end + 1u < kCaptureSamplesMax) ? s_capture.end + 1u
+                                                  : kCaptureSamplesMax;
     Serial.print("bbprobe: oversample ");
-    Serial.print(captured);
+    Serial.print(kCaptureSamplesMax);
     Serial.print(" samples, ");
-    Serial.print(s_probe_bit_us / kSampleUs);
-    Serial.print("/bit, bit ");
-    Serial.print(s_probe_bit_us);
-    Serial.print("us, recorded ");
+    Serial.print(kSamplesPerBit);
+    Serial.print("/bit, sample ");
+    Serial.print(s_sample_cycles);
+    Serial.print(" cyc, recorded ");
     Serial.println(count);
     for (uint32_t start = 0; start < count; start += kLine) {
         const uint32_t stop = (start + kLine < count) ? start + kLine : count;
@@ -576,8 +567,6 @@ bool tx_pad_test(uint8_t value) {
     gpio_put(board::kTmcUartPin, 1);
     gpio_set_dir(board::kTmcUartPin, GPIO_IN);
 
-    const uint32_t bit_cycles =
-        cycles_for_us(s_probe_bit_us, clock_get_hz(clk_sys));
     const uint32_t save = save_and_disable_interrupts();
     gpio_put(board::kTmcUartPin, 0);
     gpio_set_dir(board::kTmcUartPin, GPIO_OUT);
@@ -585,7 +574,7 @@ bool tx_pad_test(uint8_t value) {
     bool ok = true;
     for (uint32_t bit = 0; bit < 10; ++bit) {
         wait_until_cycles16(
-            t0 + (uint16_t)((2u * bit + 1u) * bit_cycles / 2u));
+            t0 + (uint16_t)((2u * bit + 1u) * s_bit_cycles / 2u));
         const int expected = (bit == 0) ? 0
                              : (bit == 9) ? 1
                                           : ((value >> (bit - 1u)) & 1u);
@@ -594,13 +583,13 @@ bool tx_pad_test(uint8_t value) {
         }
         if (bit < 9) {
             wait_until_cycles16(
-                t0 + (uint16_t)((bit + 1u) * bit_cycles));
+                t0 + (uint16_t)((bit + 1u) * s_bit_cycles));
             const int next =
                 (bit + 1u == 9u) ? 1 : ((value >> bit) & 1u);
             gpio_put(board::kTmcUartPin, next);
         }
     }
-    wait_until_cycles16(t0 + (uint16_t)(10u * bit_cycles));
+    wait_until_cycles16(t0 + (uint16_t)(10u * s_bit_cycles));
     gpio_put(board::kTmcUartPin, 1);
     gpio_set_dir(board::kTmcUartPin, GPIO_OUT);
     restore_interrupts(save);
@@ -608,18 +597,6 @@ bool tx_pad_test(uint8_t value) {
 }
 
 }  // namespace
-
-bool setBitTimeUs(uint32_t us) {
-    if (us < kMinProbeBitUs || us > kMaxProbeBitUs) {
-        return false;
-    }
-    s_probe_bit_us = us;
-    return true;
-}
-
-uint32_t bitTimeUs() {
-    return s_probe_bit_us;
-}
 
 bool setIdleBits(uint32_t bits) {
     if (bits > 12u) {
@@ -634,6 +611,14 @@ uint32_t idleBits() {
 }
 
 uint8_t begin() {
+    // One-time sample-grid setup: one sample is the 1 MHz tick in clk_sys
+    // cycles (exact at an integer-MHz clock), one bit is 4 samples. All
+    // later deadlines are integers of this grid. No bit-time override: the
+    // old bench sweep of 2..10 us is gone because the decoder expects
+    // exactly 4 samples per bit.
+    s_sample_cycles = clock_get_hz(clk_sys) / 1000000u;
+    s_bit_cycles = (uint16_t)(kSamplesPerBit * s_sample_cycles);
+
     // All outputs off before the first UART access.
     stepper_axes::setEnabled(false);
     pin_init();
@@ -645,8 +630,12 @@ uint8_t begin() {
 
     Serial.print("tmc: init GPIO");
     Serial.print(board::kTmcUartPin);
-    Serial.print(" SIO output high, ");
-    Serial.print(1000000u / s_probe_bit_us);
+    Serial.print(" SIO output high, sample ");
+    Serial.print(s_sample_cycles);
+    Serial.print(" cyc (");
+    Serial.print(kSamplesPerBit);
+    Serial.print("/bit = ");
+    Serial.print(clock_get_hz(clk_sys) / s_bit_cycles);
     Serial.print(" Baud, ");
     Serial.print(kDriverCount);
     Serial.println(" drivers");
@@ -1074,15 +1063,13 @@ void sampleLine(uint32_t us) {
 
     // Release the line with the internal pulls off, so the result reflects the
     // TMC and the external network rather than our own drive.
-    const uint32_t sample_cycles =
-        cycles_for_us(kSampleUs, clock_get_hz(clk_sys));
     const uint32_t save = save_and_disable_interrupts();
     gpio_set_dir(board::kTmcUartPin, GPIO_IN);
     gpio_disable_pulls(board::kTmcUartPin);
     memset(s_samples, 0, sizeof(s_samples));
     const uint16_t t0 = cycles_now16();
     for (uint32_t i = 0; i < us; ++i) {
-        wait_until_cycles16(t0 + (uint16_t)(i * sample_cycles));
+        wait_until_cycles16(t0 + (uint16_t)(i * s_sample_cycles));
         if (gpio_get(board::kTmcUartPin)) {
             s_samples[i >> 3] |= (uint8_t)(1u << (i & 7u));
         }
