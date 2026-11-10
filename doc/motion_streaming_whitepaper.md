@@ -843,16 +843,24 @@ pins share GPIO9, and both PIO blocks are fully allocated (can2040 and four
 FastAccelStepper state machines), so the core's PIO-based `SoftwareSerial`
 cannot be used. GPIO9 is a UART1 **RX** pin, not a TX pin, and the firmware
 does not use a UART peripheral or a TMC library at all: SIO drives the whole
-request as one continuous bit stream, then releases the pad and samples the
-reply on the 1 µs tick. Masking interrupts across both halves keeps the
-request and the reply back-to-back; no PIO state machine or background UART
-ISR is involved. The pure bit-level code is in `lib/tmc_uart_bits/`, which is
-also built and tested on the host.
+request as one continuous bit stream on an absolute cycle-deadline grid from
+one start instant, then releases the pad and samples the reply every 1 µs.
+All scheduling is 16-bit cycle arithmetic: the low half of SysTick's 24-bit
+down counter, XOR-inverted into an up count, wraps every 65,536 cycles
+(~524 µs at 125 MHz), every deadline sum is exact modulo 2^16 across wraps,
+and the signed difference decode only ever targets one bit or one sample
+away — no wider counter or wrap mask is needed. Telemetry µs come from the
+1 MHz timer in a separate 16-bit field. Masking interrupts
+across both halves keeps the request and the reply back-to-back; no PIO state
+machine or background UART ISR is involved. The pure bit-level code is in
+`lib/tmc_uart_bits/`, which is also built and tested on the host.
 
-The UART address is per drive, not the drive index: the official Klipper
-config uses 0, 1, 3, 2 for Drive0–Drive3, because Z is Drive3 and E0 is Drive2
-(`boards/Fly-Micro4/Fly_Micro4_pinmap.md` §1). The firmware takes the address
-from each drive's pin table.
+The UART address follows the address printed on the board and the pin poster:
+`0, 1, 2, 3` for Drive0–Drive3 (`boards/Fly-Micro4/Fly_Micro4_pinmap.md` §1).
+The shipped Klipper reference config puts Z on address 2 and E0 on address 3,
+which swaps Drive2/Drive3 relative to the board labels; our firmware follows
+the hardware strap, not that config. The firmware takes the address from each
+drive's pin table.
 
 Boot order follows `controller_analysis.md` §6.1: drive all `ENN` high, then
 write `GCONF` with `GCONF.1 = 0` (external sense), `I_scale_analog = 0`,
@@ -888,6 +896,7 @@ interface, and it can command motion.
 | Command | Meaning |
 |---------|---------|
 | `status [axis]` | Read and print `DRV_STATUS`, `SG_RESULT`, `TSTEP`, currents and DIAG |
+| `read <axis>` | Read every readable register and print it beside the expected init value; write-only registers show the configuration shadow |
 | `cur <axis> <run_ma> [hold_ma]` | Set run/hold current and print status |
 | `sg <axis> <0..255>` | Set `SGTHRS` |
 | `tcool <axis> <value>` | Set the 20-bit `TCOOLTHRS` |
@@ -910,6 +919,15 @@ interface, and it can command motion.
 `raw` is for register diagnosis, not current control: use `cur` so the 800 mA
 cap and the VSENSE selection apply. The console can still command motion, so
 keep the bench clear of the mechanism.
+
+`read <axis>` dumps `GCONF`, `GSTAT`, `IFCNT`, `OTP_READ`, `IOIN`,
+`FACTORY_CONF`, `TSTEP`, `SG_RESULT`, `MSCNT`, `MSCURACT`, `CHOPCONF`,
+`DRV_STATUS`, `PWMCONF`, `PWM_SCALE` and `PWM_AUTO`, each beside the value the
+firmware wrote at bring-up; `MISMATCH` marks a difference. `IHOLD_IRUN`,
+`TPOWERDOWN`, `TPWMTHRS`, `TCOOLTHRS`, `SGTHRS`, `SLAVECONF` and `VACTUAL` are
+write-only, so they are printed from the firmware shadow. Reading `GSTAT`
+clears its `reset`/`drv_err`/`uv_cp` flags, so capture it before relying on
+those flags for a fault history.
 
 `reinit` is the bring-up path after the motor supply is applied: the Fly-Micro4
 has no reset button, and unplugging USB loses the serial log. It configures the

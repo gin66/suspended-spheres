@@ -1,7 +1,9 @@
 #include "tmc2209.h"
 
 #include <Arduino.h>
+#include <hardware/clocks.h>
 #include <hardware/gpio.h>
+#include <hardware/structs/systick.h>
 #include <hardware/sync.h>
 #include <pico/stdlib.h>
 #include <string.h>
@@ -24,8 +26,13 @@ static_assert(kDriverCount == board::kDriveCount,
 
 // Register addresses (doc/motion_streaming_whitepaper.md §5.6).
 constexpr uint8_t kGconf = 0x00;
+constexpr uint8_t kGstat = 0x01;
+constexpr uint8_t kIfcnt = 0x02;
 constexpr uint8_t kSlaveconf = 0x03;
 constexpr uint8_t kOtpProg = 0x04;
+constexpr uint8_t kOtpRead = 0x05;
+constexpr uint8_t kIoin = 0x06;
+constexpr uint8_t kFactoryConf = 0x07;
 constexpr uint8_t kIholdIrun = 0x10;
 constexpr uint8_t kTpowerdown = 0x11;
 constexpr uint8_t kTstep = 0x12;
@@ -34,9 +41,13 @@ constexpr uint8_t kTcoolthrs = 0x14;
 constexpr uint8_t kVactual = 0x22;
 constexpr uint8_t kSgthrs = 0x40;
 constexpr uint8_t kSgResult = 0x41;
+constexpr uint8_t kMsCnt = 0x6A;
+constexpr uint8_t kMsCurAct = 0x6B;
 constexpr uint8_t kChopconf = 0x6C;
 constexpr uint8_t kDrvStatus = 0x6F;
 constexpr uint8_t kPwmconf = 0x70;
+constexpr uint8_t kPwmScale = 0x71;
+constexpr uint8_t kPwmAuto = 0x72;
 
 constexpr uint16_t kDefaultRunMa = 300;
 constexpr uint16_t kDefaultHoldMa = 300;
@@ -46,6 +57,10 @@ constexpr uint8_t kDefaultSgthrs = 40;
 constexpr uint32_t kDefaultTcoolthrs = 0xFFFFF;
 constexpr uint32_t kDefaultPwmconf = 0xC10D0024;
 constexpr uint32_t kDefaultTpowerdown = 20;
+
+// bit 6 = 1 pdn_disable, bit 7 = 1 mstep_reg_select, bit 8 = 1 multistep_filt,
+// bits 0/1 = 0 keep external current sensing and the digital current scale.
+constexpr uint32_t kInitGconf = (1u << 6) | (1u << 7) | (1u << 8);
 
 // SENDDELAY is written before any read so the reply always has a clean gap
 // after our last stop bit. The bench can override it per axis.
@@ -59,10 +74,11 @@ constexpr uint32_t kChopconfToff = 4;
 constexpr uint32_t kChopconfIntpol = 1;
 
 // Default 250 kBaud (4 us per bit). The bit time is switchable on the bench
-// over 2..10 us (500..100 kBaud): the absolute per-bit deadline keeps our
-// edges on that grid, and the reply is sampled on the 1 us tick (four samples
-// per bit at 250 kBaud) so the decoder can fit the period instead of trusting
-// a short per-reply estimate.
+// over 2..10 us (500..100 kBaud): every edge is placed on a cycle-resolution
+// deadline, advanced one bit at a time, so edges stay on that grid without
+// drift, and the reply is sampled every 1 us (four samples per bit at
+// 250 kBaud) so the decoder can fit the period instead of trusting a short
+// per-reply estimate.
 constexpr uint32_t kSampleUs = 1;
 constexpr uint32_t kCaptureBits = 128;
 constexpr uint32_t kMinProbeBitUs = 2;
@@ -98,19 +114,36 @@ uint32_t nominalPeriodQ8() {
 uint32_t s_irq = 0;
 bool s_irq_held = false;
 
-inline void wait_until_us(uint64_t target_us) {
-    while (time_us_64() < target_us) {
+// Scheduling runs on the cycle clock: it reads the low 16 bits of SysTick's
+// 24-bit down counter and XORs them with 0xFFFF, which turns the down count
+// into an up count. Plain 16-bit arithmetic wraps naturally, so no mask is
+// needed. The up-count wraps every 65,536 cycles (~524 us at 125 MHz). All
+// deadlines sit on one absolute grid of uint16_t sums, which are exact
+// modulo 2^16, and every wait call is decoded by the signed difference to a
+// target only one bit (or one sample) away — far inside the ±32,768-cycle
+// decode window of half the wrap period. Telemetry µs still come from the
+// 1 MHz timer in a separate 16-bit field (us_raw16).
+inline uint16_t cycles_now16() {
+    return (uint16_t)(systick_hw->cvr ^ 0xFFFFu);
+}
+
+// Sleep until the up-count passes `target`. `target` must be less than
+// 32,768 cycles ahead of the current count, which every caller maintains by
+// advancing its deadline incrementally.
+inline void wait_until_cycles16(uint16_t target) {
+    while ((int16_t)(cycles_now16() - target) < 0) {
         tight_loop_contents();
     }
 }
 
-// 32-bit version for the short capture window. time_us_32() is an inline
-// register read; time_us_64() is a call with a latch loop. The signed
-// difference keeps it correct across the 32-bit wrap.
-inline void wait_until_us32(uint32_t target_us) {
-    while ((int32_t)(time_us_32() - target_us) < 0) {
-        tight_loop_contents();
-    }
+// Telemetry only: the low half of the 1 MHz timer, in 16-bit µs.
+inline uint16_t us_raw16() {
+    return (uint16_t)time_us_32();
+}
+
+// Convert microseconds to CPU cycles: 4 us at 125 MHz = 500 cycles.
+inline uint32_t cycles_for_us(uint32_t us, uint32_t hz) {
+    return (uint32_t)(((uint64_t)us * hz) / 1000000u);
 }
 
 void bb_release_irq() {
@@ -150,10 +183,11 @@ size_t build_bits(const uint8_t* data, size_t len, uint8_t bits[8 * 10]) {
 }
 
 // Transmit a datagram, hold the line high for s_idle_bits, then release it and
-// sample the reply on the 1 us tick. Interrupts stay masked through the hold
-// and the capture; the line is driven high again as soon as the read is done.
-// The pin is already an SIO output driving 1, so the first bit is the start
-// bit with no extra preamble.
+// sample the reply. Bit edges and the 1 us samples are scheduled on the CPU
+// cycle counter, so edges are placed to cycle resolution instead of the 1 us
+// system-timer tick. Interrupts stay masked through the hold and the capture;
+// the line is driven high again as soon as the read is done. The pin is
+// already an SIO output driving 1, so the first bit is the start bit.
 void bb_tx_read(const uint8_t* data, size_t len) {
     uint8_t bits[8 * 10];
     const size_t nbits = build_bits(data, len, bits);
@@ -162,25 +196,31 @@ void bb_tx_read(const uint8_t* data, size_t len) {
     memset(s_samples, 0, sizeof(s_samples));
     memset(&s_capture, 0, sizeof(s_capture));
 
+    const uint32_t bit_cycles =
+        cycles_for_us(s_probe_bit_us, clock_get_hz(clk_sys));
+
     uart_line_high();
-    wait_until_us(time_us_64() + (uint64_t)kPreIdleBits * s_probe_bit_us);
+    wait_until_cycles16(
+        cycles_now16() + (uint16_t)(kPreIdleBits * bit_cycles));
     s_irq = save_and_disable_interrupts();
     s_irq_held = true;
-    // Align the start bit to the 1 MHz tick. Without this, the fractional
-    // offset between time_us_64() and the first gpio_put shortens the start
-    // bit by up to 1 us; the TMC auto-baud then locks onto a rate that is
-    // wrong by up to 25 % and rejects the request (no reply, all-zero).
-    const uint64_t start = time_us_64() + 1u;
-    wait_until_us(start);
+    // One start instant, one absolute grid: bit k ends at
+    // start + (k+1)*bit_cycles. uint16_t sums are exact modulo 2^16 and the
+    // signed decode inside wait_until_cycles16 only ever looks one bit
+    // ahead, so a datagram spanning more than one 65,536-cycle wrap still
+    // sits on the same absolute grid. No tick alignment is needed: cycle
+    // deadlines place edges without shortening the start bit.
+    const uint16_t start = cycles_now16();
     for (size_t k = 0; k < nbits; ++k) {
         gpio_put(board::kTmcUartPin, bits[k]);
-        wait_until_us(start + (uint64_t)(k + 1) * s_probe_bit_us);
+        wait_until_cycles16(start + (uint16_t)((k + 1) * bit_cycles));
     }
 
     // The last datagram bit is the stop bit, already high. Hold it for
     // s_idle_bits so the master is off the line during the reply delay.
     gpio_put(board::kTmcUartPin, 1);
-    wait_until_us(start + (uint64_t)(nbits + s_idle_bits) * s_probe_bit_us);
+    wait_until_cycles16(
+        start + (uint16_t)((nbits + s_idle_bits) * bit_cycles));
 
     gpio_set_dir(board::kTmcUartPin, GPIO_IN);
 
@@ -189,10 +229,16 @@ void bb_tx_read(const uint8_t* data, size_t len) {
     // stop bit is in and the line is still high, so we can take the line back
     // before the TMC releases it.
     tmc_uart_bits::CaptureTracker tracker(nominalPeriodQ8());
-    const uint32_t t0 = time_us_32();
+    // Telemetry stays on the 1 MHz timer: the capture can span more than
+    // one 16-bit cycle window, but the µs difference is far inside its own
+    // 65,536 µs half-window decode.
+    const uint16_t t0_us = us_raw16();
+    const uint32_t sample_cycles =
+        cycles_for_us(kSampleUs, clock_get_hz(clk_sys));
+    const uint16_t t0 = cycles_now16();
     const uint32_t samples = captureSamples();
     for (uint32_t i = 0; i < samples; ++i) {
-        wait_until_us32(t0 + i * kSampleUs);
+        wait_until_cycles16(t0 + (uint16_t)(i * sample_cycles));
         const bool level = gpio_get(board::kTmcUartPin);
         if (level) {
             s_samples[i >> 3] |= (uint8_t)(1u << (i & 7u));
@@ -206,7 +252,7 @@ void bb_tx_read(const uint8_t* data, size_t len) {
     tracker.finish();
     s_capture = tracker.report();
     s_capture_expected_us = (s_capture.end + 1u) * kSampleUs;
-    s_capture_elapsed_us = time_us_32() - t0;
+    s_capture_elapsed_us = (uint16_t)(us_raw16() - t0_us);
 
     // After the read, drive the line high again instead of leaving it released.
     gpio_put(board::kTmcUartPin, 1);
@@ -221,22 +267,26 @@ void bb_tx_only(const uint8_t* data, size_t len) {
     uint8_t bits[8 * 10];
     const size_t nbits = build_bits(data, len, bits);
 
+    const uint32_t bit_cycles =
+        cycles_for_us(s_probe_bit_us, clock_get_hz(clk_sys));
+
     uart_line_high();
-    wait_until_us(time_us_64() + (uint64_t)kPreIdleBits * s_probe_bit_us);
+    wait_until_cycles16(
+        cycles_now16() + (uint16_t)(kPreIdleBits * bit_cycles));
     s_irq = save_and_disable_interrupts();
     s_irq_held = true;
-    // Align the start bit to the 1 MHz tick for the same reason as
-    // bb_tx_read: the first bit must not be shortened by the fractional tick.
-    const uint64_t start = time_us_64() + 1u;
-    wait_until_us(start);
+    // The same incremental deadline as bb_tx_read: edges are placed on
+    // cycle deadlines, one bit at a time.
+    uint16_t start = cycles_now16();
     for (size_t k = 0; k < nbits; ++k) {
         gpio_put(board::kTmcUartPin, bits[k]);
-        wait_until_us(start + (uint64_t)(k + 1) * s_probe_bit_us);
+        wait_until_cycles16(start + (uint16_t)((k + 1) * bit_cycles));
     }
 
     bb_release_irq();
     gpio_put(board::kTmcUartPin, 1);
-    wait_until_us(start + (uint64_t)(nbits + s_idle_bits) * s_probe_bit_us);
+    wait_until_cycles16(
+        start + (uint16_t)((nbits + s_idle_bits) * bit_cycles));
     // Leave the pin as an output driving high.
 }
 
@@ -286,12 +336,19 @@ uint8_t driverAddress(uint8_t index) {
 // Send a read request and decode the 8-byte reply. Writes go through
 // writeAddressReg: they are write-only and their acknowledgement is not
 // decoded, so a missing or differently framed write echo cannot fail a write.
+// A decode miss is a lost frame (framing/CRC/echo), not a bad value, so retry
+// the read a few times before reporting failure.
 bool readTransact(uint8_t address, uint8_t reg,
                   uint8_t reply[tmc_uart_bits::kReplyBytes]) {
     uint8_t request[tmc_uart_bits::kReplyBytes];
     const uint32_t len = tmc_uart_bits::encode(address, reg, 0, false, request);
-    bb_tx_read(request, len);
-    return bb_decode(reply) && reply[2] == reg;
+    for (uint32_t attempt = 0; attempt < 3; ++attempt) {
+        bb_tx_read(request, len);
+        if (bb_decode(reply) && reply[2] == reg) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool readAddressReg(uint8_t address, uint8_t reg, uint32_t* value) {
@@ -413,7 +470,7 @@ bool configureDriver(uint8_t index) {
     // bit 0 = 0 I_scale_analog, bit 1 = 0 external sense resistors,
     // bit 2 = 0 en_spreadcycle, bit 6 = 1 pdn_disable,
     // bit 7 = 1 mstep_reg_select, bit 8 = 1 multistep_filt.
-    const uint32_t gconf = (1u << 6) | (1u << 7) | (1u << 8);
+    const uint32_t gconf = kInitGconf;
     writeDriverReg(index, kGconf, gconf);
     s_status[index].gconf = gconf;
     initPrefix(index);
@@ -519,13 +576,16 @@ bool tx_pad_test(uint8_t value) {
     gpio_put(board::kTmcUartPin, 1);
     gpio_set_dir(board::kTmcUartPin, GPIO_IN);
 
+    const uint32_t bit_cycles =
+        cycles_for_us(s_probe_bit_us, clock_get_hz(clk_sys));
     const uint32_t save = save_and_disable_interrupts();
     gpio_put(board::kTmcUartPin, 0);
     gpio_set_dir(board::kTmcUartPin, GPIO_OUT);
-    const uint64_t t0 = time_us_64();
+    const uint16_t t0 = cycles_now16();
     bool ok = true;
     for (uint32_t bit = 0; bit < 10; ++bit) {
-        wait_until_us(t0 + (2u * bit + 1u) * s_probe_bit_us / 2u);
+        wait_until_cycles16(
+            t0 + (uint16_t)((2u * bit + 1u) * bit_cycles / 2u));
         const int expected = (bit == 0) ? 0
                              : (bit == 9) ? 1
                                           : ((value >> (bit - 1u)) & 1u);
@@ -533,13 +593,14 @@ bool tx_pad_test(uint8_t value) {
             ok = false;
         }
         if (bit < 9) {
-            wait_until_us(t0 + (bit + 1u) * s_probe_bit_us);
+            wait_until_cycles16(
+                t0 + (uint16_t)((bit + 1u) * bit_cycles));
             const int next =
                 (bit + 1u == 9u) ? 1 : ((value >> bit) & 1u);
             gpio_put(board::kTmcUartPin, next);
         }
     }
-    wait_until_us(t0 + 10u * s_probe_bit_us);
+    wait_until_cycles16(t0 + (uint16_t)(10u * bit_cycles));
     gpio_put(board::kTmcUartPin, 1);
     gpio_set_dir(board::kTmcUartPin, GPIO_OUT);
     restore_interrupts(save);
@@ -1013,13 +1074,15 @@ void sampleLine(uint32_t us) {
 
     // Release the line with the internal pulls off, so the result reflects the
     // TMC and the external network rather than our own drive.
+    const uint32_t sample_cycles =
+        cycles_for_us(kSampleUs, clock_get_hz(clk_sys));
     const uint32_t save = save_and_disable_interrupts();
     gpio_set_dir(board::kTmcUartPin, GPIO_IN);
     gpio_disable_pulls(board::kTmcUartPin);
     memset(s_samples, 0, sizeof(s_samples));
-    const uint64_t t0 = time_us_64();
+    const uint16_t t0 = cycles_now16();
     for (uint32_t i = 0; i < us; ++i) {
-        wait_until_us(t0 + (uint64_t)i * kSampleUs);
+        wait_until_cycles16(t0 + (uint16_t)(i * sample_cycles));
         if (gpio_get(board::kTmcUartPin)) {
             s_samples[i >> 3] |= (uint8_t)(1u << (i & 7u));
         }
@@ -1057,6 +1120,159 @@ void sampleLine(uint32_t us) {
     Serial.print(edges);
     Serial.print(" idle=");
     Serial.println(tmc_uart_bits::level(s_samples, us - 1) ? "high" : "low");
+}
+
+void printHex32(uint32_t value) {
+    char text[9];
+    for (int i = 7; i >= 0; --i) {
+        text[i] = "0123456789ABCDEF"[value & 0xFu];
+        value >>= 4;
+    }
+    text[8] = '\0';
+    Serial.print(text);
+}
+
+uint32_t expectedIholdIrun(uint8_t index) {
+    const Config& c = s_config[index];
+    bool vsense = false;
+    uint32_t irun = 0;
+    currentScale(c.run_ma, &vsense, &irun);
+    const uint32_t ihold = iholdFor(irun, c.run_ma, c.hold_ma);
+    return (ihold & 0x1Fu) | ((irun & 0x1Fu) << 8) | (1u << 16);
+}
+
+void printRegisterLine(const char* name, bool have, uint32_t value,
+                       bool have_init, uint32_t init) {
+    Serial.print("  ");
+    Serial.print(name);
+    for (size_t i = strlen(name); i < 12; ++i) {
+        Serial.print(' ');
+    }
+    if (!have) {
+        Serial.println("read FAILED");
+        return;
+    }
+    Serial.print("0x");
+    printHex32(value);
+    if (have_init) {
+        Serial.print("  init 0x");
+        printHex32(init);
+        if (value != init) {
+            Serial.print("  MISMATCH");
+        }
+    }
+    Serial.println();
+}
+
+void printWriteOnlyLine(const char* name, uint32_t value) {
+    printRegisterLine(name, true, value, true, value);
+}
+
+void printRegisters(uint8_t index) {
+    if (index >= kDriverCount) {
+        return;
+    }
+
+    // Readable registers, in address order. The value is what the driver
+    // returns now; init is what the firmware wrote (or expects) at bring-up.
+    struct Entry {
+        uint8_t address;
+        const char* name;
+        bool has_init;
+    };
+    static const Entry kEntries[] = {
+        {kGconf, "GCONF", true},
+        {kGstat, "GSTAT", false},
+        {kIfcnt, "IFCNT", false},
+        {kOtpRead, "OTP_READ", false},
+        {kIoin, "IOIN", false},
+        {kFactoryConf, "FACTORY_CONF", false},
+        {kTstep, "TSTEP", false},
+        {kSgResult, "SG_RESULT", false},
+        {kMsCnt, "MSCNT", false},
+        {kMsCurAct, "MSCURACT", false},
+        {kChopconf, "CHOPCONF", true},
+        {kDrvStatus, "DRV_STATUS", false},
+        {kPwmconf, "PWMCONF", true},
+        {kPwmScale, "PWM_SCALE", false},
+        {kPwmAuto, "PWM_AUTO", false},
+    };
+
+    Serial.print("tmc");
+    Serial.print(index);
+    Serial.print("@");
+    Serial.print(driverAddress(index));
+    Serial.println(": register readback");
+    Serial.println("  register    value       init");
+
+    uint32_t drv_status = 0;
+    bool have_drv_status = false;
+
+    for (const Entry& entry : kEntries) {
+        uint32_t value = 0;
+        const bool ok = readDriverReg(index, entry.address, &value);
+
+        uint32_t init = 0;
+        bool has_init = entry.has_init;
+        if (entry.address == kGconf) {
+            init = kInitGconf;
+        } else if (entry.address == kChopconf) {
+            init = chopconfValue(s_status[index].vsense);
+        } else if (entry.address == kPwmconf) {
+            init = kDefaultPwmconf;
+        }
+
+        printRegisterLine(entry.name, ok, value, has_init, init);
+
+        if (entry.address == kDrvStatus && ok) {
+            drv_status = value;
+            have_drv_status = true;
+        }
+    }
+
+    if (have_drv_status) {
+        Serial.print("  DRV flags: otpw=");
+        Serial.print((drv_status & (1u << 0)) ? 1 : 0);
+        Serial.print(" ot=");
+        Serial.print((drv_status & (1u << 1)) ? 1 : 0);
+        Serial.print(" s2g=");
+        Serial.print(((drv_status & (1u << 2)) ||
+                      (drv_status & (1u << 3)))
+                         ? 1
+                         : 0);
+        Serial.print(" ola=");
+        Serial.print((drv_status & (1u << 6)) ? 1 : 0);
+        Serial.print(" olb=");
+        Serial.print((drv_status & (1u << 7)) ? 1 : 0);
+        Serial.print(" stst=");
+        Serial.print((drv_status & (1u << 31)) ? 1 : 0);
+        Serial.print(" stealth=");
+        Serial.print((drv_status & (1u << 30)) ? 1 : 0);
+        Serial.print(" cs=");
+        Serial.println((drv_status >> 16) & 0x1F);
+    }
+
+    // Write-only registers cannot be read back; print the value the firmware
+    // wrote (or the boot default) so the bench can still compare it.
+    Serial.println("  write-only (firmware shadow):");
+    printWriteOnlyLine("SLAVECONF", (uint32_t)kDefaultSendDelay << 8);
+    const uint32_t ihold_irun = expectedIholdIrun(index);
+    printWriteOnlyLine("IHOLD_IRUN", ihold_irun);
+    Serial.print("    run_ma=");
+    Serial.print(s_config[index].run_ma);
+    Serial.print(" hold_ma=");
+    Serial.print(s_config[index].hold_ma);
+    Serial.print(" IRUN=");
+    Serial.print((ihold_irun >> 8) & 0x1Fu);
+    Serial.print(" IHOLD=");
+    Serial.print(ihold_irun & 0x1Fu);
+    Serial.print(" IHOLDDELAY=");
+    Serial.println((ihold_irun >> 16) & 0xFu);
+    printWriteOnlyLine("TPOWERDOWN", kDefaultTpowerdown);
+    printWriteOnlyLine("TPWMTHRS", 0);
+    printWriteOnlyLine("TCOOLTHRS", s_config[index].tcoolthrs);
+    printWriteOnlyLine("SGTHRS", s_config[index].sgthrs);
+    printWriteOnlyLine("VACTUAL", 0);
 }
 
 void printDriver(uint8_t index) {

@@ -98,4 +98,10 @@ uint32_t idleBits();
 
 void printDriver(uint8_t index);
 
+// Read every readable register over the UART and print it next to the value the
+// firmware wrote at bring-up (or the running configuration for tunables).
+// Write-only registers (IHOLD_IRUN, SGTHRS, TCOOLTHRS, ...) are printed from the
+// configuration shadow because the TMC2209 cannot return them.
+void printRegisters(uint8_t index);
+
 }  // namespace tmc2209

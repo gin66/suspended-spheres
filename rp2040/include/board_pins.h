@@ -18,14 +18,15 @@ struct DrivePins {
 inline constexpr uint8_t kDriveCount = 4;
 
 // Silkscreen Drive0..Drive3. The four EN lines are active low. The UART
-// addresses follow the official Klipper config: Drive2 (gpio26/25/27) is the
-// extruder driver at address 3 and Drive3 (gpio23/22/24) is the Z driver at
-// address 2. See boards/Fly-Micro4/Fly_Micro4_pinmap.md §1.
+// addresses follow the address printed on the board and the pin poster:
+// 0, 1, 2, 3 for Drive0..Drive3. The shipped Klipper reference config happens
+// to put Z/E0 on 2/3, but the board straps are identity; see
+// boards/Fly-Micro4/Fly_Micro4_pinmap.md §1.
 inline constexpr DrivePins kDrives[kDriveCount] = {
     { 6, 3, 7, 13, 0 },
     { 1, 0, 2, 14, 1 },
-    { 26, 25, 27, 15, 3 },
-    { 23, 22, 24, 12, 2 },
+    { 26, 25, 27, 15, 2 },
+    { 23, 22, 24, 12, 3 },
 };
 
 inline constexpr bool kEnableActiveLow = true;

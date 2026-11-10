@@ -76,6 +76,7 @@ void print_result(bool ok) {
 void print_help() {
     Serial.println("bench commands:");
     Serial.println("  status [axis]              read DRV_STATUS, SG_RESULT, TSTEP");
+    Serial.println("  read <axis>                read all registers + expected init values");
     Serial.println("  reinit                     stop, re-run TMC bring-up; axes stay disabled");
     Serial.println("  quiet [on|off]             silence periodic CAN stats and command logs");
     Serial.println("  selftest                   bit-banged TX pad readback");
@@ -114,6 +115,19 @@ void command_status(int argc, char** argv) {
         tmc2209::refresh(i);
         tmc2209::printDriver(i);
     }
+}
+
+void command_read(int argc, char** argv) {
+    if (argc < 2) {
+        Serial.println("usage: read <axis>");
+        return;
+    }
+    uint8_t axis = 0;
+    if (!parse_axis(argv[1], &axis)) {
+        Serial.println("bad axis");
+        return;
+    }
+    tmc2209::printRegisters(axis);
 }
 
 void command_current(int argc, char** argv) {
@@ -329,7 +343,11 @@ void command_move(int argc, char** argv) {
         return;
     }
     if (!stepper_axes::isAxisEnabled(axis)) {
-        Serial.println("driver disabled; use enable <axis> 1");
+        Serial.print("axis ");
+        Serial.print(axis);
+        Serial.print(" disabled; use enable ");
+        Serial.print(axis);
+        Serial.println(" 1");
         return;
     }
     stepper_axes::setSpeed(axis, hz);
@@ -367,7 +385,11 @@ void command_run(int argc, char** argv) {
         return;
     }
     if (!stepper_axes::isAxisEnabled(axis)) {
-        Serial.println("driver disabled; use enable <axis> 1");
+        Serial.print("axis ");
+        Serial.print(axis);
+        Serial.print(" disabled; use enable ");
+        Serial.print(axis);
+        Serial.println(" 1");
         return;
     }
     stepper_axes::setSpeed(axis, hz);
@@ -465,6 +487,8 @@ void execute(char* line) {
         print_help();
     } else if (strcmp(command, "status") == 0) {
         command_status(argc, argv);
+    } else if (strcmp(command, "read") == 0) {
+        command_read(argc, argv);
     } else if (strcmp(command, "cur") == 0) {
         command_current(argc, argv);
     } else if (strcmp(command, "sg") == 0) {
