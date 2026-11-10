@@ -265,8 +265,12 @@ void bb_tx_read(const uint8_t* data, size_t len) {
     }
     tracker.finish();
     s_capture = tracker.report();
-    // One sample is exactly the 1 MHz tick, so expected µs = sample index.
-    s_capture_expected_us = s_capture.end + 1u;
+    // Expected µs scales with the sample period; the decoder works in
+    // sample-grid units and is unchanged.
+    s_capture_expected_us =
+        (uint32_t)(((uint64_t)(s_capture.end + 1u) * s_sample_cycles *
+                    1000000u) /
+                   clock_get_hz(clk_sys));
     s_capture_elapsed_us = (uint16_t)(us_raw16() - t0_us);
 
     // After the read, drive the line high again instead of leaving it released.
@@ -301,6 +305,11 @@ void bb_tx_only(const uint8_t* data, size_t len) {
     bit_start += s_idle_bits * s_bit_cycles;
     wait_until_cycles16(bit_start);
     // Leave the pin as an output driving high.
+}
+
+uint32_t samplePeriodUsX100(uint32_t period_q8) {
+    return (uint32_t)(((uint64_t)period_q8 * s_sample_cycles * 100000000ull) /
+                      (256ull * clock_get_hz(clk_sys)));
 }
 
 bool bb_decode(uint8_t reply[tmc_uart_bits::kReplyBytes],
@@ -699,6 +708,27 @@ bool setIdleBits(uint32_t bits) {
 
 uint32_t idleBits() {
     return s_idle_bits;
+}
+
+bool setSampleCycles(uint32_t cycles) {
+    // At 125 MHz: 60 cycles -> 240 cycles/bit -> ~521 kBaud (above the
+    // TMC2209's rough 500 kbit/s limit); 250 -> ~156 kBaud. The lower bound
+    // is a datasheet limit, not the loop budget; the bench finds the real
+    // floor with timeuart + read.
+    if (cycles < 60 || cycles > 250) {
+        return false;
+    }
+    s_sample_cycles = cycles;
+    s_bit_cycles = (uint16_t)(kSamplesPerBit * s_sample_cycles);
+    return true;
+}
+
+uint32_t sampleCycles() {
+    return s_sample_cycles;
+}
+
+uint32_t uartBaud() {
+    return s_bit_cycles == 0 ? 0 : clock_get_hz(clk_sys) / s_bit_cycles;
 }
 
 uint8_t begin() {
@@ -1368,7 +1398,7 @@ void bbProbe(uint8_t address) {
     bb_dump_samples();
 
     if (s_capture.start != 0 || s_capture.switched) {
-        const uint32_t period_x100 = (s_capture.period_q8 * 100u) / 256u;
+        const uint32_t period_x100 = samplePeriodUsX100(s_capture.period_q8);
         Serial.print("bbprobe: end start=");
         Serial.print(s_capture.start);
         Serial.print(" end=");
@@ -1428,7 +1458,7 @@ void bbProbe(uint8_t address) {
     Serial.print(reply[tmc_uart_bits::kReplyBytes - 1], HEX);
     Serial.println(")");
 
-    const uint32_t period_x100 = (frame.period_q8 * 100u) / 256u;
+    const uint32_t period_x100 = samplePeriodUsX100(frame.period_q8);
     Serial.print("bbprobe: frame start=");
     Serial.print(frame.start);
     Serial.print(" samples, period=");

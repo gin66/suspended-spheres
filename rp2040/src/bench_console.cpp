@@ -88,6 +88,7 @@ void print_help() {
     Serial.println("  senddelay <axis> <0..15>   SLAVECONF SENDDELAY reply gap");
     Serial.println("  monitor <axis> <s> [ms]    SG/PWM/current samples; 0 s = stop");
     Serial.println("  timeuart <axis> [n]        time one SG read and one refresh, us");
+    Serial.println("  sample [cycles]            UART sample period, 60..250 clk cycles");
     Serial.println("  cur <axis> <run_ma> [hold_ma]");
     Serial.println("  sg <axis> <0..255|off>     SGTHRS; off closes TCOOLTHRS");
     Serial.println("  mode <axis> <stealth|spread>  chopper mode, axis stopped");
@@ -324,6 +325,37 @@ void command_timeuart(int argc, char** argv) {
         return;
     }
     tmc2209::timeUart(axis, (uint16_t)n);
+}
+
+void command_sample(int argc, char** argv) {
+    if (argc < 2) {
+        Serial.print("sample ");
+        Serial.print(tmc2209::sampleCycles());
+        Serial.print(" cyc, ");
+        Serial.print(tmc2209::uartBaud());
+        Serial.println(" Baud");
+        return;
+    }
+    uint32_t cycles = 0;
+    if (!parse_u32(argv[1], &cycles)) {
+        Serial.println("usage: sample <60..250>");
+        return;
+    }
+    for (uint8_t i = 0; i < board::kDriveCount; ++i) {
+        if (stepper_axes::isRunning(i)) {
+            Serial.println("stop all axes before changing the sample rate");
+            return;
+        }
+    }
+    if (!tmc2209::setSampleCycles(cycles)) {
+        Serial.println("usage: sample <60..250>");
+        return;
+    }
+    Serial.print("sample ");
+    Serial.print(tmc2209::sampleCycles());
+    Serial.print(" cyc, ");
+    Serial.print(tmc2209::uartBaud());
+    Serial.println(" Baud");
 }
 
 void command_line(int argc, char** argv) {
@@ -591,6 +623,8 @@ void execute(char* line) {
         command_monitor(argc, argv);
     } else if (strcmp(command, "timeuart") == 0) {
         command_timeuart(argc, argv);
+    } else if (strcmp(command, "sample") == 0) {
+        command_sample(argc, argv);
     } else if (strcmp(command, "line") == 0) {
         command_line(argc, argv);
     } else if (strcmp(command, "idle") == 0) {
