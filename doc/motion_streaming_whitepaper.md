@@ -913,9 +913,13 @@ immediately followed by the start bit of the next, and releases the pad only
 after the final stop bit. The older per-byte bit-bang released the pad after
 every byte; the board's pull-down on `PDN_UART` then pulls the line low between
 bytes, which can break the TMC auto-baud and the power-down state. `bbprobe`
-also bit-bangs the reply: it waits for the rising edge of the `0xFF` sync and
-samples 8N1 from that edge. If `selftest` reports `idle=0`, the line is low even
-while idle and a pull-up is required before UART can work at all.
+also bit-bangs the reply at 200 kBaud and oversamples it five times (a 1 µs
+grid) over 128 bit times, covering the reply delay, the maximum `SENDDELAY`
+and the 8-byte reply. It prints the raw samples as `bbprobe: os <start>: …`
+lines so a host script can resynchronise on the `0x05` sync edge, then decodes
+8N1 from the first rising edge as a quick check. If `selftest` reports
+`idle=0`, the line is low even while idle and a pull-up is required before
+UART can work at all.
 
 **StallGuard calibration.** At the intended homing current, run the axis free
 with `run <axis> <hz> 1` and sample `SG_RESULT` with `status <axis>`. Then

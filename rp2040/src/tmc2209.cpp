@@ -134,13 +134,18 @@ void bb_release_irq() {
 // Interrupts stay masked until bb_read_reply has sampled the reply. Restoring
 // them first lets USB run while this pin is still driven high and the TMC
 // reply is lost.
-// 40000 baud. 25 us is an exact number of time_us_64 ticks. 115200 is not:
-// the 1 us clock alternates 8 us and 9 us bits, and the TMC2209 autobaud
-// measurement on the 0x05 sync nibble then rejects the datagram.
-constexpr uint32_t kProbeBitUs = 25;
-// Reply is 8 bytes (2 ms at 40000) plus the 8-bit SENDDELAY.
-constexpr uint32_t kTraceUs = 4000;
-uint8_t s_trace[kTraceUs / 8];
+// 200 kBaud. A bit is 5 us, an exact number of time_us_64 ticks, and the
+// absolute per-bit deadline keeps the edges on that grid. Sample on the 1 us
+// system tick, i.e. five samples per bit, so the reply can be resynchronised
+// and decoded off-line instead of trusting a short per-reply bit-time guess.
+// 128 bit times covers the base reply delay, the maximum 15-bit SENDDELAY
+// (SLAVECONF bits 11:8) and the 8-byte 8N1 reply (80 bit times).
+constexpr uint32_t kProbeBitUs = 5;
+constexpr uint32_t kSampleUs = 1;
+constexpr uint32_t kOversample = kProbeBitUs / kSampleUs;
+constexpr uint32_t kCaptureUs = 128 * kProbeBitUs;
+constexpr uint32_t kCaptureSamples = kCaptureUs / kSampleUs;
+uint8_t s_trace[(kCaptureSamples + 7u) / 8u];
 
 void bb_tx_datagram(const uint8_t* data, size_t len) {
     // Four extra high bits keep the bus idle-high after the stop bit, then
@@ -180,13 +185,39 @@ bool bb_trace_level(uint32_t index) {
     return ((s_trace[index >> 3] >> (index & 7u)) & 1u) != 0;
 }
 
-// Width of the first three bits of the 0x05 sync, in microseconds. The reply
-// bit time is the one the TMC measured from our datagram, which is not always
-// exactly kProbeBitUs. A fixed 25 us grid walks off the bit center by the CRC.
+// Raw oversampling, so a slow capture can be pasted into a host script and
+// resynchronised there. One line per 128 samples keeps the output short while
+// the sample index in the prefix still makes the lines concatenatable.
+constexpr uint32_t kTraceLine = 128;
+
+void bb_dump_trace(uint32_t count) {
+    Serial.print("bbprobe: oversample ");
+    Serial.print(count);
+    Serial.print(" samples, ");
+    Serial.print(kOversample);
+    Serial.print("/bit, bit ");
+    Serial.print(kProbeBitUs);
+    Serial.println("us");
+    for (uint32_t start = 0; start < count; start += kTraceLine) {
+        const uint32_t stop =
+            (start + kTraceLine < count) ? start + kTraceLine : count;
+        Serial.print("bbprobe: os ");
+        Serial.print(start);
+        Serial.print(": ");
+        for (uint32_t i = start; i < stop; ++i) {
+            Serial.print(bb_trace_level(i) ? '1' : '0');
+        }
+        Serial.println();
+    }
+}
+
+// Width of the first three bits of the 0x05 sync, in samples. The reply bit
+// time is the one the TMC measured from our datagram, which is not always
+// exactly kProbeBitUs. A fixed grid walks off the bit centre by the CRC.
 uint32_t bb_sync_span(uint32_t edge) {
     uint32_t i = edge;
     auto skip = [&](bool high) {
-        while (i < kTraceUs && bb_trace_level(i) == high) {
+        while (i < kCaptureSamples && bb_trace_level(i) == high) {
             ++i;
         }
     };
@@ -195,7 +226,8 @@ uint32_t bb_sync_span(uint32_t edge) {
     skip(false);
     skip(true);
     const uint32_t span = i - edge;
-    if (span < 36 || span > 120) {
+    // Three bit times is 15 samples at 5 us. Reject noise outside 3..10 us.
+    if (span < 9 || span > 30) {
         return kProbeBitUs * 3u;
     }
     return span;
@@ -208,17 +240,19 @@ bool bb_read_reply(uint8_t* reply, size_t len) {
     // already hold the line low.
     memset(s_trace, 0, sizeof(s_trace));
     const uint64_t t0 = time_us_64();
-    for (uint32_t i = 0; i < kTraceUs; ++i) {
-        wait_until_us(t0 + i);
+    for (uint32_t i = 0; i < kCaptureSamples; ++i) {
+        wait_until_us(t0 + (uint64_t)i * kSampleUs);
         if (gpio_get(board::kTmcUartPin)) {
             s_trace[i >> 3] |= (uint8_t)(1u << (i & 7u));
         }
     }
     bb_release_irq();
 
+    bb_dump_trace(kCaptureSamples);
+
     uint32_t rises = 0;
     int edge = -1;
-    for (uint32_t i = 1; i < kTraceUs; ++i) {
+    for (uint32_t i = 1; i < kCaptureSamples; ++i) {
         if (bb_trace_level(i) && !bb_trace_level(i - 1u)) {
             if (edge < 0) {
                 edge = (int)i;
@@ -244,7 +278,7 @@ bool bb_read_reply(uint8_t* reply, size_t len) {
             const uint32_t index = 10u * n + bit;
             const uint32_t at =
                 (uint32_t)edge + ((2u * index + 1u) * span) / 6u;
-            if (at < kTraceUs && bb_trace_level(at)) {
+            if (at < kCaptureSamples && bb_trace_level(at)) {
                 value |= (uint8_t)(1u << bit);
             }
         }
