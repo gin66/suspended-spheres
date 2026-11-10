@@ -895,8 +895,10 @@ interface, and it can command motion.
 
 | Command | Meaning |
 |---------|---------|
-| `status [axis]` | Read and print `DRV_STATUS`, `SG_RESULT`, `TSTEP`, currents and DIAG |
+| `status [axis]` | Read and print `DRV_STATUS`, `SG_RESULT`, `TSTEP`, `PWM_SCALE`, `PWM_AUTO`, currents and DIAG; mark `STALL`/`CURRENT_LIMITED` |
 | `read <axis>` | Read every readable register and print it beside the expected init value; write-only registers show the configuration shadow |
+| `stats [axis]` | Print per-driver UART read/write counters and the last IFCNT comparison |
+| `monitor <axis> <seconds> [interval_ms]` | Sample `SG_RESULT`, `PWM_SCALE` and `DRV_STATUS` for a limited time; `0` seconds stops it |
 | `cur <axis> <run_ma> [hold_ma]` | Set run/hold current and print status |
 | `sg <axis> <0..255>` | Set `SGTHRS` |
 | `tcool <axis> <value>` | Set the 20-bit `TCOOLTHRS` |
@@ -905,7 +907,7 @@ interface, and it can command motion.
 | `raw <axis> <reg> [value]` | Register access in hex; OTP, `VACTUAL`, `IHOLD_IRUN` and unsafe GCONF bits are refused |
 | `move <axis> <steps> <hz>` | Finite move (axis must be enabled) |
 | `run <axis> <hz> [0\|1]` | Continuous move, 1 = forward (axis must be enabled) |
-| `stop [axis]`, `enable <axis> <0\|1>`, `diag` | Stop, explicitly enable/disable outputs, print DIAG pins |
+| `stop [axis]`, `enable <axis> <0\|1>`, `diag [clear]` | Stop, explicitly enable/disable outputs, print DIAG pins, or clear the latched DIAG event flags |
 | `reinit` | Stop, re-run the TMC bring-up; the drivers stay disabled until an explicit `enable` |
 | `quiet [on\|off]` | Silence the periodic CAN statistics and command logs; CAN traffic is unchanged |
 | `selftest` | Bit-bang a pattern through SIO and sample the pad at every bit centre |
@@ -925,9 +927,35 @@ keep the bench clear of the mechanism.
 `DRV_STATUS`, `PWMCONF`, `PWM_SCALE` and `PWM_AUTO`, each beside the value the
 firmware wrote at bring-up; `MISMATCH` marks a difference. `IHOLD_IRUN`,
 `TPOWERDOWN`, `TPWMTHRS`, `TCOOLTHRS`, `SGTHRS`, `SLAVECONF` and `VACTUAL` are
-write-only, so they are printed from the firmware shadow. Reading `GSTAT`
-clears its `reset`/`drv_err`/`uv_cp` flags, so capture it before relying on
-those flags for a fault history.
+write-only, so they are printed from the firmware shadow. `GSTAT` is
+write-1-clear (`R+WC`); reading it does **not** clear `reset`/`drv_err`/`uv_cp`.
+Use `raw <axis> 1 0x7` to clear a flag, then read it again to see whether a new
+event occurred.
+
+`stats [axis]` prints the bit-banged UART health counters per driver: read
+frames/attempts/failures, write frames, IFCNT-verified writes, write failures,
+and the last IFCNT comparison (`checks`, `mism`, `pending`). `writes` counts
+every write frame including retries; `wr_ok` counts writes confirmed by an
+IFCNT increment. `poll()` compares IFCNT with the writes sent since the last
+check once per second, round-robin over the ready drivers; a mismatch means the
+driver accepted a different number of writes than the firmware sent. `stats
+<axis>` forces a fresh check for that driver.
+
+`monitor <axis> <seconds> [interval_ms]` is a bench-only motion trace. It
+periodically samples `SG_RESULT`, `DRV_STATUS`, `PWM_SCALE` and `PWM_AUTO` and
+prints one line with `sg` (against `2·SGTHRS`), `cs` (against IRUN), `pwm`, and
+the auto-tuned `PWM_OFS`/`PWM_GRAD`. `STALL` means `SG_RESULT ≤ 2·SGTHRS` while
+`stst=0`, the driver is in StealthChop, and `TSTEP ≤ TCOOLTHRS` (the same
+velocity gate that enables the DIAG stall output); `CURRENT_LIMITED` means the
+driver is moving but `CS_ACTUAL < IRUN` or `PWM_SCALE_SUM ≥ 250`, i.e. the
+current regulator has run out of headroom. Neither flag is a position feedback: there is
+no encoder. The monitor is explicit because a UART read blocks the CPU for
+several milliseconds; it must not run implicitly on the motion loop.
+
+The four DIAG pins are also edge-triggered: a rising edge latches that driver in
+the GPIO ISR and the main loop then reads `DRV_STATUS` and `SG_RESULT` and
+prints a stall line. That catches a StallGuard pulse that has already ended by
+the time the loop polls, which the level-only `diag` snapshot cannot.
 
 `reinit` is the bring-up path after the motor supply is applied: the Fly-Micro4
 has no reset button, and unplugging USB loses the serial log. It configures the
@@ -939,17 +967,21 @@ pattern on GPIO9 and sampling every bit centre; if it passes and `bbprobe` or
 address, or wiring). None of these commands changes the CAN protocol.
 
 Bring-up writes `SLAVECONF.SENDDELAY = 2` (two extra bit times before each
-reply) and does not read it back: writes are write-only, and only reads use the
-reply capture and CRC check. That gives the reply a clean, known gap after our
-last stop bit; `senddelay` overrides it on the bench. The line is driven high
-before and after that write.
+reply) and does not verify that first write: its reply delay is not set yet.
+Every later configuration write is verified by reading `IFCNT` before and after
+and retrying when the count did not advance by one. Only reads use the reply
+capture and CRC check. That gives the reply a clean, known gap after our last
+stop bit; `senddelay` overrides it on the bench. The line is driven high before
+and after the write.
 
 The board pulls `PDN_UART` down through 20 kΩ when the line is released, so the
 UART init writes `GCONF.pdn_disable = 1` (together with
 `mstep_reg_select` and `multistep_filt`) to take the pin's power-down function
-out of the picture. Init is write-only; it does not read back the config. This
-is a firmware-only change, with no board change: the
-pin is an SIO output driving 1 whenever the firmware is not sampling a reply.
+out of the picture. Init does not read back the configuration registers; the
+`IFCNT` increment is the write acknowledgement. A write that still fails after
+its retries leaves that axis disabled instead of silently keeping the reset
+default. This is a firmware-only change, with no board change: the pin is an
+SIO output driving 1 whenever the firmware is not sampling a reply.
 `bbprobe` keeps the SIO output enabled across the whole datagram, so the stop
 bit of one byte is immediately followed by the start bit of the next, and
 releases the pad only after the final stop bit. The older per-byte bit-bang
@@ -1020,15 +1052,26 @@ design.
 **StallGuard calibration.** At the intended homing current, run the axis free
 with `run <axis> <hz> 1` and sample `SG_RESULT` with `status <axis>`. Then
 block the axis and sample again. `SG_RESULT` falls with load and high values
-mean light load; `SGTHRS` sets where DIAG asserts (higher is less sensitive,
-0 disables StallGuard). Sweep `SGTHRS` at each current step, because the
-signal amplitude scales with current. The DIAG path is also the fault path:
-it asserts on overtemperature pre-warning, short-to-GND and open load, so a
+mean light load; a stall is signalled when `SG_RESULT ≤ 2·SGTHRS`, so a
+**higher** `SGTHRS` is more sensitive, not less (datasheet §11.2); 0 disables
+the threshold. Sweep `SGTHRS` at each current step, because the signal
+amplitude scales with current. The DIAG path is also the fault path: it
+asserts on overtemperature pre-warning, short-to-GND and open load, so a
 DIAG read must be interpreted with `DRV_STATUS`, not assumed to be a stall.
 
-The node reads `DRV_STATUS` at boot and on a DIAG change only; it does not
-poll UART in the motion loop. The 1 Hz health frame carries the resulting
-`otpw`/`ot` masks. On-demand `status` reads block the CPU for tens of
+StallGuard4 is only valid in StealthChop and within the
+`TCOOLTHRS ≥ TSTEP > TPWMTHRS` window. It is a medium-velocity measurement:
+at very low speed the result is unstable, and at very high speed (where the
+back EMF exceeds the supply and the full sinusoidal current is not driven into
+the coils) its response collapses (datasheet §11.5). A high-speed loss of
+synchronism with a low-current drive can therefore show a high `SG_RESULT` and
+no DIAG; that is a torque/voltage limit, not a StallGuard failure. Use
+`PWM_SCALE_SUM` (255 = regulator at its limit) and `CS_ACTUAL` against
+`IRUN` to diagnose it, not `SG_RESULT`.
+
+The node reads `DRV_STATUS` and `SG_RESULT` at boot and on a DIAG edge only;
+apart from the explicit `monitor` command it does not poll UART in the motion
+loop. The 1 Hz health frame carries the resulting `otpw`/`ot` masks. On-demand `status` reads block the CPU for tens of
 milliseconds per driver, which is acceptable at the bench but must not be
 used while motion is playing.
 

@@ -77,6 +77,7 @@ void print_help() {
     Serial.println("bench commands:");
     Serial.println("  status [axis]              read DRV_STATUS, SG_RESULT, TSTEP");
     Serial.println("  read <axis>                read all registers + expected init values");
+    Serial.println("  stats [axis]               UART read/write/IFCNT health counters");
     Serial.println("  reinit                     stop, re-run TMC bring-up; axes stay disabled");
     Serial.println("  quiet [on|off]             silence periodic CAN stats and command logs");
     Serial.println("  selftest                   bit-banged TX pad readback");
@@ -85,6 +86,7 @@ void print_help() {
     Serial.println("  line [us]                  release GPIO9 and report bus level/edges");
     Serial.println("  idle [bits]                show/set idle high bits after request (0..12)");
     Serial.println("  senddelay <axis> <0..15>   SLAVECONF SENDDELAY reply gap");
+    Serial.println("  monitor <axis> <s> [ms]    SG/PWM/current samples; 0 s = stop");
     Serial.println("  cur <axis> <run_ma> [hold_ma]");
     Serial.println("  sg <axis> <0..255>         SGTHRS");
     Serial.println("  tcool <axis> <value>       TCOOLTHRS (20 bit)");
@@ -96,7 +98,7 @@ void print_help() {
     Serial.println("  run <axis> <hz> [0|1]      continuous, 1 = forward (requires enable)");
     Serial.println("  stop [axis]");
     Serial.println("  enable <axis> <0|1>");
-    Serial.println("  diag");
+    Serial.println("  diag [clear]");
 }
 
 void command_status(int argc, char** argv) {
@@ -154,6 +156,20 @@ void command_current(int argc, char** argv) {
     }
     tmc2209::refresh(axis);
     tmc2209::printDriver(axis);
+}
+
+void command_stats(int argc, char** argv) {
+    if (argc < 2) {
+        tmc2209::printStats();
+        return;
+    }
+    uint8_t axis = 0;
+    if (!parse_axis(argv[1], &axis)) {
+        Serial.println("bad axis");
+        return;
+    }
+    tmc2209::checkIfcnt(axis);
+    tmc2209::printStats(axis);
 }
 
 void command_sg(int argc, char** argv) {
@@ -233,6 +249,28 @@ void command_senddelay(int argc, char** argv) {
         return;
     }
     print_result(tmc2209::setSendDelay(axis, (uint8_t)value));
+}
+
+void command_monitor(int argc, char** argv) {
+    if (argc < 3) {
+        Serial.println("usage: monitor <axis> <seconds> [interval_ms]");
+        return;
+    }
+    uint8_t axis = 0;
+    uint32_t seconds = 0;
+    uint32_t interval_ms = 100;
+    if (!parse_axis(argv[1], &axis) || !parse_u32(argv[2], &seconds)) {
+        Serial.println("bad argument");
+        return;
+    }
+    if (argc >= 4 && !parse_u32(argv[3], &interval_ms)) {
+        Serial.println("bad interval");
+        return;
+    }
+    if (seconds > 3600u) {
+        seconds = 3600u;
+    }
+    print_result(tmc2209::startMonitor(axis, seconds * 1000u, interval_ms));
 }
 
 void command_line(int argc, char** argv) {
@@ -415,7 +453,12 @@ void command_enable(int argc, char** argv) {
     print_result(true);
 }
 
-void command_diag() {
+void command_diag(int argc, char** argv) {
+    if (argc >= 2 && strcmp(argv[1], "clear") == 0) {
+        tmc2209::clearDiagEvents();
+        Serial.println("diag events cleared");
+        return;
+    }
     Serial.print("diag=");
     for (uint8_t i = 0; i < board::kDriveCount; ++i) {
         Serial.print(digitalRead(board::kDrives[i].diag) ? 1 : 0);
@@ -473,6 +516,8 @@ void execute(char* line) {
         command_status(argc, argv);
     } else if (strcmp(command, "read") == 0) {
         command_read(argc, argv);
+    } else if (strcmp(command, "stats") == 0) {
+        command_stats(argc, argv);
     } else if (strcmp(command, "cur") == 0) {
         command_current(argc, argv);
     } else if (strcmp(command, "sg") == 0) {
@@ -487,6 +532,8 @@ void execute(char* line) {
         command_pwm(argc, argv);
     } else if (strcmp(command, "senddelay") == 0) {
         command_senddelay(argc, argv);
+    } else if (strcmp(command, "monitor") == 0) {
+        command_monitor(argc, argv);
     } else if (strcmp(command, "line") == 0) {
         command_line(argc, argv);
     } else if (strcmp(command, "idle") == 0) {
@@ -517,7 +564,7 @@ void execute(char* line) {
             tmc2209::bbProbeAll();
         }
     } else if (strcmp(command, "diag") == 0) {
-        command_diag();
+        command_diag(argc, argv);
     } else {
         Serial.print("unknown command: ");
         Serial.println(command);

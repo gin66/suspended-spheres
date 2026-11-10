@@ -110,6 +110,18 @@ uint32_t s_capture_expected_us = 0;
 uint32_t s_irq = 0;
 bool s_irq_held = false;
 
+// One counter set per UART address (the TMC2209 address is 0..3).
+constexpr uint8_t kAddressCount = 4;
+UartStats s_uart_stats[kAddressCount];
+
+UartStats& statsFor(uint8_t address) {
+    return s_uart_stats[address & 0x03u];
+}
+
+// Round-robin IFCNT check, one ready driver per second.
+uint32_t s_ifcnt_check_ms = 0;
+uint8_t s_ifcnt_check_index = 0;
+
 // Scheduling runs on the cycle clock: it reads the low 16 bits of SysTick's
 // 24-bit down counter and XORs them with 0xFFFF, which turns the down count
 // into an up count. Plain 16-bit arithmetic wraps naturally, so no mask is
@@ -324,21 +336,23 @@ uint8_t driverAddress(uint8_t index) {
     return board::kDrives[index].uart_address;
 }
 
-// Send a read request and decode the 8-byte reply. Writes go through
-// writeAddressReg: they are write-only and their acknowledgement is not
-// decoded, so a missing or differently framed write echo cannot fail a write.
-// A decode miss is a lost frame (framing/CRC/echo), not a bad value, so retry
-// the read a few times before reporting failure.
+// Send a read request and decode the 8-byte reply. A decode miss is a lost
+// frame (framing/CRC/echo), not a bad value, so retry the read a few times
+// before reporting failure. Every attempt is counted per address.
 bool readTransact(uint8_t address, uint8_t reg,
                   uint8_t reply[tmc_uart_bits::kReplyBytes]) {
+    UartStats& stats = statsFor(address);
     uint8_t request[tmc_uart_bits::kReplyBytes];
     const uint32_t len = tmc_uart_bits::encode(address, reg, 0, false, request);
     for (uint32_t attempt = 0; attempt < 3; ++attempt) {
+        stats.read_attempts++;
         bb_tx_read(request, len);
         if (bb_decode(reply) && reply[2] == reg) {
+            stats.reads++;
             return true;
         }
     }
+    stats.read_failures++;
     return false;
 }
 
@@ -354,11 +368,36 @@ bool readAddressReg(uint8_t address, uint8_t reg, uint32_t* value) {
 }
 
 bool writeAddressReg(uint8_t address, uint8_t reg, uint32_t value) {
+    UartStats& stats = statsFor(address);
+    stats.writes++;
+    stats.writes_since_check++;
     uint8_t request[tmc_uart_bits::kReplyBytes];
     const uint32_t len =
         tmc_uart_bits::encode(address, reg, value, true, request);
     bb_tx_only(request, len);
     return true;
+}
+
+// A write has no reply, so a lost frame is invisible. IFCNT is the driver's
+// count of accepted writes: read it before and after, and repeat the write
+// when the count did not advance by one. The surrounding reads also give the
+// driver a clean gap between datagrams.
+bool writeAddressRegVerified(uint8_t address, uint8_t reg, uint32_t value) {
+    UartStats& stats = statsFor(address);
+    constexpr uint8_t kAttempts = 3;
+    for (uint8_t attempt = 0; attempt < kAttempts; ++attempt) {
+        uint32_t before = 0;
+        const bool have_before = readAddressReg(address, kIfcnt, &before);
+        writeAddressReg(address, reg, value);
+        uint32_t after = 0;
+        if (have_before && readAddressReg(address, kIfcnt, &after) &&
+            (uint8_t)(after - before) == 1u) {
+            stats.write_verified++;
+            return true;
+        }
+    }
+    stats.write_failures++;
+    return false;
 }
 
 bool readDriverReg(uint8_t index, uint8_t reg, uint32_t* value) {
@@ -367,6 +406,13 @@ bool readDriverReg(uint8_t index, uint8_t reg, uint32_t* value) {
 }
 
 bool writeDriverReg(uint8_t index, uint8_t reg, uint32_t value) {
+    return index < kDriverCount &&
+           writeAddressRegVerified(driverAddress(index), reg, value);
+}
+
+// SLAVECONF sets the reply delay, so the first write cannot be verified with
+// a read yet.
+bool writeDriverRegRaw(uint8_t index, uint8_t reg, uint32_t value) {
     return index < kDriverCount &&
            writeAddressReg(driverAddress(index), reg, value);
 }
@@ -447,7 +493,7 @@ bool configureDriver(uint8_t index) {
     // last stop bit. It is write-only; the log is the record.
     uart_line_high();
     const uint32_t slaveconf = (uint32_t)kDefaultSendDelay << 8;
-    writeDriverReg(index, kSlaveconf, slaveconf);
+    writeDriverRegRaw(index, kSlaveconf, slaveconf);
     uart_line_high();
     initPrefix(index);
     Serial.print("SENDDELAY=");
@@ -456,13 +502,15 @@ bool configureDriver(uint8_t index) {
     Serial.print(slaveconf, HEX);
     Serial.println(" (UART line high)");
 
-    // Init is write-only: no register reads. The GCONF reset default is not
-    // trusted; write every bit we care about explicitly.
+    // The GCONF reset default is not trusted; write every bit we care about
+    // explicitly. Each write is verified through IFCNT, so a lost frame
+    // disables the axis instead of silently keeping the reset default.
     // bit 0 = 0 I_scale_analog, bit 1 = 0 external sense resistors,
     // bit 2 = 0 en_spreadcycle, bit 6 = 1 pdn_disable,
     // bit 7 = 1 mstep_reg_select, bit 8 = 1 multistep_filt.
     const uint32_t gconf = kInitGconf;
-    writeDriverReg(index, kGconf, gconf);
+    bool ok = true;
+    ok = writeDriverReg(index, kGconf, gconf) && ok;
     s_status[index].gconf = gconf;
     initPrefix(index);
     Serial.print("GCONF=0x");
@@ -477,13 +525,13 @@ bool configureDriver(uint8_t index) {
         (ihold & 0x1Fu) | ((irun & 0x1Fu) << 8) | (1u << 16);
     const uint32_t chopconf = chopconfValue(vsense);
 
-    writeDriverReg(index, kChopconf, chopconf);
-    writeDriverReg(index, kIholdIrun, ihold_irun);
-    writeDriverReg(index, kPwmconf, kDefaultPwmconf);
-    writeDriverReg(index, kTpowerdown, kDefaultTpowerdown);
-    writeDriverReg(index, kTpwmthrs, 0);
-    writeDriverReg(index, kTcoolthrs, kDefaultTcoolthrs);
-    writeDriverReg(index, kSgthrs, kDefaultSgthrs);
+    ok = writeDriverReg(index, kChopconf, chopconf) && ok;
+    ok = writeDriverReg(index, kIholdIrun, ihold_irun) && ok;
+    ok = writeDriverReg(index, kPwmconf, kDefaultPwmconf) && ok;
+    ok = writeDriverReg(index, kTpowerdown, kDefaultTpowerdown) && ok;
+    ok = writeDriverReg(index, kTpwmthrs, 0) && ok;
+    ok = writeDriverReg(index, kTcoolthrs, kDefaultTcoolthrs) && ok;
+    ok = writeDriverReg(index, kSgthrs, kDefaultSgthrs) && ok;
 
     initPrefix(index);
     Serial.print("CHOPCONF=0x");
@@ -552,12 +600,16 @@ bool configureDriver(uint8_t index) {
     s_config[index].tcoolthrs = kDefaultTcoolthrs;
     s_status[index].sgthrs = kDefaultSgthrs;
     s_status[index].tcoolthrs = kDefaultTcoolthrs;
-    s_status[index].ready = true;
+    s_status[index].ready = ok;
     s_status[index].online = true;
     uart_line_high();
     initPrefix(index);
-    Serial.println("complete, UART line high");
-    return true;
+    if (ok) {
+        Serial.println("complete, UART line high");
+    } else {
+        Serial.println("write verification failed; axis stays disabled");
+    }
+    return ok;
 }
 
 // Drive one byte through SIO and sample the pad at every bit centre. This
@@ -596,6 +648,32 @@ bool tx_pad_test(uint8_t value) {
     return ok;
 }
 
+// DIAG is active high and StallGuard only pulses it, so the level poll can
+// miss a stall. Latch the asserting edge in the GPIO IRQ and let the main loop
+// do the UART read; no register access happens in interrupt context.
+volatile uint8_t s_diag_events = 0;
+bool s_diag_irq_ready = false;
+
+void diagIrq(uint gpio, uint32_t) {
+    for (uint8_t i = 0; i < kDriverCount; ++i) {
+        if (board::kDrives[i].diag == gpio) {
+            s_diag_events |= (uint8_t)(1u << i);
+            return;
+        }
+    }
+}
+
+void attachDiagInterrupts() {
+    if (s_diag_irq_ready) {
+        return;
+    }
+    for (uint8_t i = 0; i < kDriverCount; ++i) {
+        gpio_set_irq_enabled_with_callback(board::kDrives[i].diag,
+                                           GPIO_IRQ_EDGE_RISE, true, &diagIrq);
+    }
+    s_diag_irq_ready = true;
+}
+
 }  // namespace
 
 bool setIdleBits(uint32_t bits) {
@@ -622,6 +700,7 @@ uint8_t begin() {
     // All outputs off before the first UART access.
     stepper_axes::setEnabled(false);
     pin_init();
+    attachDiagInterrupts();
 
     s_ready_mask = 0;
     s_seen_mask = 0;
@@ -681,6 +760,91 @@ const DriverStatus& status(uint8_t index) {
     return index < kDriverCount ? s_status[index] : empty;
 }
 
+const UartStats& uartStats(uint8_t index) {
+    static const UartStats empty = {};
+    return index < kDriverCount ? statsFor(driverAddress(index)) : empty;
+}
+
+bool checkIfcnt(uint8_t index) {
+    if (index >= kDriverCount) {
+        return false;
+    }
+    const uint8_t address = driverAddress(index);
+    UartStats& stats = statsFor(address);
+    uint32_t value = 0;
+    if (!readAddressReg(address, kIfcnt, &value)) {
+        return false;
+    }
+    const uint8_t now = (uint8_t)value;
+    stats.ifcnt_checks++;
+    if (!stats.ifcnt_valid) {
+        stats.ifcnt_valid = true;
+        stats.ifcnt_last = now;
+        stats.writes_since_check = 0;
+        return true;
+    }
+    const uint8_t delta = (uint8_t)(now - stats.ifcnt_last);
+    if (delta != stats.writes_since_check) {
+        stats.ifcnt_mismatches++;
+    }
+    stats.ifcnt_last = now;
+    stats.writes_since_check = 0;
+    return true;
+}
+
+void printStats(uint8_t index) {
+    if (index >= kDriverCount) {
+        return;
+    }
+    const UartStats& s = uartStats(index);
+    Serial.print("tmc");
+    Serial.print(index);
+    Serial.print("@");
+    Serial.print(driverAddress(index));
+    Serial.print(": ready=");
+    Serial.print(ready(index) ? 1 : 0);
+    Serial.print(" rd_ok=");
+    Serial.print(s.reads);
+    Serial.print(" rd_att=");
+    Serial.print(s.read_attempts);
+    Serial.print(" rd_fail=");
+    Serial.print(s.read_failures);
+    Serial.print(" wr=");
+    Serial.print(s.writes);
+    Serial.print(" wr_ok=");
+    Serial.print(s.write_verified);
+    Serial.print(" wr_fail=");
+    Serial.print(s.write_failures);
+    Serial.print(" ifcnt=");
+    if (s.ifcnt_valid) {
+        Serial.print("0x");
+        Serial.print(s.ifcnt_last, HEX);
+    } else {
+        Serial.print("--");
+    }
+    Serial.print(" checks=");
+    Serial.print(s.ifcnt_checks);
+    Serial.print(" mism=");
+    Serial.print(s.ifcnt_mismatches);
+    Serial.print(" pending=");
+    Serial.println(s.writes_since_check);
+}
+
+void printStats() {
+    for (uint8_t i = 0; i < kDriverCount; ++i) {
+        printStats(i);
+    }
+}
+
+void clearDiagEvents() {
+    const uint32_t save = save_and_disable_interrupts();
+    s_diag_events = 0;
+    restore_interrupts(save);
+    for (uint8_t i = 0; i < kDriverCount; ++i) {
+        s_status[i].diag_event = false;
+    }
+}
+
 bool setCurrents(uint8_t index, uint16_t run_ma, uint16_t hold_ma) {
     if (!ready(index) || run_ma == 0) {
         return false;
@@ -704,8 +868,10 @@ bool setCurrents(uint8_t index, uint16_t run_ma, uint16_t hold_ma) {
         return false;
     }
     chopconf = (chopconf & ~(1u << 17)) | (vsense ? (1u << 17) : 0);
-    writeDriverReg(index, kChopconf, chopconf);
-    writeDriverReg(index, kIholdIrun, ihold_irun);
+    if (!writeDriverReg(index, kChopconf, chopconf) ||
+        !writeDriverReg(index, kIholdIrun, ihold_irun)) {
+        return false;
+    }
 
     s_config[index].run_ma = run_ma;
     s_config[index].hold_ma = hold_ma;
@@ -719,7 +885,9 @@ bool setStallGuard(uint8_t index, uint8_t sgthrs) {
     if (!ready(index)) {
         return false;
     }
-    writeDriverReg(index, kSgthrs, sgthrs);
+    if (!writeDriverReg(index, kSgthrs, sgthrs)) {
+        return false;
+    }
     s_config[index].sgthrs = sgthrs;
     s_status[index].sgthrs = sgthrs;
     return true;
@@ -730,7 +898,9 @@ bool setTcoolthrs(uint8_t index, uint32_t value) {
         return false;
     }
     value &= 0xFFFFFu;
-    writeDriverReg(index, kTcoolthrs, value);
+    if (!writeDriverReg(index, kTcoolthrs, value)) {
+        return false;
+    }
     s_config[index].tcoolthrs = value;
     s_status[index].tcoolthrs = value;
     return true;
@@ -751,8 +921,7 @@ bool setMicrosteps(uint8_t index, uint16_t microsteps, bool interpolate) {
     chopconf = (chopconf & ~(0xFu << 24)) | ((uint32_t)mres << 24);
     chopconf = (chopconf & ~(1u << 28)) |
                ((interpolate ? 1u : 0u) << 28);
-    writeDriverReg(index, kChopconf, chopconf);
-    return true;
+    return writeDriverReg(index, kChopconf, chopconf);
 }
 
 bool setChopper(uint8_t index, uint32_t chopconf) {
@@ -818,14 +987,122 @@ bool writeRegister(uint8_t index, uint8_t address, uint32_t value) {
     return writeDriverReg(index, address, value);
 }
 
-void poll(uint32_t) {
+void updateMotionFlags(uint8_t index);
+
+// Bench monitor. Off by default: a UART read blocks the CPU for several ms,
+// so this must never run implicitly on the motion loop. The DIAG path below
+// stays the production event path.
+uint8_t s_monitor_index = kDriverCount;
+uint32_t s_monitor_until_ms = 0;
+uint32_t s_monitor_next_ms = 0;
+uint32_t s_monitor_interval_ms = 100;
+
+void printMonitorLine(uint8_t index, uint32_t now_ms) {
+    const DriverStatus& s = s_status[index];
+    Serial.print("mon tmc");
+    Serial.print(index);
+    Serial.print("@");
+    Serial.print(driverAddress(index));
+    Serial.print(" t=");
+    Serial.print(now_ms);
+    Serial.print(" sg=");
+    Serial.print(s.sg_result);
+    Serial.print("/");
+    Serial.print((uint16_t)(2u * s.sgthrs));
+    Serial.print(" cs=");
+    Serial.print(s.cs_actual);
+    Serial.print("/");
+    Serial.print(s.irun);
+    Serial.print(" pwm=");
+    Serial.print(s.pwm_scale_sum);
+    Serial.print("/");
+    Serial.print(s.pwm_scale_auto);
+    Serial.print(" auto=");
+    Serial.print(s.pwm_ofs_auto);
+    Serial.print("/");
+    Serial.print(s.pwm_grad_auto);
+    Serial.print(" tstep=");
+    Serial.print(s.tstep);
+    if (s.stall) {
+        Serial.print(" STALL");
+    }
+    if (s.current_limited) {
+        Serial.print(" CURRENT_LIMITED");
+    }
+    Serial.println();
+}
+
+bool startMonitor(uint8_t index, uint32_t duration_ms, uint32_t interval_ms) {
+    if (index >= kDriverCount) {
+        return false;
+    }
+    if (duration_ms == 0) {
+        s_monitor_index = kDriverCount;
+        Serial.println("monitor: stopped");
+        return true;
+    }
+    if (!s_status[index].ready) {
+        return false;
+    }
+    if (interval_ms < 20u) {
+        interval_ms = 20u;
+    } else if (interval_ms > 2000u) {
+        interval_ms = 2000u;
+    }
+    s_monitor_index = index;
+    s_monitor_interval_ms = interval_ms;
+    s_monitor_until_ms = millis() + duration_ms;
+    s_monitor_next_ms = millis();
+    Serial.print("monitor: tmc");
+    Serial.print(index);
+    Serial.print(" for ");
+    Serial.print(duration_ms);
+    Serial.print(" ms every ");
+    Serial.print(interval_ms);
+    Serial.println(" ms");
+    return true;
+}
+
+void poll(uint32_t now_ms) {
+    if (s_monitor_index < kDriverCount) {
+        if ((int32_t)(now_ms - s_monitor_until_ms) >= 0) {
+            s_monitor_index = kDriverCount;
+            Serial.println("monitor: done");
+        } else if ((int32_t)(now_ms - s_monitor_next_ms) >= 0) {
+            s_monitor_next_ms = now_ms + s_monitor_interval_ms;
+            refresh(s_monitor_index);
+            printMonitorLine(s_monitor_index, now_ms);
+        }
+    }
+
     if (s_ready_mask == 0) {
         return;
     }
 
+    // One IFCNT comparison per second, round-robin over the ready drivers.
+    if ((int32_t)(now_ms - s_ifcnt_check_ms) >= 0) {
+        s_ifcnt_check_ms = now_ms + 1000;
+        for (uint8_t tries = 0; tries < kDriverCount; ++tries) {
+            const uint8_t i = s_ifcnt_check_index;
+            s_ifcnt_check_index =
+                (uint8_t)((s_ifcnt_check_index + 1u) % kDriverCount);
+            if (s_ready_mask & (uint8_t)(1u << i)) {
+                checkIfcnt(i);
+                break;
+            }
+        }
+    }
+
+    // Take the latched edges from the GPIO ISR. A short StallGuard pulse is
+    // gone before this loop runs, so it must be remembered in the ISR.
+    uint32_t save = save_and_disable_interrupts();
+    const uint8_t events = s_diag_events;
+    s_diag_events = 0;
+    restore_interrupts(save);
+
     // DIAG is the event path; UART stays off the motion loop. A changed DIAG
-    // pin (stall, pre-warning, short, open load) triggers one DRV_STATUS read,
-    // which the 1 Hz health frame then reports.
+    // pin (stall, pre-warning, short, open load) triggers one DRV_STATUS and
+    // SG_RESULT read, which the 1 Hz health frame and the status flags use.
     uint8_t diag = 0;
     for (uint8_t i = 0; i < kDriverCount; ++i) {
         if (digitalRead(board::kDrives[i].diag)) {
@@ -839,23 +1116,84 @@ void poll(uint32_t) {
     }
     const uint8_t changed = diag ^ s_last_diag;
     s_last_diag = diag;
-    if (changed == 0) {
+    const uint8_t pending = (uint8_t)(changed | events);
+    if (pending == 0) {
         return;
     }
 
     for (uint8_t i = 0; i < kDriverCount; ++i) {
-        if ((changed & (uint8_t)(1u << i)) == 0 ||
-            (s_ready_mask & (uint8_t)(1u << i)) == 0) {
+        const uint8_t bit = (uint8_t)(1u << i);
+        if ((pending & bit) == 0 || (s_ready_mask & bit) == 0) {
             continue;
+        }
+        const bool edge = (events & bit) != 0;
+        if (edge) {
+            s_status[i].diag_event = true;
         }
         uint32_t drv_status = 0;
         const bool ok = readDriverReg(i, kDrvStatus, &drv_status);
         s_status[i].online = ok;
         if (ok) {
             s_status[i].drv_status = drv_status;
-            s_seen_mask |= (uint8_t)(1u << i);
+            s_status[i].cs_actual = (uint8_t)((drv_status >> 16) & 0x1Fu);
+            s_seen_mask |= bit;
+        }
+        uint32_t sg_result = 0;
+        if (readDriverReg(i, kSgResult, &sg_result)) {
+            s_status[i].sg_result = (uint16_t)sg_result;
+            s_seen_mask |= bit;
+        }
+        if (!ok) {
+            continue;
+        }
+        updateMotionFlags(i);
+        const bool moving = (s_status[i].drv_status & (1u << 31)) == 0;
+        const bool fault = (s_status[i].drv_status & 0xFu) != 0;
+        if (edge && (moving || fault)) {
+            Serial.print("tmc");
+            Serial.print(i);
+            Serial.print("@");
+            Serial.print(driverAddress(i));
+            Serial.print(": DIAG");
+            if (fault) {
+                Serial.print(" fault=0x");
+                Serial.print(s_status[i].drv_status & 0xFu, HEX);
+            }
+            if (s_status[i].stall) {
+                Serial.print(" STALL");
+            }
+            Serial.print(" sg=");
+            Serial.print(s_status[i].sg_result);
+            Serial.print("/");
+            Serial.print((uint16_t)(2u * s_status[i].sgthrs));
+            Serial.print(" cs=");
+            Serial.print(s_status[i].cs_actual);
+            Serial.print("/");
+            Serial.print(s_status[i].irun);
+            Serial.print(" pwm=");
+            Serial.println(s_status[i].pwm_scale_sum);
         }
     }
+}
+
+void updateMotionFlags(uint8_t index) {
+    DriverStatus& s = s_status[index];
+    const bool moving = (s.drv_status & (1u << 31)) == 0;
+    const bool stealth = (s.drv_status & (1u << 30)) != 0;
+    const uint16_t threshold = (uint16_t)(2u * s.sgthrs);
+    // StallGuard4 only drives the stall result in StealthChop. SGTHRS = 0 is
+    // the documented "off" setting, and DIAG is gated to
+    // TCOOLTHRS >= TSTEP > TPWMTHRS. TPWMTHRS is 0 here, so the upper limit is
+    // TSTEP <= TCOOLTHRS; this keeps a low-speed false stall from showing.
+    const bool sg_speed_ok = s.tstep <= s.tcoolthrs;
+    s.stall = moving && stealth && s.sgthrs != 0 && sg_speed_ok &&
+              s.sg_result <= threshold;
+    // CS_ACTUAL follows IHOLD/IRUN. A lower value while moving means the
+    // driver is not delivering the set current; PWM_SCALE at 250+ means the
+    // voltage-mode regulator has run out of headroom. Neither is a stall by
+    // itself, but both explain lost torque at speed.
+    s.current_limited =
+        moving && ((s.cs_actual < s.irun) || (s.pwm_scale_sum >= 250));
 }
 
 void refresh(uint8_t index) {
@@ -866,11 +1204,14 @@ void refresh(uint8_t index) {
     // fail while the digital configuration registers still read back.
     uint32_t value = 0;
     bool any_ok = false;
+    bool drv_ok = false;
 
     if (readDriverReg(index, kDrvStatus, &value)) {
         s_status[index].drv_status = value;
+        s_status[index].cs_actual = (uint8_t)((value >> 16) & 0x1Fu);
         s_seen_mask |= (uint8_t)(1u << index);
         any_ok = true;
+        drv_ok = true;
     }
     if (readDriverReg(index, kSgResult, &value)) {
         s_status[index].sg_result = (uint16_t)value;
@@ -887,7 +1228,24 @@ void refresh(uint8_t index) {
         s_status[index].vsense = ((value >> 17) & 1u) != 0;
         any_ok = true;
     }
+    if (readDriverReg(index, kPwmScale, &value)) {
+        s_status[index].pwm_scale_sum = (uint8_t)(value & 0xFFu);
+        int32_t scale_auto = (int32_t)((value >> 16) & 0x1FFu);
+        if (scale_auto & 0x100) {
+            scale_auto -= 0x200;
+        }
+        s_status[index].pwm_scale_auto = (int16_t)scale_auto;
+        any_ok = true;
+    }
+    if (readDriverReg(index, kPwmAuto, &value)) {
+        s_status[index].pwm_ofs_auto = (uint8_t)(value & 0xFFu);
+        s_status[index].pwm_grad_auto = (uint8_t)((value >> 16) & 0xFFu);
+        any_ok = true;
+    }
     s_status[index].online = any_ok;
+    if (drv_ok) {
+        updateMotionFlags(index);
+    }
 }
 
 uint8_t otpwMask() {
@@ -1306,11 +1664,32 @@ void printDriver(uint8_t index) {
     Serial.print(" stealth=");
     Serial.print((s.drv_status & (1u << 30)) ? 1 : 0);
     Serial.print(" cs=");
-    Serial.print((s.drv_status >> 16) & 0x1F);
+    Serial.print(s.cs_actual);
+    Serial.print("/");
+    Serial.print(s.irun);
     Serial.print(" sg_result=");
     Serial.print(s.sg_result);
+    Serial.print("/");
+    Serial.print((uint16_t)(2u * s.sgthrs));
     Serial.print(" tstep=");
     Serial.print(s.tstep);
+    Serial.print(" pwm=");
+    Serial.print(s.pwm_scale_sum);
+    Serial.print("/");
+    Serial.print(s.pwm_scale_auto);
+    Serial.print(" auto=");
+    Serial.print(s.pwm_ofs_auto);
+    Serial.print("/");
+    Serial.print(s.pwm_grad_auto);
+    if (s.stall) {
+        Serial.print(" STALL");
+    }
+    if (s.current_limited) {
+        Serial.print(" CURRENT_LIMITED");
+    }
+    if (s.diag_event) {
+        Serial.print(" DIAG_EVENT");
+    }
     Serial.print(" diag=");
     Serial.print(digitalRead(board::kDrives[index].diag) ? 1 : 0);
     Serial.println();

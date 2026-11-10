@@ -31,6 +31,34 @@ struct DriverStatus {
     bool     vsense;
     uint8_t  sgthrs;
     uint32_t tcoolthrs;
+    // Last PWM/current sample. CS_ACTUAL follows IHOLD/IRUN; a value below
+    // irun while moving means the driver is not delivering the set current.
+    uint8_t  cs_actual;
+    uint8_t  pwm_scale_sum;    // PWM_SCALE bits 0..7, 255 = regulator at limit
+    int16_t  pwm_scale_auto;   // PWM_SCALE bits 24..16, signed 9-bit
+    uint8_t  pwm_ofs_auto;     // PWM_AUTO bits 0..7
+    uint8_t  pwm_grad_auto;    // PWM_AUTO bits 23..16
+    bool     stall;            // SG_RESULT <= 2*SGTHRS while moving
+    bool     current_limited;  // moving and current not reached / PWM at limit
+    bool     diag_event;       // a DIAG rising edge occurred since bring-up
+};
+
+// Bit-banged UART health counters, one set per TMC2209 address. IFCNT is the
+// driver's count of accepted writes; writes_since_check is ours. A periodic
+// check compares the IFCNT delta with the writes we sent, so a lost write
+// shows up even when its register is write-only.
+struct UartStats {
+    uint32_t read_attempts;    // read frames sent, including retries
+    uint32_t reads;            // read transactions decoded successfully
+    uint32_t read_failures;    // transactions that failed after all retries
+    uint32_t writes;           // write frames sent, including retries
+    uint32_t write_verified;   // writes confirmed by an IFCNT increment
+    uint32_t write_failures;   // verified writes that failed after all retries
+    uint32_t ifcnt_checks;     // successful IFCNT comparisons
+    uint32_t ifcnt_mismatches; // IFCNT delta != writes sent since last check
+    uint8_t  ifcnt_last;
+    uint8_t  writes_since_check;
+    bool     ifcnt_valid;
 };
 
 // Drives EN high first, then configures every driver over UART. Returns a
@@ -41,6 +69,17 @@ uint8_t begin();
 bool ready(uint8_t index);
 const Config& config(uint8_t index);
 const DriverStatus& status(uint8_t index);
+const UartStats& uartStats(uint8_t index);
+
+// Read IFCNT and compare its advance with the writes sent since the previous
+// check. Called periodically from poll(); the bench can call it on demand.
+bool checkIfcnt(uint8_t index);
+void printStats(uint8_t index);
+void printStats();
+
+// Clear the latched DIAG event flags and the pending ISR bits. The pin state
+// is not changed; a new rising edge latches again.
+void clearDiagEvents();
 
 bool setCurrents(uint8_t index, uint16_t run_ma, uint16_t hold_ma);
 bool setStallGuard(uint8_t index, uint8_t sgthrs);
@@ -60,6 +99,12 @@ void poll(uint32_t now_ms);
 
 // Read DRV_STATUS, SG_RESULT, TSTEP and the current/SG registers now.
 void refresh(uint8_t index);
+
+// Bench-only motion monitor: sample SG_RESULT, PWM_SCALE and DRV_STATUS once
+// per interval_ms and print one line per sample. A continuous UART read would
+// stall the motion loop, so this is explicit and time-limited.
+// duration_ms == 0 stops an active monitor.
+bool startMonitor(uint8_t index, uint32_t duration_ms, uint32_t interval_ms);
 
 uint8_t otpwMask();
 uint8_t otMask();
