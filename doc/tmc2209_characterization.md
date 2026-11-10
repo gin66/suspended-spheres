@@ -1,10 +1,44 @@
 # TMC2209 + Stepper Characterization — Bench Test Plan
 
-> Status: proposed, not yet implemented. This is a bench-only procedure.
-> The commands described here can command motion and must never run with the
-> mechanism in service. The existing `bench_console` is already such a tool.
-> Hardware is the Fly-Micro4 as built; clip-on instruments only. The bench
-> output is the saved session record in §12, not a serial scroll.
+> Status: bench run 2026-11-10; measured results below. This is a bench-only
+> procedure. The commands described here can command motion and must never run
+> with the mechanism in service. The existing `bench_console` is already such a
+> tool. Hardware is the Fly-Micro4 as built; clip-on instruments only. The
+> bench output is the saved session record in §12, not a serial scroll.
+
+## Measured results (2026-11-10, Fly-Micro4, M0/M2)
+
+Per-session evidence is in `doc/bench/tmc2209/<run_id>/`. These numbers
+supersede the assumptions marked in §3.2, §3.7 and §7.
+
+| axis | StealthChop `f_stall` | SpreadCycle `f_stall` |
+|------|----------------------:|----------------------:|
+| M0 full NEMA-17 | 18.0 kstep/s (3/3 clean) | ≈74 kstep/s (76k lost) |
+| M2 US-17HS4023S | ≈21 kstep/s | ≥94 kstep/s (stopped for mechanical noise) |
+
+300 mA, 1/16, interpolation on, unloaded. Supply at M0 74k: 210 mA total for
+the board and four driven phases at 20 V (not the limiter). The pancake outran
+the full-size motor, so the limit is not rotor torque; M0 is the
+speed-limiting axis.
+
+Four findings contradict the plan text:
+
+1. **`SGTHRS = 0` is not "StallGuard off".** The comparison is
+   `SG_RESULT <= 2*SGTHRS`; at threshold 0 it still trips whenever `SG_RESULT`
+   reaches 0. The firmware suppresses only its own `STALL` flag when
+   `sgthrs == 0`, but the DIAG pin and the ISR still fire. Use the
+   `TCOOLTHRS` window or SpreadCycle to silence it, not `sg 0 0`.
+2. **`TCOOLTHRS = 0xFFFFF` gates nothing.** `TCOOLTHRS >= TSTEP > TPWMTHRS`
+   is true at every reportable speed, including standstill. Set `TCOOLTHRS` to
+   the `TSTEP` of the lowest speed to be armed.
+3. **`SG_RESULT` is not a motion sensor.** It stayed high (350–470) while the
+   rotor was stalled at a high step rate. Only `TSTEP` (step source) plus an
+   independent reference (operator, tach or shaft mark) can prove motion.
+4. **IFCNT `mism` counts write attempts, not lost writes.** A dropped frame
+   recovered by a retry increments `writes_since_check` again and shows as a
+   `mism` even though every write was verified (§3.7, `tmc2209.cpp`).
+
+The required tach/operator reference is therefore mandatory, not optional.
 
 ---
 
@@ -225,6 +259,16 @@ determine which one happened. The firmware comment that `TCOOLTHRS = 0xFFFFF`
 `TSTEP <= 0xFFFFF` is true at every speed the chip can report. Copy the register
 value into the run note, not the comment.
 
+**Measured 2026-11-10.** `SGTHRS = 0` does not silence the comparator either:
+the threshold becomes 0 and `SG_RESULT` reaches 0, so DIAG still pulses (128
+lines during one StealthChop `stop`). With `SGTHRS = 0` the firmware's own
+`STALL` flag stays clear, so the log looks quiet while the pin is not. And a
+true stall at high step rate leaves `SG_RESULT` *high* (~350–470), not low, so
+DIAG or SG cannot classify the event without the tach. The Stop-flood is the
+re-capture on deceleration, not the stall onset. See
+`doc/bench/tmc2209/2026-11-10-M0-SC-SP-300-16-01/note.md` and
+`...-SC-300-16-07/note.md`.
+
 ### 3.3 Changing chopper mode
 
 - `GCONF.en_spreadCycle = 1` forces SpreadCycle.
@@ -393,6 +437,16 @@ Take `stats` at the start of every session and again after any `FAILED` or
 accepted a different number of writes than the firmware sent. Discard every
 point since that previous `stats`. Phase 0's "no IFCNT mismatches" check is
 this same counter.
+
+**Measured 2026-11-10:** the counter as built counts write *attempts*, not
+accepted writes. `writes_since_check` is incremented in `writeAddressReg()` for
+every frame, including a retry after a dropped frame, while IFCNT advances only
+when a frame lands. A recovered retry therefore appears as a `mism` even though
+every register verified and the read-back matched. This is why Session 0
+reported `mism` +1 on M0 with `wr_fail = 0`. Until the counter counts verified
+writes, compare the IFCNT delta against `wr_ok`, not against `pending`, and
+treat a one-for-one `mism` with matching read-backs as a dropped-and-retried
+frame, not a bad configuration.
 
 ### 3.8 Resonance, and how far microstepping can go
 
@@ -572,6 +626,13 @@ sg 0 0                 # ok, or FAILED → StallGuard is still at the old shadow
 monitor 0 120 20
 run 0 18000 1          # the 1 is forward, not a duration
 ```
+
+**Measured 2026-11-10:** `sg 0 0` prints `ok` but does not disable StallGuard;
+the DIAG pin still pulses when `SG_RESULT` reaches 0. Treat every DIAG as an
+event to classify, and use the operator/tach, not SG, to decide whether the
+shaft is turning. The 20 kstep/s "OK" result in this session was withdrawn
+after the operator saw the rotor stall; see the measured-results block at the
+top.
 
 Watch the shaft during the ramp. At 2000 step/s² the ramp to 18 kstep/s lasts
 9 s. A DIAG or a visible loss during the ramp is an event at the tach speed,
@@ -932,6 +993,44 @@ stays a diagnostic. The operating point remains the 1/16 worked case until
 microstepping is selected in `doc/mechanical_analysis.md`. Label every file
 `1/16 worked case`, `1/8 diagnostic`, or `1/32 candidate`. Do not run native
 1/256 (§3.8).
+
+### Phase 4a — CHOPCONF / PWMCONF tuning (queued, not run)
+
+The measured SpreadCycle numbers (M0 ≈74k, M2 ≥94k) were taken with the
+**StealthChop bring-up** `CHOPCONF = 0x14020054`, so they are a lower bound with
+an untuned chopper. This phase is queued. It needs the operator-bit stall
+protocol and a stopped axis (`chop`/`pwm` do not check that themselves).
+
+**CHOPCONF** base `0x14020054`: TOFF 4, HSTRT 5, HEND 0, TBL 0, VSENSE 1,
+MRES 4, INTPOL 1. HSTRT/HEND/TBL/TOFF are the SpreadCycle knobs. Keep
+VSENSE/MRES/INTPOL fixed; never TOFF = 0 (chopper off); never set
+DISS2G/DISS2VS.
+
+| knob | value | CHOPCONF |
+|------|------:|----------|
+| baseline | TOFF4 HSTRT5 HEND0 TBL0 | `0x14020054` |
+| TOFF | 3 / 5 | `0x14020053` / `0x14020055` |
+| HSTRT | 4 / 7 | `0x14020044` / `0x14020074` |
+| HEND | 1 / 2 | `0x140200D4` / `0x14020154` |
+| TBL | 1 / 2 | `0x14028054` / `0x14030054` |
+| INTPOL off | bit 28 clear | `0x04020054` (separate A/B) |
+
+Procedure per variant: stop, `mode spread`, `chop <axis> <hex>`, confirm the
+read-back (`raw <axis> 0x6C` equals the value sent, VSENSE preserved), then
+ramp from rest to 74k, 76k, 78k with a 2 s dwell and operator bits. Baseline:
+74k passes, 76k fails. Record `PWM_SCALE`, `CS_ACTUAL` and the noise
+impression. A variant that moves the limit must be repeated 3× before it is
+believed.
+
+**PWMCONF** is StealthChop-only, so it matters for homing, not motion. Current
+`0xC10D0024` (autoscale on, `pwm_freq = 1`, `PWM_OFS = 0x24`). Compare the
+default against `pwm_freq` 0/2 and a different `PWM_OFS` at 1k/2k/4k step/s,
+looking at SG mean/sd and audible smoothness. Low priority until the hard stop
+exists. It does not change the motion chopper.
+
+Also queued here: interpolation off versus on at 1/16 (CHOPCONF bit 28) at the
+last good RPM, and one low hybrid crossover (`TPWMTHRS`) with the `stealth` bit
+checked above and below.
 
 ### Phase 5 — StallGuard window (session 3)
 
@@ -1352,6 +1451,14 @@ measured limit on this board. Hardware is not an outcome.
 | G4 | Homing window: current, speed, `SGTHRS`, repeatability | Homing uses StallGuard inside the measured window, at a stated current and speed. Outside that window, stall detection is the tach on the bench and is absent in the installation. |
 | G5 | `SG_RESULT` versus the predicted tension | Report whether `SG_RESULT` moves with the predicted tension. No sensor is added if it does not. |
 | G6 | Measured UART mask, and the period that fits | Keep event-driven DIAG reads. Add a periodic read only at a measured period that fits the UART budget. |
+
+**Bench status 2026-11-10.** G1: closed by operator observation — true stall at
+~18.5 kstep/s, DIAG burst at the loss, no fault bits; the `stop` flood is
+re-capture. G2: closed for M0/M2 — StealthChop 18/21k, SpreadCycle 74/≥94k;
+hybrid still open. G3: speed criterion passes for a 40 mm drum in SpreadCycle;
+20/10 mm optional tiers are outside `0.7×f_stall` on M0 and the 10 mm optional
+is above the 64 kstep/s playback chunk; acceleration is unmeasured (bench
+0.079 m/s²). G4–G6 remain open. Evidence in `doc/bench/tmc2209/`.
 
 A likely outcome, based on the datasheet and field experience, is:
 

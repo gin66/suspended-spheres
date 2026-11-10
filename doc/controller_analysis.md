@@ -262,6 +262,32 @@ The TMC2209 can measure coil current either across external sense resistors or a
 
 The datasheet's "set `otp_internalRsense = 1` before enabling the driver" note (§3.2, Rev. 1.09) applies only to the resistor-less RDSon circuit; it must not be applied to these boards.
 
+### 6.2 Chopper mode — measured on the Fly-Micro4 (2026-11-10)
+
+At 300 mA, 1/16, interpolation on, unloaded, operator-confirmed:
+
+| axis | StealthChop `f_stall` | SpreadCycle `f_stall` |
+|------|----------------------:|----------------------:|
+| M0 full NEMA-17 | 18.0 kstep/s | ≈74 kstep/s |
+| M2 US-17HS4023S pancake | ≈21 kstep/s | ≥94 kstep/s |
+
+The pancake (0.13 Nm) outran the full-size motor (0.42 Nm), so the limit is not
+rotor torque. The supply was 210 mA total at 20 V at 74 kstep/s, so it is not
+the supply. StealthChop is a voltage-mode estimate that degrades as back-EMF
+and L/R phase lag grow; SpreadCycle regulates current every chopper cycle and
+holds through the same electrical frequency. That is the ~4× difference.
+
+**Decision:** run motion in **SpreadCycle**; use **StealthChop only for
+StallGuard homing**, whose speed (40–50 mm/s) is far inside the StealthChop
+window. M0 is the speed-limiting axis at 300 mA. A low hybrid crossover is not
+measured; if it is used, keep the crossover low and only switch at standstill.
+All these numbers were taken with the StealthChop bring-up `CHOPCONF`
+(`0x14020054`), so a SpreadCycle-oriented chopper may move them. The cost is
+audible chopper noise; the mechanical noise at 94 kstep/s (1763 RPM) is already
+the practical ceiling at the top end.
+
+See `tmc2209_characterization.md` and `doc/bench/tmc2209/`.
+
 ---
 
 ## 7. Per-Controller Block Diagram (ESP32-S3, WiFi)

@@ -118,6 +118,10 @@ At the optional 1.2 m/s tier, 21 ms of drift gives ≈ 25 mm after 5 minutes and
 | 13 | **Position-scale error from multi-layer winding** | High | Medium | Level-wind single layer, or calibrate radius vs turns; second layer adds ≈4 % scale error (≈80 mm over the 2 m travel) vs the 50 µm/pitch limit (`NFR-PHYS-007`) |
 | 14 | **Hollow ornament detachment or cracking** | Medium | Medium | Containment (`NFR-SAFE-001`); inspect ornaments; secure the thread attachment |
 | 15 | **Step-rate ceiling at the optional 1.2 m/s tier** | Low | Low | Microstep count is TBD. Fly-Micro4 PIO ceiling is 200 kstep/s (80 ticks at 16 MHz). In the 1/16 worked case a 40 mm drum needs 30.6 kstep/s at 1.2 m/s (6.5×). A 2 ms FasTimed chunk caps playback at 64 kstep/s (2.1×). The 40 kHz I2S figure was the superseded ESP32 path. At 1/8, 30–40 mm fails the 50 µm resolution |
+| 16 | **StealthChop speed ceiling** | High | Certain | Measured 18 kstep/s (M0) / 21 kstep/s (M2) at 300 mA, 1/16. Do not run motion in StealthChop; use SpreadCycle (≈74 / ≥94 kstep/s) and keep StealthChop for homing. See `tmc2209_characterization.md`. |
+| 17 | **StallGuard false DIAG / not a motion sensor** | High | Medium | `SGTHRS = 0` does not silence DIAG; `TCOOLTHRS = 0xFFFFF` gates nothing; `SG_RESULT` stays high on a high-speed stall. Gate with `TCOOLTHRS`, classify with `DRV_STATUS` and an independent reference, ignore DIAG below ~750 step/s and at spin-up. |
+| 18 | **High-speed mechanical resonance/noise** | Medium | Medium | Operator heard mechanical distress at 94 kstep/s (1763 RPM) on M2; M0 loses sync at 76k. Cap the envelope, design the mechanical path, and take a proper noise survey; limits are per motor. |
+| 19 | **Bench IFCNT mismatch is a retry artefact** | Low | Certain | `writes_since_check` counts attempts, so a recovered retry shows as `mism` with `wr_fail = 0`. Compare the IFCNT delta with verified writes before discarding a point; fix the counter. |
 
 
 ---

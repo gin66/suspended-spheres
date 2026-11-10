@@ -809,10 +809,13 @@ Housekeeping (10–50 Hz)
 - **Microstepping:** TBD. Until the count is chosen, the host constant
   `MC_STEPS_PER_MM_Q16` and the chunk examples use the 1/16 worked case.
   MicroPlyer (`intpol`) can then interpolate that input toward 1/256.
-- **Chopper:** StealthChop for the slow/quiet programme. Verify it does not
-  lose steps at the 1.2 m/s / 4 m/s² effects; if it does, switch to SpreadCycle
-  for the fast tier or reduce the acceleration. The duty is tiny (0.25–0.3 A
-  RMS), so thermal headroom is ample.
+- **Chopper:** measured 2026-11-10 at 300 mA, 1/16, unloaded: StealthChop
+  `f_stall` is 18 kstep/s (M0) and 21 kstep/s (M2); SpreadCycle is ≈74 kstep/s
+  (M0, 76k lost) and ≥94 kstep/s (M2, stopped for mechanical noise). **Run
+  motion in SpreadCycle**; keep StealthChop for StallGuard homing, whose speed
+  is far below its ceiling. A low hybrid crossover is still unmeasured. Duty is
+  0.25–0.3 A RMS, so thermal headroom is ample. See
+  `tmc2209_characterization.md` measured-results block.
 - **Current:** set run/hold current over UART at boot. Do not run at the
   module's 1–2 A rating; the mechanical analysis needs ~0.02 Nm and the 2×
   margin is already covered at 0.25–0.3 A.
@@ -864,8 +867,10 @@ drive's pin table.
 
 Boot order follows `controller_analysis.md` §6.1: drive all `ENN` high, then
 write `GCONF` with `GCONF.1 = 0` (external sense), `I_scale_analog = 0`,
-`en_spreadcycle = 0`, `pdn_disable = 1`, `mstep_reg_select = 1` and
-`multistep_filt = 1`. The chopper is TOFF = 4, MRES = 4 (1/16) with
+`en_spreadcycle = 1` (SpreadCycle, `GCONF = 0x1C4` for motion; `mode stealth`
+switches to StealthChop at standstill for homing), `pdn_disable = 1`,
+`mstep_reg_select = 1` and `multistep_filt = 1`. The chopper is TOFF = 4,
+MRES = 4 (1/16) with
 interpolation, `PWMCONF = 0xC10D0024`, `TPWMTHRS = 0`,
 `TCOOLTHRS = 0xFFFFF`, `SGTHRS = 40`. Init is entirely write-only: no
 `GCONF`/`OTP_READ` reads, no read-gated OTP check, and no read-back of
@@ -876,6 +881,15 @@ write-only in the TMC2209 register map anyway. A driver is marked configured
 once its writes are issued; there is no read that can fail bring-up. `ENN`
 stays high (disabled) through bring-up; motion is enabled explicitly with
 `enable <axis> 1` after the motor supply/current limit is set.
+
+**Measured 2026-11-10:** motion now boots in SpreadCycle
+(`en_spreadcycle = 1`, `GCONF = 0x1C4`). `TCOOLTHRS = 0xFFFFF` still leaves
+the StallGuard window open at every speed, but StallGuard4 only drives DIAG in
+StealthChop and the armed predicate also requires `SGTHRS != 0`, so there is no
+SG result in SpreadCycle. For homing, stop the axis and use
+`mode <axis> stealth` (`mode <axis> spread` to return); `sg off` writes
+`TCOOLTHRS = 0` instead of setting `SGTHRS = 0`. See §5.7 and the
+characterization document.
 
 The default is 300 mA RMS run and hold at `RSENSE = 0.110 Ω`. The firmware
 selects VSENSE and the IRUN/IHOLD codes with the integer form
@@ -900,7 +914,8 @@ interface, and it can command motion.
 | `stats [axis]` | Print per-driver UART read/write counters and the last IFCNT comparison |
 | `monitor <axis> <seconds> [interval_ms]` | Sample `SG_RESULT`, `PWM_SCALE` and `DRV_STATUS` for a limited time; `0` seconds stops it |
 | `cur <axis> <run_ma> [hold_ma]` | Set run/hold current and print status |
-| `sg <axis> <0..255>` | Set `SGTHRS` |
+| `sg <axis> <0..255\|off>` | Set `SGTHRS`; `off` writes `TCOOLTHRS = 0` (`SGTHRS = 0` is not off) |
+| `mode <axis> <stealth\|spread>` | Set `GCONF.en_spreadCycle`; requires the axis stopped |
 | `tcool <axis> <value>` | Set the 20-bit `TCOOLTHRS` |
 | `micro <axis> <2..256> [0\|1]` | Set microsteps and interpolation |
 | `chop <axis> <hex>` / `pwm <axis> <hex>` | Raw CHOPCONF / PWMCONF; VSENSE is preserved |
@@ -940,6 +955,14 @@ IFCNT increment. `poll()` compares IFCNT with the writes sent since the last
 check once per second, round-robin over the ready drivers; a mismatch means the
 driver accepted a different number of writes than the firmware sent. `stats
 <axis>` forces a fresh check for that driver.
+
+**Measured 2026-11-10:** as built, `writes_since_check` counts write *attempts*
+(`tmc2209.cpp`), while IFCNT advances only for frames that land. A dropped frame
+recovered by a retry therefore shows as a `mism` with `wr_fail = 0` and every
+register still verified. Until the counter counts verified writes, compare the
+IFCNT delta with `wr_ok`, not `pending`. `TSTEP` is also stored in a `uint16_t`
+while the register is 20 bits, so a printed standstill value is `0xFFFF`, not
+`0xFFFFF`; new traces must store the raw 32-bit read.
 
 `monitor <axis> <seconds> [interval_ms]` is a bench-only motion trace. It
 periodically samples `SG_RESULT`, `DRV_STATUS`, `PWM_SCALE` and `PWM_AUTO` and
@@ -1053,9 +1076,11 @@ design.
 with `run <axis> <hz> 1` and sample `SG_RESULT` with `status <axis>`. Then
 block the axis and sample again. `SG_RESULT` falls with load and high values
 mean light load; a stall is signalled when `SG_RESULT ≤ 2·SGTHRS`, so a
-**higher** `SGTHRS` is more sensitive, not less (datasheet §11.2); 0 disables
-the threshold. Sweep `SGTHRS` at each current step, because the signal
-amplitude scales with current. The DIAG path is also the fault path: it
+**higher** `SGTHRS` is more sensitive, not less (datasheet §11.2).
+**Measured 2026-11-10:** `SGTHRS = 0` sets the threshold to the floor; it does
+not gate the output. DIAG still pulses whenever `SG_RESULT` reaches 0, so use
+the `TCOOLTHRS` window (or SpreadCycle) to silence it. Sweep `SGTHRS` at each
+current step, because the signal amplitude scales with current. The DIAG path is also the fault path: it
 asserts on overtemperature pre-warning, short-to-GND and open load, so a
 DIAG read must be interpreted with `DRV_STATUS`, not assumed to be a stall.
 
@@ -1068,6 +1093,15 @@ synchronism with a low-current drive can therefore show a high `SG_RESULT` and
 no DIAG; that is a torque/voltage limit, not a StallGuard failure. Use
 `PWM_SCALE_SUM` (255 = regulator at its limit) and `CS_ACTUAL` against
 `IRUN` to diagnose it, not `SG_RESULT`.
+
+**Measured 2026-11-10 (M0, 300 mA, free run):** `SG_RESULT` is unstable only
+below ~750 step/s (500 step/s: 68 ± 25, min 0). It is stable and rises
+monotonically from 750 step/s to 17 kstep/s (139 at 1k, 353 at 4k, 427 at 17k),
+with no DIAG. Homing band, at 40–50 mm/s: 40 mm drum 1.0–1.25k → 139–164;
+20 mm 2.0–2.5k → 228–262; 10 mm 4.0–5.0k → 353–349. A true stall at high step
+rate left `SG_RESULT` high, so SG cannot detect that loss; the stable free-run
+signal is not stall detection. Gate `TCOOLTHRS` above the low-speed region and
+ignore DIAG at spin-up and below 750 step/s.
 
 The node reads `DRV_STATUS` and `SG_RESULT` at boot and on a DIAG edge only;
 apart from the explicit `monitor` command it does not poll UART in the motion
@@ -1122,6 +1156,15 @@ available; do not use GPIO12 as both. See `boards/Fly-Micro4/Fly_Micro4_pinmap.m
 6. Store the calibrated `SGTHRS` and homing current per axis; read `SG_RESULT`
    over UART during commissioning to set the threshold and the minimum
    travel/time.
+
+**Measured 2026-11-10 (M0, 300 mA, free run):** the usable window starts at
+~750 step/s. `SG_RESULT` is stable and monotonic above it (1k: 139; 2k: 229;
+4k: 353; 17k: 427); below it the value collapses to 0. At 40–50 mm/s the
+homing band is 139–164 (40 mm), 228–262 (20 mm), 353–349 (10 mm), all inside
+the stable region. Gate `TCOOLTHRS` above ~750 step/s and ignore DIAG at spin-up
+and below it. Free run only: a high-speed stall leaves `SG_RESULT` high, so SG
+is not a motion sensor. The hard-stop/repeatability half of G4 is still
+unmeasured (the rig is not built); do not hard-code the homing threshold yet.
 
 **Timing:** home one axis at a time or four in parallel per board; run boards
 in parallel over CAN. The official sensorless-homing reference uses
