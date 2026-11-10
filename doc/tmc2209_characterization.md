@@ -1458,7 +1458,8 @@ re-capture. G2: closed for M0/M2 — StealthChop 18/21k, SpreadCycle 74/≥94k;
 hybrid still open. G3: speed criterion passes for a 40 mm drum in SpreadCycle;
 20/10 mm optional tiers are outside `0.7×f_stall` on M0 and the 10 mm optional
 is above the 64 kstep/s playback chunk; acceleration is unmeasured (bench
-0.079 m/s²). G4–G6 remain open. Evidence in `doc/bench/tmc2209/`.
+0.079 m/s²). G4–G5 remain open; G6 is closed (one SG read 1.5–1.9 ms, one
+refresh 8.6–10.7 ms including retries). Evidence in `doc/bench/tmc2209/`.
 
 A likely outcome, based on the datasheet and field experience, is:
 
@@ -1470,7 +1471,9 @@ A likely outcome, based on the datasheet and field experience, is:
 - `SG_RESULT` is usable at low/medium speed in StealthChop, not at high speed
   and not in SpreadCycle. A 5 ms sampler is not available for four axes; the
   production default is the DIAG edge plus the existing 1 Hz health read, with
-  a periodic read only after its mask time is measured.
+  a periodic read only after its mask time is measured. Measured 2026-11-10:
+  one SG read 1.5–1.9 ms, one refresh 8.6–10.7 ms (retries included); at most
+  one axis per 20 ms, or one four-axis round-robin per ~50–100 ms.
 - Up/down from `SG_RESULT` is at best a small friction-and-ramp effect on a free
   hang. If it is not visible, the result is "StallGuard does not see direction
   on this mechanism," and no sensor is bought.

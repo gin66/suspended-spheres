@@ -28,6 +28,9 @@ operator-confirmed by the sound/shaft stopping.
 | `2026-11-10-M2-SP-300-16-01` | **M2 SpreadCycle ≥94 kstep/s**, stopped for mechanical noise. |
 | `2026-11-10-M2-SC-300-16-01` | Invalid for StealthChop: harness wrote `0x1C4`, actually SpreadCycle. |
 | `2026-11-10-M2-SC-300-16-02` | **M2 StealthChop `f_stall` ≈21 kstep/s.** |
+| `2026-11-10-M2-SC-300-16-03` | **M2 StallGuard window:** stable ≥1000 step/s; ~half of M0, so per-axis `SGTHRS`. |
+| `2026-11-10-M0-valid-01` | Firmware `60acd5a` validation: mode, `sg off`, 20-bit TSTEP, IFCNT, 18k/74k smoke. |
+| `2026-11-10-M0-uart-01` | **G6:** SG read 1.5–1.9 ms, refresh 8.6–10.7 ms; no 5 ms sampler. |
 
 ## Gates
 
@@ -36,15 +39,15 @@ operator-confirmed by the sound/shaft stopping.
 | G1 | closed — true stall at ~18.5k; DIAG burst; no fault; stop-flood is re-capture |
 | G2 | closed for M0/M2 in StealthChop vs SpreadCycle; **hybrid open**; noise number not measured |
 | G3 | partial — speed passes for 40 mm in SpreadCycle; 20/10 mm optional tiers outside margin; **acceleration unmeasured** |
-| G4 | partial — free-run window found; **hard-stop repeatability pending** (rig not built) |
+| G4 | partial — free-run window found for M0 and M2; **hard-stop repeatability pending** (rig not built) |
 | G5 | open — needs drum + 50 g load |
-| G6 | open — needs scope/microsecond timing |
+| G6 | closed — SG read 1.5–1.9 ms, refresh 8.6–10.7 ms; DIAG-only |
 
 ## Open items
 
-Homing rig (Session 4), M2 StallGuard window, 500/800 mA, hybrid crossover,
-interpolation on/off, acceleration (needs a firmware command), thermal repeat,
-three-axis run on the installation supply.
+Homing rig (Session 4), 500/800 mA, hybrid crossover, interpolation on/off,
+acceleration (needs a firmware command), thermal repeat, three-axis run on the
+installation supply.
 
 Queued: CHOPCONF/PWMCONF tuning matrix — see
 `doc/tmc2209_characterization.md` §8 Phase 4a. The measured SpreadCycle numbers
