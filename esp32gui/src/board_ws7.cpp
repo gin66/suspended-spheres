@@ -586,6 +586,10 @@ esp_err_t board_ws7_touch_init(void) {
   return ESP_OK;
 }
 
+/* s_i2c_mux is defined later in this file; declare it here so
+ * gt911_read_point can use a non-blocking lock. */
+extern SemaphoreHandle_t s_i2c_mux;
+
 /* Read a single touch point from GT911 via I2C (S5.01) */
 static bool gt911_read_point(int16_t* x, int16_t* y) {
   s_touch_points = 0;
@@ -593,8 +597,12 @@ static bool gt911_read_point(int16_t* x, int16_t* y) {
   if (s_touch_addr == 0) {
     return false;
   }
-  if (board_ws7_i2c_lock(20) != ESP_OK) {
-    return false; /* bus busy: report no touch rather than block the UI */
+  /* Non-blocking lock: if the I2C bus is held by the snapshot cycle or a
+   * CH422G operation, skip this touch frame rather than blocking the UI
+   * thread for up to 20 ms.  The GT911 buffers events, so losing one read
+   * frame is harmless — the next frame will contain the latest position. */
+  if (s_i2c_mux == nullptr || xSemaphoreTake(s_i2c_mux, 0) != pdTRUE) {
+    return false; /* bus busy — skip this frame, do not block */
   }
 
   Wire.beginTransmission(s_touch_addr);
@@ -695,7 +703,7 @@ void board_ws7_touch_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
 
 // --- I2C mutex with bounded timeout (S3.14, N13) ---
 
-static SemaphoreHandle_t s_i2c_mux = NULL;
+SemaphoreHandle_t s_i2c_mux = NULL;
 
 esp_err_t board_ws7_i2c_lock(uint32_t timeout_ms) {
   if (s_i2c_mux == NULL) {

@@ -8,6 +8,9 @@
 
 #include <Arduino.h>
 #include <lvgl.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#include <freertos/task.h>
 
 #include <cstdio>
 #include <cstring>
@@ -31,9 +34,11 @@ namespace {
 /* RGB565 draw buffer in internal RAM. The panel DMA cannot cross into PSRAM. */
 uint8_t s_draw_buf[BOARD_WS7_SCREEN_WIDTH * BOARD_WS7_DRAW_LINES * 2];
 
+/* ui_snapshot_t is ~17 KiB, far too large for a task stack. It lives in
+ * .bss and is only touched by snapshot_task. */
 ui_snapshot_t s_snapshot;
 lv_display_t *s_display = nullptr;
-uint32_t s_last_ui_ms = 0;
+SemaphoreHandle_t s_lvgl_mux = nullptr;
 uint32_t s_test_run_started_ms = 0;
 bool s_upgrade_active = false;
 uint8_t s_upgrade_progress = 0;
@@ -381,6 +386,26 @@ void build_snapshot(ui_snapshot_t *snap) {
   app_log_dump(snap->log_text, sizeof(snap->log_text));
 }
 
+/* Snapshot task: runs at FreeRTOS priority 1 (below the LVGL input reader
+ * which typically runs at priority 2).  It builds the UI snapshot every 500 ms
+ * and calls ui_update().  By keeping the SPIFFS read + node iteration off
+ * the main loop / touch path, the GT911 I2C bus is no longer starved and
+ * touch latency drops from seconds to milliseconds.
+ *
+ * The snapshot itself lives in s_snapshot, not on this stack.  LVGL is built
+ * with LV_USE_OS = LV_OS_NONE, so widget updates and lv_task_handler() are
+ * serialized through s_lvgl_mux. */
+static void snapshot_task(void *arg) {
+  (void)arg;
+  for (;;) {
+    vTaskDelay(pdMS_TO_TICKS(500));
+    build_snapshot(&s_snapshot);
+    xSemaphoreTake(s_lvgl_mux, portMAX_DELAY);
+    ui_update(&s_snapshot);
+    xSemaphoreGive(s_lvgl_mux);
+  }
+}
+
 }  // namespace
 
 void setup() {
@@ -460,9 +485,6 @@ void setup() {
 #endif
   ui_init(&actions);
 
-  build_snapshot(&s_snapshot);
-  ui_update(&s_snapshot);
-
   if (s_display != nullptr) {
     lv_refr_now(s_display);
     board_ws7_backlight(true);
@@ -472,20 +494,25 @@ void setup() {
   SS_LOGI("boot", "ready: %s transport, %d position capacity",
           can_transport_is_mock() ? "mock" : "TWAI",
           config_store_capacity());
+
+  /* Start the snapshot task: keeps SPIFFS reads + node iteration off the
+   * main loop / touch path so the GT911 I2C bus is never starved.  The
+   * stack only holds build_snapshot()'s locals; the snapshot is static. */
+  s_lvgl_mux = xSemaphoreCreateMutex();
+  if (s_lvgl_mux == nullptr ||
+      xTaskCreate(snapshot_task, "snapshot", 4096, nullptr, 1, nullptr) !=
+          pdPASS) {
+    SS_LOGE("boot", "snapshot task not started");
+  }
 }
 
 void loop() {
+  if (s_lvgl_mux != nullptr) xSemaphoreTake(s_lvgl_mux, portMAX_DELAY);
   lv_task_handler();
+  if (s_lvgl_mux != nullptr) xSemaphoreGive(s_lvgl_mux);
   commission_poll();
   app_watchdog_poll();
   app_watchdog_kick(SS_WATCH_ALL);
-
-  const uint32_t now = millis();
-  if ((uint32_t)(now - s_last_ui_ms) >= 100u) {
-    s_last_ui_ms = now;
-    build_snapshot(&s_snapshot);
-    ui_update(&s_snapshot);
-  }
 
   delay(5);
 }

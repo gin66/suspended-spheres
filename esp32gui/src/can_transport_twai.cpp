@@ -2,17 +2,6 @@
 
 #ifndef SS_CAN_MOCK
 
-#include <Arduino.h>
-#include <driver/twai.h>
-#include <esp_heap_caps.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
-
-#include <cstring>
-
-#include "app_log.h"
-#include "board_ws7.h"
-
 #ifndef SS_CAN_TX_GPIO
 #define SS_CAN_TX_GPIO 20
 #endif
@@ -20,11 +9,25 @@
 #define SS_CAN_RX_GPIO 19
 #endif
 
+#include <Arduino.h>
+#include <driver/twai.h>
+#include <esp_heap_caps.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
+#include <freertos/task.h>
+
+#include <cstring>
+
+#include "app_log.h"
+#include "board_ws7.h"
+
 namespace {
 ss_can_stats_t s_stats;
 ss_can_rx_fn s_cb = nullptr;
 void *s_ctx = nullptr;
-TaskHandle_t s_task = nullptr;
+TaskHandle_t s_rx_task = nullptr;
+TaskHandle_t s_worker_task = nullptr;
+QueueHandle_t s_rx_queue = nullptr;
 volatile bool s_running = false;
 uint32_t s_last_recovery_ms = 0;
 
@@ -40,11 +43,10 @@ void refresh_status() {
   s_stats.bus_off = (info.state == TWAI_STATE_BUS_OFF);
 }
 
-void can_rx_task(void *) {
-  /* The task outlives a stop/start cycle. It only touches TWAI while
-   * s_running is true, so can_transport_stop() can uninstall the driver
-   * without deleting and later recreating a task (heap is tight after the
-   * LVGL UI is built). */
+/* Lightweight RX task: only calls twai_receive() and pushes frames to a
+ * queue.  All callback processing (logging, node lookup, commission) happens
+ * in can_rx_worker_task() which has a much larger stack. */
+static void can_rx_task(void *) {
   while (true) {
     if (!s_running) {
       vTaskDelay(pdMS_TO_TICKS(20));
@@ -60,7 +62,11 @@ void can_rx_task(void *) {
         std::memcpy(f.data, msg.data, f.len);
         f.timestamp_ms = millis();
         s_stats.rx_frames++;
-        if (s_cb != nullptr) s_cb(&f, s_ctx);
+        /* Non-blocking push: drop frames if the worker queue is full.
+         * This keeps the RX task's stack footprint tiny. */
+        if (s_rx_queue != nullptr) {
+          xQueueSendToBack(s_rx_queue, &f, 0);
+        }
       }
       refresh_status();
     } else {
@@ -78,6 +84,17 @@ void can_rx_task(void *) {
           }
         }
       }
+    }
+  }
+}
+
+/* Worker task: dequeues frames and calls all registered callbacks.
+ * Has a large stack so logging and node lookup never overflow. */
+static void can_rx_worker_task(void *) {
+  ss_can_frame_t f;
+  while (true) {
+    if (xQueueReceive(s_rx_queue, &f, pdMS_TO_TICKS(50)) == pdPASS) {
+      if (s_cb != nullptr) s_cb(&f, s_ctx);
     }
   }
 }
@@ -127,16 +144,40 @@ bool can_transport_start(uint32_t bitrate, ss_can_rx_fn cb, void *ctx) {
   s_running = true;
   s_stats.running = true;
   s_last_recovery_ms = 0;
-  if (s_task == nullptr) {
+  s_rx_queue = xQueueCreate(64, sizeof(ss_can_frame_t));
+  if (s_rx_queue == nullptr) {
+    SS_LOGE("can", "CAN RX queue creation failed");
+    s_running = false;
+    s_stats.running = false;
+    twai_stop();
+    twai_driver_uninstall();
+    return false;
+  }
+  if (s_rx_task == nullptr) {
     SS_LOGI("can", "starting RX task: internal free=%u largest=%u",
             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
-    if (xTaskCreatePinnedToCore(can_rx_task, "can_rx", 4096, nullptr, 5,
-                                &s_task, 0) != pdPASS) {
+    if (xTaskCreatePinnedToCore(can_rx_task, "can_rx", 2048, nullptr, 5,
+                                &s_rx_task, 0) != pdPASS) {
       SS_LOGE("can", "CAN RX task creation failed");
       s_running = false;
       s_stats.running = false;
-      s_task = nullptr;
+      s_rx_task = nullptr;
+      vQueueDelete(s_rx_queue);
+      s_rx_queue = nullptr;
+      twai_stop();
+      twai_driver_uninstall();
+      return false;
+    }
+    TaskHandle_t worker = nullptr;
+    if (xTaskCreatePinnedToCore(can_rx_worker_task, "can_rxw", 4096,
+                                nullptr, 5, &worker, 0) != pdPASS) {
+      SS_LOGE("can", "CAN RX worker task creation failed");
+      s_running = false;
+      s_stats.running = false;
+      s_rx_task = nullptr;
+      vQueueDelete(s_rx_queue);
+      s_rx_queue = nullptr;
       twai_stop();
       twai_driver_uninstall();
       return false;
@@ -156,6 +197,10 @@ void can_transport_stop(void) {
   twai_stop();
   twai_driver_uninstall();
   board_ws7_set_usb_mode(true);
+  if (s_rx_queue != nullptr) {
+    vQueueDelete(s_rx_queue);
+    s_rx_queue = nullptr;
+  }
   SS_LOGI("can", "TWAI stopped; GPIO 19/20 returned to USB");
 }
 
