@@ -25,7 +25,8 @@ void begin() {
 
     for (uint8_t i = 0; i < board::kDriveCount; i++) {
         const board::DrivePins& pins = board::kDrives[i];
-        pinMode(pins.diag, INPUT);
+        // The official Klipper config uses ^gpio13..15/12, i.e. a pull-up.
+        pinMode(pins.diag, INPUT_PULLUP);
 
         axes[i] = engine.stepperConnectToPin(pins.step);
         if (axes[i] == nullptr) {
@@ -33,7 +34,10 @@ void begin() {
         }
         axes[i]->setDirectionPin(pins.dir);
         axes[i]->setEnablePin(pins.en, board::kEnableActiveLow);
-        axes[i]->setAutoEnable(true);
+        // A suspended ball is held by current, not by a brake. Auto-enable
+        // would drop the driver after the auto-disable delay, so outputs stay
+        // enabled explicitly until a caller disables them.
+        axes[i]->setAutoEnable(false);
         axes[i]->setSpeedInHz(1000);
         axes[i]->setAcceleration(500);
         axes[i]->disableOutputs();
@@ -47,16 +51,21 @@ FastAccelStepper* axis(uint8_t index) {
     return axes[index];
 }
 
+void setAxisEnabled(uint8_t index, bool enabled) {
+    FastAccelStepper* stepper = axis(index);
+    if (stepper == nullptr) {
+        return;
+    }
+    if (enabled) {
+        stepper->enableOutputs();
+    } else {
+        stepper->disableOutputs();
+    }
+}
+
 void setEnabled(bool enabled) {
     for (uint8_t i = 0; i < board::kDriveCount; i++) {
-        if (axes[i] == nullptr) {
-            continue;
-        }
-        if (enabled) {
-            axes[i]->enableOutputs();
-        } else {
-            axes[i]->disableOutputs();
-        }
+        setAxisEnabled(i, enabled);
     }
 }
 
@@ -80,6 +89,15 @@ bool move(uint8_t index, int32_t steps) {
         return false;
     }
     return stepper->move(steps) == MOVE_OK;
+}
+
+bool run(uint8_t index, bool forward) {
+    FastAccelStepper* stepper = axis(index);
+    if (stepper == nullptr) {
+        return false;
+    }
+    MoveResultCode rc = forward ? stepper->runForward() : stepper->runBackward();
+    return rc == MOVE_OK;
 }
 
 void stop(uint8_t index) {

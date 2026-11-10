@@ -57,7 +57,7 @@ is 50 ms.
 
 **Layouts.** Assert the tables that already exist. Do not restate them here.
 
-- Sync frame, 10 Hz status frame, and the version-1 `.anim.json` schema,
+- Sync frame, 1 Hz status frame, and the version-1 `.anim.json` schema,
   including `patterns/golden_sine.anim.json`: whitepaper §4.5 and §6.9.
 - `ASK`, `DISC`, and `ASSIGN`: `Fly_Micro4_addressing.md` §3. The board ID
   is volatile. The host map `(uuid, axis) → position` is not on the wire.
@@ -228,8 +228,9 @@ Whitepaper §4.2, §4.3, §4.5. Addressing §3.
 - [x] **P4** The sync frame matches the whitepaper §4.5 byte table. A sync
   ID is field 0, type 2. After `t_us_low` wraps, the reconstructed `int64`
   time gains `2^32` µs.
-- [x] **P5** The 10 Hz status frame matches the whitepaper §4.5 byte table.
-  It carries no position and no velocity.
+- [x] **P5** The 1 Hz status frame (also sent immediately on a state or
+  fault change) matches the whitepaper §4.5 byte table. It carries no
+  position and no velocity.
 - [x] **P6** Command, home, and parameter frames are types 4, 5, and 6.
   A motion decoder ignores them. Homing bytes are not part of the motion
   sample buffer.
@@ -278,8 +279,8 @@ assumption fails here.
   | 4 | 11 ms | 2 727 | 35 % |
   | 4 | 15 ms | 2 000 | 26 % |
 
-- [x] **B3** Adding a 50 Hz sync and 30 × 10 Hz status (350 frames/s)
-  raises those loads to 57, 52, 39, 44, 40, and 31 %.
+- [x] **B3** Adding a 50 Hz sync and 30 × 1 Hz status (80 frames/s)
+  raises those loads to 53, 48, 36, 40, 36, and 27 %.
 - [x] **B4** A 10 ms *message* period (12 000 frames/s) is 156 % and is
   reported as over budget. The limit used by the pattern checker is 60 %.
 - [x] **B5** 120 motion frames occupy 15.6 ms of bus time.

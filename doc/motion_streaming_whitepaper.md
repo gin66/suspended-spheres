@@ -209,17 +209,17 @@ after framing overhead. Practical designs should stay below ~60–70 % load.
 
 | Mode | `Δt` (ms) | Period (ms) | Per-motor rate (Hz) | Frames/s (120 motors) | Bus load @ 1 Mbit/s | With sync/status |
 |------|-----------|-------------|---------------------|-----------------------|---------------------|------------------|
-| **N=3 + speed** | **10** | 30 | 33.3 | **4,000** | **52 %** | **57 %** |
-| N=3 + speed | 11 | 33 | 30.3 | 3,636 | 47 % | 52 % |
-| N=3 + speed | 15 | 45 | 22.2 | 2,667 | 35 % | 39 % |
-| **N=4 positions** | **10** | 40 | 25.0 | **3,000** | **39 %** | **44 %** |
-| N=4 positions | 11 | 44 | 22.7 | 2,727 | 35 % | 40 % |
-| N=4 positions | 15 | 60 | 16.7 | 2,000 | 26 % | 31 % |
+| **N=3 + speed** | **10** | 30 | 33.3 | **4,000** | **52 %** | **53 %** |
+| N=3 + speed | 11 | 33 | 30.3 | 3,636 | 47 % | 48 % |
+| N=3 + speed | 15 | 45 | 22.2 | 2,667 | 35 % | 36 % |
+| **N=4 positions** | **10** | 40 | 25.0 | **3,000** | **39 %** | **40 %** |
+| N=4 positions | 11 | 44 | 22.7 | 2,727 | 35 % | 36 % |
+| N=4 positions | 15 | 60 | 16.7 | 2,000 | 26 % | 27 % |
 | 10 ms *message* (counterfactual) | 10 | 10 | 100 | 12,000 | 156 % | — |
 
 `Δt` is the free variable. At `N=3`, `Δt=10 ms` is 52 % before overhead,
 `Δt=11 ms` is 47 %, `Δt=15 ms` is 35 %. `N=4` at `Δt=10 ms` is 39 %. The
-“with sync/status” column adds a 50 Hz sync and 30 × 10 Hz status (350
+“with sync/status” column adds a 50 Hz sync and 30 × 1 Hz status (80
 frames/s). Stay below ~60 %: `N=3`/`Δt=10` is workable but the tightest; a
 larger `Δt` or `N=4` gives margin. Increasing `Δt` reduces bus and CPU load but
 coarsens the trajectory sampling; the node’s cubic interpolation and the slow
@@ -402,7 +402,8 @@ node owns, and how a board is commissioned are in `Fly_Micro4_addressing.md`.
   start of each `N·Δt` window gives the nominal `T` for the following motion
   frames. Identifiers stay 11-bit. Nodes timestamp the start-of-frame with a
   free-running 1 MHz timer and fit offset/rate.
-- **Status** (node → master, 10 Hz). One 8-byte frame, type 3, little-endian:
+- **Status** (node → master, 1 Hz, plus immediately on a state or fault
+  change). One 8-byte frame, type 3, little-endian:
 
   | Offset | Type | Field |
   |--------|------|--------|
@@ -413,7 +414,7 @@ node owns, and how a board is commissioned are in `Fly_Micro4_addressing.md`.
   | 7 | `uint8` | `last_seq`, low 8 bits of the last accepted sync `seq` |
 
   On request or on failure, a separate command response carries per-ball
-  position and velocity (`FR-MON-001`). The 10 Hz frame never does.
+  position and velocity (`FR-MON-001`). The status frame never does.
 - **Health / temperature** (node → master, 1 Hz). One 8-byte frame, type 14,
   field = the answering board ID (0–29; field 127 is invalid). Little-endian:
 
@@ -429,16 +430,16 @@ node owns, and how a board is commissioned are in `Fly_Micro4_addressing.md`.
   | 7 | `uint8` | reserved, 0 |
 
   The frame is periodic telemetry, not an alarm path. A TMC over-temperature
-  pre-warning asserts DIAG immediately; the DIAG handler and the 10 Hz status
-  frame carry the fault. The health frame is for logging, trend and the
+  pre-warning asserts DIAG immediately; the DIAG handler and an immediate
+  status update carry the fault. The health frame is for logging, trend and the
   panel’s thermal display. It is sent only after the board has a board ID.
   Nodes phase-offset the 1 Hz period by `33 ms × board_id` so 30 health frames
   do not arrive as a burst. The detailed `DRV_STATUS` is read on demand or
   logged when an `otpw`/`ot` bit changes; this frame carries the
-  pre-warning/shutdown masks, not the threshold bits. The current node
-  firmware fills `mcu_temp_c` and `diag_mask`; `otpw_mask`, `ot_mask` and
-  `valid_mask` bit 3 stay zero/clear until the TMC2209 UART driver reads
-  `DRV_STATUS`. The payload does not change when that driver lands.
+  pre-warning/shutdown masks, not the threshold bits. The node firmware
+  fills `mcu_temp_c`, `diag_mask`, `otpw_mask`, `ot_mask` and `valid_mask`
+  bit 3 from the TMC2209 UART driver (§5.6.1). `DRV_STATUS` is read at boot
+  and on a DIAG change, not periodically during motion.
 - **Version query / response** (types 12/13). The master sends an 8-byte
   `VERSION_REQ` of zeros to field 127 (every board) or to one board. Each
   board answers `VERSION_RSP` in the same 8-byte layout, little-endian:
@@ -482,16 +483,16 @@ carry it, and per-motor or per-node frames already give natural grouping.
 ### 4.6 Bus budget
 
 Total bus budget for 120 motors. Motion frames are `120/(N·Δt)`; add the 50 Hz
-sync, 30 × 10 Hz status and 30 × 1 Hz health (380 frames/s).
+sync, 30 × 1 Hz status and 30 × 1 Hz health (110 frames/s).
 
 | Mode | `Δt` (ms) | Motion frames/s | Total frames/s | Bus load @ 1 Mbit/s |
 |------|-----------|-----------------|----------------|---------------------|
-| N=3 + speed | 10 | 4,000 | ~4,380 | **57 %** |
-| N=3 + speed | 11 | 3,636 | ~4,016 | **52 %** |
-| N=3 + speed | 15 | 2,667 | ~3,047 | **40 %** |
-| N=4 positions | 10 | 3,000 | ~3,380 | **44 %** |
-| N=4 positions | 11 | 2,727 | ~3,107 | **40 %** |
-| N=4 positions | 15 | 2,000 | ~2,380 | **31 %** |
+| N=3 + speed | 10 | 4,000 | ~4,110 | **53 %** |
+| N=3 + speed | 11 | 3,636 | ~3,746 | **49 %** |
+| N=3 + speed | 15 | 2,667 | ~2,777 | **36 %** |
+| N=4 positions | 10 | 3,000 | ~3,110 | **40 %** |
+| N=4 positions | 11 | 2,727 | ~2,837 | **37 %** |
+| N=4 positions | 15 | 2,000 | ~2,110 | **27 %** |
 
 At ~130 bits/frame. Keep the sustained target below 60 %: `N=3`/`Δt=10` is the
 tightest; `Δt=11` or `N=4` gives margin. If the design adds per-frame
@@ -783,7 +784,7 @@ StepperTask (FastAccelStepper internal, ~4 ms)
   └─ manage queues / PIO FIFOs
 
 Housekeeping (10–50 Hz)
-  ├─ status frame (10 Hz), health frame (1 Hz), DRV_STATUS
+  ├─ status frame (1 Hz + on change), health frame (1 Hz), DRV_STATUS
   ├─ sync fit/PLL update
   └─ watchdog kick
 ```
@@ -834,6 +835,102 @@ Housekeeping (10–50 Hz)
   pause on reversal (hundreds of µs). At 1.2 m/s that is 0.6–1.2 mm of delayed
   motion; keep reversals rare and account for the pause in the trajectory
   verification.
+
+#### 5.6.1 Bring-up implementation and bench tuning
+
+The firmware implements §5.6 in `rp2040/src/tmc2209.cpp`. All four `PDN_UART`
+pins share GPIO9, and both PIO blocks are fully allocated (can2040 and four
+FastAccelStepper state machines), so the core's PIO-based `SoftwareSerial`
+cannot be used. GPIO9 is a UART1 **RX** pin, not a TX pin, so the `Stream`
+bit-bangs the request through SIO and then switches the pin mux to UART1 RX;
+the hardware receiver and its FIFO capture the 8-byte reply for TMCStepper.
+RXE is disabled while TX drives the line, and the RX FIFO/error flags are
+drained before it is re-enabled. No PIO state machine or background UART ISR
+is needed. The TMCStepper commit is pinned in `rp2040/platformio.ini`.
+
+The UART address is per drive, not the drive index: the official Klipper
+config uses 0, 1, 3, 2 for Drive0–Drive3, because Z is Drive3 and E0 is Drive2
+(`boards/Fly-Micro4/Fly_Micro4_pinmap.md` §1). The firmware takes the address
+from each drive's pin table.
+
+Boot order follows `controller_analysis.md` §6.1: drive all `ENN` high, read
+`GCONF` and `OTP_READ`, reject a driver with OTP0.6 = 1, force `GCONF.1 = 0`
+and verify it, then write `GCONF` with `I_scale_analog = 0`,
+`en_spreadcycle = 0`, `pdn_disable = 1`, `mstep_reg_select = 1` and
+`multistep_filt = 1`. The chopper is TOFF = 4, MRES = 4 (1/16) with
+interpolation, `PWMCONF = 0xC10D0024`, `TPWMTHRS = 0`,
+`TCOOLTHRS = 0xFFFFF`, `SGTHRS = 40`. Every key register is read back; a
+driver that fails any check is left disabled, and only drivers that pass are
+enabled by the node.
+
+The default is 300 mA RMS run and hold at `RSENSE = 0.110 Ω`. TMCStepper's
+`rms_current()` selects VSENSE and the IRUN/IHOLD codes. Hold equals run so
+the ball weight is still held with margin; do not reduce it without measuring
+the holding margin. At `RSENSE = 0.110 Ω` the high-sensitivity current step is
+about 30 mA, so the codes nearest 300 mA are 275 mA (`IRUN = 8`, selected by
+TMCStepper) and 306 mA (`IRUN = 9`). The bench console caps the run-current
+request at 800 mA, matching the official reference; this is above the
+250–300 mA design point and is only an experiment limit, not an operating
+recommendation.
+
+**Bench console.** USB serial accepts the following commands
+(`rp2040/src/bench_console.cpp`). It is a bring-up tool, not an operator
+interface, and it can command motion.
+
+| Command | Meaning |
+|---------|---------|
+| `status [axis]` | Read and print `DRV_STATUS`, `SG_RESULT`, `TSTEP`, currents and DIAG |
+| `cur <axis> <run_ma> [hold_ma]` | Set run/hold current and read back |
+| `sg <axis> <0..255>` | Set `SGTHRS` |
+| `tcool <axis> <value>` | Set the 20-bit `TCOOLTHRS` |
+| `micro <axis> <2..256> [0\|1]` | Set microsteps and interpolation |
+| `chop <axis> <hex>` / `pwm <axis> <hex>` | Raw CHOPCONF / PWMCONF; VSENSE is preserved |
+| `raw <axis> <reg> [value]` | Register access in hex; OTP, `VACTUAL`, `IHOLD_IRUN` and unsafe GCONF bits are refused |
+| `move <axis> <steps> <hz>` | Finite move |
+| `run <axis> <hz> [0\|1]` | Continuous move, 1 = forward |
+| `stop [axis]`, `enable <axis> <0\|1>`, `diag` | Stop, enable outputs, print DIAG pins |
+| `reinit` | Stop, re-run the TMC bring-up, enable the drivers that pass |
+| `quiet [on\|off]` | Silence the periodic CAN statistics and command logs; CAN traffic is unchanged |
+| `selftest` | UART1 RX internal loopback, then SIO readback of the bit-banged TX pad |
+| `scan` | Read `GCONF` at UART addresses 0–3 to find which strap addresses answer |
+| `bbprobe [addr]` | Pure bit-banged GCONF read: one continuous TX bit stream, then bit-banged RX; bypasses TMCStepper |
+
+`raw` is for register diagnosis, not current control: use `cur` so the 800 mA
+cap and the VSENSE selection apply. The console can still command motion, so
+keep the bench clear of the mechanism.
+
+`reinit` is the bring-up path after the motor supply is applied: the Fly-Micro4
+has no reset button, and unplugging USB loses the serial log. `quiet on` keeps
+the console readable. `selftest` separates the two UART halves: the internal
+loopback proves the UART1 RX/FIFO/baud path, and the SIO readback proves the
+bit-banged TX pad. If both pass and `GCONF read failed` remains, the fault is
+external (TMC supply, PDN bus, address, or wiring). None of these commands
+changes the CAN protocol.
+
+`bbprobe` is the pure bit-bang path: no TMCStepper and no UART1. It keeps the
+SIO output enabled across the whole datagram, so the stop bit of one byte is
+immediately followed by the start bit of the next, and releases the pad only
+after the final stop bit. The older per-byte bit-bang released the pad after
+every byte; the board's pull-down on `PDN_UART` then pulls the line low between
+bytes, which can break the TMC auto-baud and the power-down state. `bbprobe`
+also bit-bangs the reply: it waits for the rising edge of the `0xFF` sync and
+samples 8N1 from that edge. If `selftest` reports `idle=0`, the line is low even
+while idle and a pull-up is required before UART can work at all.
+
+**StallGuard calibration.** At the intended homing current, run the axis free
+with `run <axis> <hz> 1` and sample `SG_RESULT` with `status <axis>`. Then
+block the axis and sample again. `SG_RESULT` falls with load and high values
+mean light load; `SGTHRS` sets where DIAG asserts (higher is less sensitive,
+0 disables StallGuard). Sweep `SGTHRS` at each current step, because the
+signal amplitude scales with current. The DIAG path is also the fault path:
+it asserts on overtemperature pre-warning, short-to-GND and open load, so a
+DIAG read must be interpreted with `DRV_STATUS`, not assumed to be a stall.
+
+The node reads `DRV_STATUS` at boot and on a DIAG change only; it does not
+poll UART in the motion loop. The 1 Hz health frame carries the resulting
+`otpw`/`ot` masks. On-demand `status` reads block the CPU for tens of
+milliseconds per driver, which is acceptable at the bench but must not be
+used while motion is playing.
 
 ### 5.7 Homing and position reference
 
@@ -1010,7 +1107,8 @@ rp2040/                       # firmware-only
 │   ├── status_led.cpp/.h     # D5/GPIO8 status patterns (§5.8.1)
 │   ├── motion_node.cpp/.h    # sample buffers, interpolator, chunker
 │   ├── homing.cpp/.h
-│   ├── tmc2209.cpp/.h
+│   ├── tmc2209.cpp/.h        # UART, register setup, current/StallGuard
+│   ├── bench_console.cpp/.h  # USB-serial current/StallGuard tuning
 │   └── config_store.cpp/.h
 └── test/
     └── test_motion_core.cpp  # on-target self-test for W0 bench

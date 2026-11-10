@@ -73,6 +73,9 @@ All technical Markdown belongs in `doc/`. Only `README.md` and `AGENTS.md` sit a
   cd rp2040 && pio run
   ```
   PlatformIO finds the shared core through `lib_extra_dirs = ../lib`; do not copy `motion_core` into `rp2040/`.
+- **TMC2209 bring-up console.** USB serial on the Fly-Micro4 accepts `help`.
+  Current and StallGuard commands are in `doc/motion_streaming_whitepaper.md`
+  §5.6.1. It can command motion and is a bench tool, not a production interface.
 - **Show-controller firmware (PlatformIO).** `esp32gui/` is the Waveshare 7"
   panel. It builds with the mock CAN transport because the bus is not wired:
   ```sh

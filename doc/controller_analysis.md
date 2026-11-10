@@ -258,7 +258,7 @@ The TMC2209 can measure coil current either across external sense resistors or a
 | Internal RDSon | Tied directly to GND | `RREF` from `5VOUT` (8) to VREF, `2.2 µF` VREF→GND | `1` |
 
 - **Decision:** both boards fit external sense resistors, so the driver stays in external mode. Forcing `internal_Rsense = 1` on them would drive VREF to GND internally and expect an `RREF` path they do not have, so the coil current would be wrong. Do not program `otp0.6` on the Fly-Micro4 or the carrier: OTP is irreversible, and the external resistors are the chosen current path.
-- **Firmware guarantee:** before the first enable, drive every `ENN` high (disabled) and, over the TMC UART, read `GCONF` and `OTP_READ`, force `GCONF.1 = 0`, write it back and require the read-back to match; require `OTP_READ` bit 6 = 0. Only then write the chopper/current registers, verify them, and pull `ENN` low. Repeat every boot; never rely on the OTP default.
+- **Firmware guarantee:** before the first enable, drive every `ENN` high (disabled) and, over the TMC UART, read `GCONF` and `OTP_READ`, force `GCONF.1 = 0`, write it back and require the read-back to match; require `OTP_READ` bit 6 = 0. Only then write the chopper/current registers, verify them, and pull `ENN` low. Repeat every boot; never rely on the OTP default. The node implements this in `rp2040/src/tmc2209.cpp`; a driver that fails is left disabled (`motion_streaming_whitepaper.md` §5.6.1).
 
 The datasheet's "set `otp_internalRsense = 1` before enabling the driver" note (§3.2, Rev. 1.09) applies only to the resistor-less RDSon circuit; it must not be applied to these boards.
 

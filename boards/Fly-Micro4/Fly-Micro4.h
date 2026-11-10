@@ -42,13 +42,15 @@
 #define DRIVE2_DIR_PIN          25
 #define DRIVE2_EN_PIN           27
 #define DRIVE2_DIAG_PIN         15
-#define DRIVE2_UART_ADDRESS     2
+/* Official Klipper config: E0 = Drive2, uart_address 3. */
+#define DRIVE2_UART_ADDRESS     3
 
 #define DRIVE3_STEP_PIN         23
 #define DRIVE3_DIR_PIN          22
 #define DRIVE3_EN_PIN           24
 #define DRIVE3_DIAG_PIN         12
-#define DRIVE3_UART_ADDRESS     3
+/* Official Klipper config: Z = Drive3, uart_address 2. */
+#define DRIVE3_UART_ADDRESS     2
 
 #define DRIVE_COUNT             4
 

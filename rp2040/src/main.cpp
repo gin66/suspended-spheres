@@ -9,19 +9,22 @@
  *
  * Core 0 decodes COMMAND (type 4) and HOME (type 5) frames. Commands drive
  * the four axes through stepper_axes; a broadcast REIDENTIFY drops the RAM
- * board ID so a rebooted master can find the board again. StallGuard homing
- * is still a stub because it needs the TMC2209 UART configuration.
+ * board ID so a rebooted master can find the board again. The TMC2209s are
+ * configured over UART at boot; the StallGuard homing state machine itself is
+ * still a stub.
  */
 
 #include <Arduino.h>
 #include <math.h>
 #include <pico/stdlib.h>
 
+#include "bench_console.h"
 #include "board_pins.h"
 #include "can_node.h"
 #include "motion_core.h"
 #include "status_led.h"
 #include "stepper_axes.h"
+#include "tmc2209.h"
 
 namespace {
 
@@ -33,6 +36,7 @@ int s_status_board_id = -1;
 uint32_t s_next_health_ms = 0;
 int s_health_board_id = -1;
 uint8_t s_health_seq = 0;
+uint8_t s_last_status_state = 0xFF;
 
 void send_status(int board_id) {
     mc_status_t st = {};
@@ -58,6 +62,11 @@ void send_health(int board_id) {
     if (t > 127.0f) t = 127.0f;
     h.mcu_temp_c = (int8_t)lroundf(t);
     h.valid_mask = MC_HEALTH_VALID_MCU;
+    h.otpw_mask = tmc2209::otpwMask();
+    h.ot_mask = tmc2209::otMask();
+    if (tmc2209::statusValid()) {
+        h.valid_mask |= MC_HEALTH_VALID_DRV_STATUS;
+    }
 
     for (uint8_t i = 0; i < board::kDriveCount; i++) {
         if (digitalRead(board::kDrives[i].diag)) {
@@ -120,21 +129,26 @@ void jog(bool up, uint8_t mask, uint16_t distance_mm, uint16_t speed_mm_s,
         if ((mask & (uint8_t)(1u << i)) == 0) {
             continue;
         }
+        if (!tmc2209::ready(i)) {
+            continue;
+        }
         stepper_axes::setSpeed(i, hz);
         stepper_axes::setAcceleration(i, kJogAccelStepsS2);
         stepper_axes::move(i, up ? steps : -steps);
     }
 
-    Serial.print("command: ");
-    Serial.print(up ? "UP" : "DOWN");
-    Serial.print(" mask=0x");
-    Serial.print((unsigned)mask, HEX);
-    Serial.print(" steps=");
-    Serial.print(steps);
-    Serial.print(" hz=");
-    Serial.print(hz);
-    Serial.print(" seq=");
-    Serial.println((unsigned)seq);
+    if (bench_console::logs_enabled()) {
+        Serial.print("command: ");
+        Serial.print(up ? "UP" : "DOWN");
+        Serial.print(" mask=0x");
+        Serial.print((unsigned)mask, HEX);
+        Serial.print(" steps=");
+        Serial.print(steps);
+        Serial.print(" hz=");
+        Serial.print(hz);
+        Serial.print(" seq=");
+        Serial.println((unsigned)seq);
+    }
 }
 
 void handle_frame(const can_node::Frame& frame) {
@@ -156,7 +170,9 @@ void handle_frame(const can_node::Frame& frame) {
         if (cmd.action == MC_CMD_STOP) {
             stop_axes(cmd.axis_mask);
             s_node_state = MC_STATUS_IDLE;
-            Serial.println("command: STOP");
+            if (bench_console::logs_enabled()) {
+                Serial.println("command: STOP");
+            }
         } else if (cmd.action == MC_CMD_UP) {
             jog(true, cmd.axis_mask, cmd.distance_mm, cmd.speed_mm_s, cmd.seq);
         } else if (cmd.action == MC_CMD_DOWN) {
@@ -170,9 +186,11 @@ void handle_frame(const can_node::Frame& frame) {
         if (board < 0 || mc_board_accepts_id(board, id) == 0) {
             return;
         }
-        Serial.print("home: ignored, StallGuard homing is not implemented (mask=0x");
-        Serial.print((unsigned)mask, HEX);
-        Serial.println(")");
+        if (bench_console::logs_enabled()) {
+            Serial.print("home: ignored, StallGuard homing is not implemented (mask=0x");
+            Serial.print((unsigned)mask, HEX);
+            Serial.println(")");
+        }
     }
 }
 
@@ -190,18 +208,34 @@ void setup() {
 
     stepper_axes::begin();
 
+    const uint8_t tmc_ready = tmc2209::begin();
+    uint8_t axes_enabled = 0;
+    uint8_t axes_configured = 0;
+    for (uint8_t i = 0; i < board::kDriveCount; i++) {
+        if (stepper_axes::axis(i) != nullptr) {
+            axes_configured++;
+        }
+        const bool ready = (tmc_ready & (uint8_t)(1u << i)) != 0;
+        stepper_axes::setAxisEnabled(i, ready);
+        if (ready) {
+            axes_enabled++;
+        }
+    }
+    if (tmc_ready != (uint8_t)((1u << board::kDriveCount) - 1u)) {
+        s_node_state = MC_STATUS_FAULT;
+    }
+
     status_led::init();
     status_led::set(status_led::State::Boot);
     s_boot_start_ms = millis();
+    bench_console::begin();
 
-    uint8_t axes_ready = 0;
-    for (uint8_t i = 0; i < board::kDriveCount; i++) {
-        if (stepper_axes::axis(i) != nullptr) {
-            axes_ready++;
-        }
-    }
     Serial.print("Fly-Micro4: CAN core=1, stepper axes on PIO0=");
-    Serial.println(axes_ready);
+    Serial.print(axes_configured);
+    Serial.print(", TMC ready=0x");
+    Serial.print(tmc_ready, HEX);
+    Serial.print(" enabled=");
+    Serial.println(axes_enabled);
 }
 
 void setup1() {
@@ -221,27 +255,61 @@ void loop() {
          * outputs enabled so a partly wound ball is held, not dropped. */
         stepper_axes::stopAll();
         s_node_state = MC_STATUS_IDLE;
-        Serial.println("command: re-identify; axes stopped");
+        if (bench_console::logs_enabled()) {
+            Serial.println("command: re-identify; axes stopped");
+        }
     }
 
     uint32_t now = millis();
+    tmc2209::poll(now);
+    bench_console::poll();
+
+    if (bench_console::take_reinit_request()) {
+        stepper_axes::stopAll();
+        const uint8_t ready = tmc2209::begin();
+        uint8_t enabled = 0;
+        for (uint8_t i = 0; i < board::kDriveCount; i++) {
+            const bool ok = (ready & (uint8_t)(1u << i)) != 0;
+            stepper_axes::setAxisEnabled(i, ok);
+            if (ok) {
+                enabled++;
+            }
+        }
+        if (ready == (uint8_t)((1u << board::kDriveCount) - 1u)) {
+            s_node_state = MC_STATUS_IDLE;
+            status_led::clear_fault();
+        } else {
+            s_node_state = MC_STATUS_FAULT;
+        }
+        Serial.print("reinit: TMC ready=0x");
+        Serial.print(ready, HEX);
+        Serial.print(" enabled=");
+        Serial.println(enabled);
+    }
+
     const int board_id = can_node::assigned_board_id();
     if (board_id >= 0) {
         if (board_id != s_status_board_id) {
             s_status_board_id = board_id;
-            s_next_status_ms = now;
+            s_last_status_state = 0xFF;
+            // 1 Hz heartbeat, phase-offset so 30 nodes do not burst.
+            s_next_status_ms = now + (uint32_t)(board_id * 33) % 1000u;
         }
-        if ((int32_t)(now - s_next_status_ms) >= 0) {
+        if (s_node_state != s_last_status_state ||
+            (int32_t)(now - s_next_status_ms) >= 0) {
             send_status(board_id);
-            s_next_status_ms += 100u;
+            s_last_status_state = s_node_state;
+            s_next_status_ms += 1000u;
             if ((int32_t)(now - s_next_status_ms) >= 0) {
-                s_next_status_ms = now + 100u;
+                s_next_status_ms = now + 1000u;
             }
         }
 
         if (board_id != s_health_board_id) {
             s_health_board_id = board_id;
-            s_next_health_ms = now + 1000u + (uint32_t)board_id * 33u;
+            // Offset 500 ms from the status phase so the two 1 Hz frames do
+            // not collide on the bus.
+            s_next_health_ms = now + 500u + (uint32_t)board_id * 33u;
         }
         if ((int32_t)(now - s_next_health_ms) >= 0) {
             send_health(board_id);
@@ -268,7 +336,7 @@ void loop() {
     status_led::tick(millis());
 
     static uint32_t next_report_ms = 0;
-    if ((int32_t)(now - next_report_ms) >= 0) {
+    if (bench_console::logs_enabled() && (int32_t)(now - next_report_ms) >= 0) {
         next_report_ms = now + 1000;
         can_node::Stats s = can_node::stats();
         Serial.print("can rx=");

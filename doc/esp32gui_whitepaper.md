@@ -294,7 +294,8 @@ position. The checked-in image still persists an 8-byte id; the move to the
 Each board sends the type-14 `HEALTH` frame from
 `motion_streaming_whitepaper.md` §4.5 at 1 Hz once it has a board ID. The
 panel consumes it for display and logging; it is not the fault path. DIAG and
-the 10 Hz type-3 status frame remain the fast indication.
+the type-3 status frame (1 Hz heartbeat, sent immediately on a state or fault
+change) remain the fast indication.
 
 The node registry carries `mcu_temp_c`, `otpw_mask`, `ot_mask`, `diag_mask`,
 `ntc_t0_c`, `ntc_bed_c`, `valid_mask`, `health_seq` and `health_age_ms`.

@@ -15,12 +15,15 @@
 | STEP | GPIO6 | GPIO1 | GPIO26 | GPIO23 |
 | DIR | GPIO3 | GPIO0 | GPIO25 | GPIO22 |
 | EN (active low) | GPIO7 | GPIO2 | GPIO27 | GPIO24 |
-| TMC UART | GPIO9, addr 0 | GPIO9, addr 1 | GPIO9, addr 2 | GPIO9, addr 3 |
+| TMC UART | GPIO9, addr 0 | GPIO9, addr 1 | GPIO9, addr 3 | GPIO9, addr 2 |
 | DIAG | GPIO13 | GPIO14 | GPIO15 | GPIO12 |
 
 The official Klipper config maps printer axes as **X = Drive0, Y = Drive1,
 Z = Drive3, E0 = Drive2**. “Drive0–3” are the board labels; the X/Y/Z/E0 names
-are Klipper configuration choices.
+are Klipper configuration choices. The `uart_address` values in that config are
+therefore **0, 1, 3, 2** for Drive0–Drive3: the Z driver (Drive3) is address 2
+and the extruder driver (Drive2) is address 3. Do not assume the address equals
+the drive index.
 
 **All four DIAG are MCU-routed** (GPIO13, GPIO14, GPIO15, GPIO12). The official
 config uses Drive0/1 DIAG for X/Y sensorless homing and GPIO12 (Drive3 DIAG) as
@@ -28,6 +31,12 @@ the Z endstop input. Drive2 DIAG (GPIO15) is unused by the official config but
 is available. For 4-axis StallGuard homing, all four are usable; **GPIO12 is
 shared with the official Z endstop header**, so do not use it as both Drive3
 DIAG and a separate endstop.
+
+GPIO9 is one half-duplex wire shared by all four `PDN_UART` pins. GPIO9 is a
+UART1 RX pin, not a TX pin, and both PIO blocks are allocated (can2040 and
+four step generators), so the core's PIO `SoftwareSerial` cannot be used. The
+node firmware bit-bangs TX through SIO and switches the pad to UART1 RX for
+the reply. See `doc/motion_streaming_whitepaper.md` §5.6.1.
 
 ## 2. Other connectors
 
