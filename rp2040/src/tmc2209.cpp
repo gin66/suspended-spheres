@@ -116,6 +116,8 @@ uint8_t s_samples[(kCaptureSamplesMax + 7u) / 8u];
 tmc_uart_bits::CaptureReport s_capture = {};
 uint32_t s_capture_elapsed_us = 0;
 uint32_t s_capture_expected_us = 0;
+uint16_t s_mask_us = 0;
+uint32_t s_refresh_mask_us = 0;
 
 uint32_t s_irq = 0;
 bool s_irq_held = false;
@@ -214,6 +216,7 @@ void bb_tx_read(const uint8_t* data, size_t len) {
         cycles_now16() + (uint16_t)(kPreIdleBits * s_bit_cycles));
     s_irq = save_and_disable_interrupts();
     s_irq_held = true;
+    const uint16_t mask_start_us = us_raw16();
     // One start instant, one absolute grid: bit k ends at
     // start + (k+1)*bit_cycles. uint16_t sums are exact modulo 2^16 and the
     // signed decode inside wait_until_cycles16 only ever looks one bit
@@ -276,6 +279,8 @@ void bb_tx_read(const uint8_t* data, size_t len) {
     // After the read, drive the line high again instead of leaving it released.
     gpio_put(board::kTmcUartPin, 1);
     gpio_set_dir(board::kTmcUartPin, GPIO_OUT);
+    s_mask_us = (uint16_t)(us_raw16() - mask_start_us);
+    s_refresh_mask_us += s_mask_us;
     bb_release_irq();
 }
 
@@ -1265,6 +1270,7 @@ void refresh(uint8_t index) {
     if (index >= kDriverCount) {
         return;
     }
+    s_refresh_mask_us = 0;
     // Read registers independently: with the motor supply off, DRV_STATUS may
     // fail while the digital configuration registers still read back.
     uint32_t value = 0;
@@ -1578,6 +1584,14 @@ void printWriteOnlyLine(const char* name, uint32_t value) {
     printRegisterLine(name, true, value, true, value);
 }
 
+uint16_t lastMaskUs() {
+    return s_mask_us;
+}
+
+uint16_t lastRefreshMaskUs() {
+    return (uint16_t)s_refresh_mask_us;
+}
+
 void timeUart(uint8_t index, uint16_t n) {
     if (index >= kDriverCount) {
         return;
@@ -1588,12 +1602,16 @@ void timeUart(uint8_t index, uint16_t n) {
     uint32_t sg_min = 0xFFFFFFFFu;
     uint32_t sg_max = 0;
     uint32_t sg_sum = 0;
+    uint32_t sm_min = 0xFFFFFFFFu;
+    uint32_t sm_max = 0;
+    uint32_t sm_sum = 0;
     uint16_t sg_ok = 0;
     for (uint16_t i = 0; i < n; ++i) {
         uint32_t value = 0;
         const uint32_t start = micros();
         const bool ok = readDriverReg(index, kSgResult, &value);
         const uint32_t dt = micros() - start;
+        const uint16_t mask = lastMaskUs();
         if (dt < sg_min) {
             sg_min = dt;
         }
@@ -1601,6 +1619,13 @@ void timeUart(uint8_t index, uint16_t n) {
             sg_max = dt;
         }
         sg_sum += dt;
+        if (mask < sm_min) {
+            sm_min = mask;
+        }
+        if (mask > sm_max) {
+            sm_max = mask;
+        }
+        sm_sum += mask;
         if (ok) {
             sg_ok++;
         }
@@ -1608,10 +1633,14 @@ void timeUart(uint8_t index, uint16_t n) {
     uint32_t rf_min = 0xFFFFFFFFu;
     uint32_t rf_max = 0;
     uint32_t rf_sum = 0;
+    uint32_t rm_min = 0xFFFFFFFFu;
+    uint32_t rm_max = 0;
+    uint32_t rm_sum = 0;
     for (uint16_t i = 0; i < n; ++i) {
         const uint32_t start = micros();
         refresh(index);
         const uint32_t dt = micros() - start;
+        const uint16_t mask = lastRefreshMaskUs();
         if (dt < rf_min) {
             rf_min = dt;
         }
@@ -1619,6 +1648,13 @@ void timeUart(uint8_t index, uint16_t n) {
             rf_max = dt;
         }
         rf_sum += dt;
+        if (mask < rm_min) {
+            rm_min = mask;
+        }
+        if (mask > rm_max) {
+            rm_max = mask;
+        }
+        rm_sum += mask;
     }
     Serial.print("timeuart tmc");
     Serial.print(index);
@@ -1634,12 +1670,24 @@ void timeUart(uint8_t index, uint16_t n) {
     Serial.print(sg_ok);
     Serial.print("/");
     Serial.print(n);
+    Serial.print(" mask_us min=");
+    Serial.print(sm_min);
+    Serial.print(" mean=");
+    Serial.print(sm_sum / n);
+    Serial.print(" max=");
+    Serial.print(sm_max);
     Serial.print(" refresh_us min=");
     Serial.print(rf_min);
     Serial.print(" mean=");
     Serial.print(rf_sum / n);
     Serial.print(" max=");
-    Serial.println(rf_max);
+    Serial.print(rf_max);
+    Serial.print(" refresh_mask_us min=");
+    Serial.print(rm_min);
+    Serial.print(" mean=");
+    Serial.print(rm_sum / n);
+    Serial.print(" max=");
+    Serial.println(rm_max);
 }
 
 void printRegisters(uint8_t index) {

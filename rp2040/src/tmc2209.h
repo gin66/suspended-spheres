@@ -77,6 +77,9 @@ bool checkIfcnt(uint8_t index);
 // Bench-only: time one SG_RESULT read and one full refresh() in microseconds,
 // including the interrupt-masked window and any retries. Prints min/mean/max.
 void timeUart(uint8_t index, uint16_t n);
+// IRQ-masked time of the last read and of the six reads in the last refresh.
+uint16_t lastMaskUs();
+uint16_t lastRefreshMaskUs();
 // Bench-only: set the sample period in clk_sys cycles (one bit = 4 samples).
 // Recomputes the bit time; the decoder and the TMC auto-baud are unchanged.
 // Returns false outside 60..250 cycles (~496..156 kBaud at 125 MHz).
