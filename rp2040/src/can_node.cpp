@@ -38,7 +38,10 @@ volatile bool disc_pending = false;
 volatile bool reidentify_requested = false;
 volatile uint32_t disc_due_us = 0;
 
-void on_can(struct can2040*, uint32_t notify, struct can2040_msg* msg) {
+/* The ACK must be armed within about 7 µs at 1 Mbit/s. These two run inside
+ * the can2040 IRQ, so they stay in RAM with can2040 itself. */
+void __not_in_flash_func(on_can)(struct can2040*, uint32_t notify,
+                                 struct can2040_msg* msg) {
     if (notify == CAN2040_NOTIFY_RX) {
         rx_count++;
         const uint16_t id = (uint16_t)msg->id;
@@ -87,7 +90,7 @@ void on_can(struct can2040*, uint32_t notify, struct can2040_msg* msg) {
     }
 }
 
-void pio1_irq() {
+void __not_in_flash_func(pio1_irq)() {
     can2040_pio_irq_handler(&cbus);
 }
 

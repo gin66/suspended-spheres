@@ -670,8 +670,11 @@ A bare-metal Pico SDK build is not a drop-in.
 
 **CAN is fixed.** The Fly-Micro4 uses can2040; there is no SPI controller or
 board change. Keep the bus below ~60 %, keep can2040 IRQ latency short, and use
-heartbeat/timeouts plus the hardwired E-stop. Four axes is the ceiling; CAN is
-not a safety function.
+heartbeat/timeouts plus the hardwired E-stop. At 1 Mbit/s the ACK must be armed
+within about 7 µs, so `can2040.c` text and rodata, plus `pio1_irq` and `on_can`,
+are linked into RAM (`rp2040/can2040_ram.py`, and the same exclude in
+`memmap_katapult.ld`). The rest of the firmware stays in flash. Four axes is
+the ceiling; CAN is not a safety function.
 
 ### 5.2 FastAccelStepper integration levels
 
