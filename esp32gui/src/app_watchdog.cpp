@@ -98,7 +98,13 @@ void app_watchdog_note_can_rx(void) {
 
 void app_watchdog_set_can_expected(bool expected) {
   s_can_expected = expected;
-  if (!expected) s_status.can_link_ok = true;
+  if (expected) {
+    /* Start the link timeout from the moment CAN is expected; otherwise the
+     * stale 0 timestamp raises a hold before the first frame arrives. */
+    s_status.last_can_rx_ms = millis();
+  } else {
+    s_status.can_link_ok = true;
+  }
 }
 
 void app_watchdog_set_hold_callback(app_watchdog_hold_fn fn) { s_hold_fn = fn; }

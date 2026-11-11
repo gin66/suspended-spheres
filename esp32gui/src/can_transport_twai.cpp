@@ -31,6 +31,16 @@ QueueHandle_t s_rx_queue = nullptr;
 volatile bool s_running = false;
 uint32_t s_last_recovery_ms = 0;
 
+/* Static storage: repeated Start/Stop must not allocate from the already small,
+ * fragmented internal heap. Everything lives in .bss. */
+constexpr UBaseType_t kRxQueueLen = 64;
+StaticTask_t s_rx_tcb;
+StackType_t s_rx_stack[4096] __attribute__((aligned(16)));
+StaticTask_t s_worker_tcb;
+StackType_t s_worker_stack[4096] __attribute__((aligned(16)));
+StaticQueue_t s_rx_queue_struct;
+alignas(8) uint8_t s_rx_queue_buf[kRxQueueLen * sizeof(ss_can_frame_t)];
+
 void refresh_status() {
   twai_status_info_t info;
   if (twai_get_status_info(&info) != ESP_OK) return;
@@ -76,11 +86,20 @@ static void can_rx_task(void *) {
       if (s_running && s_stats.bus_off &&
           (uint32_t)(millis() - s_last_recovery_ms) > 1000u) {
         s_last_recovery_ms = millis();
-        SS_LOGW("can", "bus-off; starting recovery");
+        SS_LOGW("can", "bus-off; initiating recovery");
         if (twai_initiate_recovery() == ESP_OK) {
-          vTaskDelay(pdMS_TO_TICKS(100));
-          if (twai_start() == ESP_OK) {
-            SS_LOGI("can", "bus-off recovery restarted");
+          /* The driver returns to RUNNING automatically after 128 x 11
+           * recessive bits. Do not call twai_start() on a fixed delay: if the
+           * node is still transmitting error frames the controller is still
+           * RECOVERING and a premature start fails, leaving it bus-off. */
+          for (int i = 0; i < 50; ++i) {
+            vTaskDelay(pdMS_TO_TICKS(20));
+            twai_status_info_t info;
+            if (twai_get_status_info(&info) == ESP_OK &&
+                info.state == TWAI_STATE_RUNNING) {
+              SS_LOGI("can", "bus-off recovery complete");
+              break;
+            }
           }
         }
       }
@@ -92,7 +111,30 @@ static void can_rx_task(void *) {
  * Has a large stack so logging and node lookup never overflow. */
 static void can_rx_worker_task(void *) {
   ss_can_frame_t f;
+  uint32_t last_diag_ms = 0;
   while (true) {
+    if ((uint32_t)(millis() - last_diag_ms) >= 2000u) {
+      last_diag_ms = millis();
+      twai_status_info_t info;
+      if (twai_get_status_info(&info) == ESP_OK) {
+        SS_LOGI("can", "st=%d tec=%lu rec=%lu arb=%lu bus=%lu rx=%lu tx=%lu err=%lu txfail=%lu txq=%lu rxq=%lu",
+                (int)info.state,
+                (unsigned long)info.tx_error_counter,
+                (unsigned long)info.rx_error_counter,
+                (unsigned long)info.arb_lost_count,
+                (unsigned long)info.bus_error_count,
+                (unsigned long)s_stats.rx_frames,
+                (unsigned long)s_stats.tx_frames,
+                (unsigned long)(s_stats.tx_failed + s_stats.bus_errors),
+                (unsigned long)info.tx_failed_count,
+                (unsigned long)info.msgs_to_tx,
+                (unsigned long)info.msgs_to_rx);
+      }
+      uint32_t alerts = 0;
+      if (twai_read_alerts(&alerts, 0) == ESP_OK && alerts != 0) {
+        SS_LOGW("can", "alerts=0x%lx", (unsigned long)alerts);
+      }
+    }
     if (xQueueReceive(s_rx_queue, &f, pdMS_TO_TICKS(50)) == pdPASS) {
       if (s_cb != nullptr) s_cb(&f, s_ctx);
     }
@@ -127,7 +169,8 @@ bool can_transport_start(uint32_t bitrate, ss_can_rx_fn cb, void *ctx) {
   g.rx_queue_len = 64;
   g.tx_queue_len = 32;
   g.alerts_enabled = TWAI_ALERT_BUS_OFF | TWAI_ALERT_BUS_ERROR |
-                     TWAI_ALERT_RX_QUEUE_FULL;
+                     TWAI_ALERT_RX_QUEUE_FULL | TWAI_ALERT_ARB_LOST |
+                     TWAI_ALERT_TX_FAILED;
   const twai_timing_config_t t = TWAI_TIMING_CONFIG_1MBITS();
   const twai_filter_config_t f = TWAI_FILTER_CONFIG_ACCEPT_ALL();
 
@@ -144,40 +187,48 @@ bool can_transport_start(uint32_t bitrate, ss_can_rx_fn cb, void *ctx) {
   s_running = true;
   s_stats.running = true;
   s_last_recovery_ms = 0;
-  s_rx_queue = xQueueCreate(64, sizeof(ss_can_frame_t));
   if (s_rx_queue == nullptr) {
-    SS_LOGE("can", "CAN RX queue creation failed");
-    s_running = false;
-    s_stats.running = false;
-    twai_stop();
-    twai_driver_uninstall();
-    return false;
+    s_rx_queue = xQueueCreateStatic(kRxQueueLen, sizeof(ss_can_frame_t),
+                                    s_rx_queue_buf, &s_rx_queue_struct);
+    if (s_rx_queue == nullptr) {
+      SS_LOGE("can", "CAN RX queue creation failed");
+      s_running = false;
+      s_stats.running = false;
+      twai_stop();
+      twai_driver_uninstall();
+      return false;
+    }
+  } else {
+    xQueueReset(s_rx_queue);
   }
   if (s_rx_task == nullptr) {
     SS_LOGI("can", "starting RX task: internal free=%u largest=%u",
             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
-    if (xTaskCreatePinnedToCore(can_rx_task, "can_rx", 2048, nullptr, 5,
-                                &s_rx_task, 0) != pdPASS) {
+    s_rx_task = xTaskCreateStaticPinnedToCore(
+        can_rx_task, "can_rx", sizeof(s_rx_stack), nullptr, 5, s_rx_stack,
+        &s_rx_tcb, 0);
+    if (s_rx_task == nullptr) {
       SS_LOGE("can", "CAN RX task creation failed");
       s_running = false;
       s_stats.running = false;
       s_rx_task = nullptr;
-      vQueueDelete(s_rx_queue);
-      s_rx_queue = nullptr;
+      xQueueReset(s_rx_queue);
       twai_stop();
       twai_driver_uninstall();
       return false;
     }
-    TaskHandle_t worker = nullptr;
-    if (xTaskCreatePinnedToCore(can_rx_worker_task, "can_rxw", 4096,
-                                nullptr, 5, &worker, 0) != pdPASS) {
+    s_worker_task = xTaskCreateStaticPinnedToCore(
+        can_rx_worker_task, "can_rxw", sizeof(s_worker_stack), nullptr, 5,
+        s_worker_stack, &s_worker_tcb, 0);
+    if (s_worker_task == nullptr) {
       SS_LOGE("can", "CAN RX worker task creation failed");
       s_running = false;
       s_stats.running = false;
+      vTaskDelete(s_rx_task);
       s_rx_task = nullptr;
-      vQueueDelete(s_rx_queue);
-      s_rx_queue = nullptr;
+      s_worker_task = nullptr;
+      xQueueReset(s_rx_queue);
       twai_stop();
       twai_driver_uninstall();
       return false;
@@ -193,13 +244,26 @@ void can_transport_stop(void) {
   if (!s_running) return;
   s_running = false;
   s_stats.running = false;
+  /* Let the RX task leave twai_receive() and the worker leave xQueueReceive()
+   * before tearing anything down. Both block for at most 50 ms. */
   vTaskDelay(pdMS_TO_TICKS(150));
+  /* The tasks must die before the queue they block on, and before the driver
+   * is uninstalled. A task left behind would touch a freed queue on the next
+   * Start, which is what rebooted the panel on Start/Stop. */
+  if (s_rx_task != nullptr) {
+    vTaskDelete(s_rx_task);
+    s_rx_task = nullptr;
+  }
+  if (s_worker_task != nullptr) {
+    vTaskDelete(s_worker_task);
+    s_worker_task = nullptr;
+  }
   twai_stop();
   twai_driver_uninstall();
   board_ws7_set_usb_mode(true);
   if (s_rx_queue != nullptr) {
-    vQueueDelete(s_rx_queue);
-    s_rx_queue = nullptr;
+    /* Static queue: keep the storage, just drop stale frames. */
+    xQueueReset(s_rx_queue);
   }
   SS_LOGI("can", "TWAI stopped; GPIO 19/20 returned to USB");
 }
@@ -223,8 +287,10 @@ bool can_transport_send(const ss_can_frame_t *frame) {
   msg.data_length_code = frame->len;
   std::memcpy(msg.data, frame->data, frame->len);
 
-  if (twai_transmit(&msg, 0) != ESP_OK) {
+  const esp_err_t tx_err = twai_transmit(&msg, 0);
+  if (tx_err != ESP_OK) {
     s_stats.tx_failed++;
+    SS_LOGW("can", "tx failed: %s", esp_err_to_name(tx_err));
     return false;
   }
   s_stats.tx_frames++;

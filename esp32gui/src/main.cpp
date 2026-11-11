@@ -229,8 +229,10 @@ void action_can_start(void) {
 }
 
 void action_can_stop(void) {
-  can_transport_stop();
+  /* Drop the link requirement first: the stop deliberately silences the bus
+   * for >150 ms and must not trip the "CAN link silent" safe hold. */
   app_watchdog_set_can_expected(false);
+  can_transport_stop();
 }
 
 void action_can_clear(void) { can_monitor_reset(); }
