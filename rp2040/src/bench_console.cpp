@@ -5,6 +5,8 @@
 #include <string.h>
 
 #include "board_pins.h"
+#include "can_node.h"
+#include "pico/can2040_lite_pico.h"
 #include "stepper_axes.h"
 #include "tmc2209.h"
 
@@ -102,6 +104,14 @@ void print_help() {
     Serial.println("  stop [axis]");
     Serial.println("  enable <axis> <0|1>");
     Serial.println("  diag [clear]");
+    Serial.println("  can stats                  driver + app counters");
+    Serial.println("  can send <id> [hex]        raw standard frame, up to 8 data bytes");
+    Serial.println("  can pins [ms]              sample CAN RX/TX pad levels and edges");
+    Serial.println("  can arm                    clean RX re-arm (flush FIFO/parser)");
+    Serial.println("  can raw [ms]               raw RX FIFO words for PC-side analysis");
+    Serial.println("  can dbg [clear]            PIO IRQ count and FDEBUG (RXSTALL etc.)");
+    Serial.println("  can rec [clear]            dump/clear the RX edge-pair record");
+    Serial.println("  can ack [n] [id]           ACK-slot tolerance from the RX record");
 }
 
 void command_status(int argc, char** argv) {
@@ -571,6 +581,230 @@ void command_reinit() {
     Serial.println("reinit requested");
 }
 
+int hex_nibble(char c) {
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return c - 'a' + 10;
+    }
+    if (c >= 'A' && c <= 'F') {
+        return c - 'A' + 10;
+    }
+    return -1;
+}
+
+bool parse_can_data(const char* text, uint8_t data[8], uint8_t* dlc) {
+    const size_t len = strlen(text);
+    if (len > 16u || (len & 1u) != 0u) {
+        return false;
+    }
+    for (size_t i = 0; i < len / 2u; i++) {
+        const int hi = hex_nibble(text[i * 2u]);
+        const int lo = hex_nibble(text[i * 2u + 1u]);
+        if (hi < 0 || lo < 0) {
+            return false;
+        }
+        data[i] = (uint8_t)((hi << 4) | lo);
+    }
+    *dlc = (uint8_t)(len / 2u);
+    return true;
+}
+
+int32_t permille(int32_t value16, uint32_t bit_ticks) {
+    const int64_t t16 = (int64_t)bit_ticks * 16;
+    if (t16 == 0) {
+        return 0;
+    }
+    return (int32_t)(((int64_t)value16 * 1000) / t16);
+}
+
+void print_ack_sample(int index, const can_node::AckSample& s) {
+    if (!s.valid) {
+        Serial.print(index);
+        Serial.println(": no measurable frame (timeout/filter)");
+        return;
+    }
+    Serial.print(index);
+    Serial.print(": id=0x");
+    Serial.print(s.rx_id, HEX);
+    Serial.print(" stuffed=");
+    Serial.print(s.stuffed_bits);
+    if (!s.acknowledged) {
+        Serial.println(" NACK (slot recessive)");
+        return;
+    }
+    const uint32_t t = s.bit_ticks;
+    Serial.print(" T=");
+    Serial.print(t);
+    Serial.print(" err=");
+    Serial.print(permille(s.phase_16, t));
+    Serial.print("m width=");
+    Serial.print(permille(s.width_16, t));
+    Serial.print("m start_margin=");
+    Serial.print(permille(s.start_margin_16, t));
+    Serial.print("m end_margin=");
+    Serial.print(permille(s.end_margin_16, t));
+    Serial.println("m");
+}
+
+void command_can(int argc, char** argv) {
+    if (argc < 2 || strcmp(argv[1], "stats") == 0) {
+        can_node::print_stats();
+        return;
+    }
+    if (strcmp(argv[1], "send") == 0) {
+        uint32_t id = 0;
+        uint8_t data[8] = {};
+        uint8_t dlc = 0;
+        if (argc < 3 || !parse_u32(argv[2], &id) || id > 0x7FFu) {
+            Serial.println("usage: can send <id> [hex-data]");
+            return;
+        }
+        if (argc >= 4 && !parse_can_data(argv[3], data, &dlc)) {
+            Serial.println("bad hex data (even length, <= 8 bytes)");
+            return;
+        }
+        print_result(can_node::send((uint16_t)id, data, dlc));
+        return;
+    }
+    if (strcmp(argv[1], "raw") == 0) {
+        Serial.println("raw capture removed in this can2040-lite version");
+        return;
+    }
+    if (strcmp(argv[1], "arm") == 0) {
+        can_node::request_rx_arm();
+        delay(10);
+        Serial.println("rx arm requested");
+        return;
+    }
+    if (strcmp(argv[1], "dbg") == 0) {
+        if (argc >= 3 && strcmp(argv[2], "clear") == 0) {
+            can_node::pio_fdebug_clear();
+            Serial.println("fdebug cleared");
+            return;
+        }
+        Serial.print("irq=");
+        Serial.print(can_node::irq_count());
+        Serial.print(" arms=");
+        Serial.print(can_node::arm_count());
+        Serial.print(" us_max=");
+        Serial.print(can_node::irq_us_max());
+        Serial.print(" us_sum=");
+        Serial.print(can_node::irq_us_sum());
+        Serial.print(" fdebug=0x");
+        Serial.println(can_node::pio_fdebug(), HEX);
+        return;
+    }
+    if (strcmp(argv[1], "pins") == 0) {
+        uint32_t ms = 200;
+        if (argc >= 3 && (!parse_u32(argv[2], &ms) || ms > 5000u)) {
+            Serial.println("usage: can pins [ms]");
+            return;
+        }
+        const uint32_t edges = can_node::sample_rx_edges(ms);
+        Serial.print("CAN rx(GPIO4)=");
+        Serial.print(can_node::rx_level());
+        Serial.print(" tx(GPIO5)=");
+        Serial.print(can_node::tx_level());
+        Serial.print(" edges/");
+        Serial.print(ms);
+        Serial.print("ms=");
+        Serial.println(edges);
+        return;
+    }
+    if (strcmp(argv[1], "rec") == 0) {
+        if (argc >= 3 && strcmp(argv[2], "clear") == 0) {
+            can_node::record_clear();
+            Serial.println("record cleared");
+        } else {
+            can_node::record_print();
+        }
+        return;
+    }
+    if (strcmp(argv[1], "ack") == 0) {
+        uint32_t samples = 5;
+        uint32_t id = 0x00Bu;  // ASK broadcast from the show controller
+        if (argc >= 3 && !parse_u32(argv[2], &samples)) {
+            Serial.println("usage: can ack [samples] [id]");
+            return;
+        }
+        if (argc >= 4 && !parse_u32(argv[3], &id)) {
+            Serial.println("usage: can ack [samples] [id]");
+            return;
+        }
+        if (!can_node::recording_enabled()) {
+            Serial.println("recording disabled; build fly_micro4_record");
+            return;
+        }
+        if (samples == 0 || samples > 50) {
+            Serial.println("samples 1..50");
+            return;
+        }
+        int32_t min_err = 0, max_err = 0, sum_err = 0;
+        int32_t min_start = 0, min_end = 0;
+        int32_t min_width = 0, max_width = 0;
+        uint32_t acked = 0, nacked = 0, missed = 0;
+        for (uint32_t i = 0; i < samples; i++) {
+            can_node::AckSample s;
+            const bool ok = can_node::capture_ack((uint16_t)(id & 0x7FFu),
+                                                  6000u, &s);
+            print_ack_sample((int)i, s);
+            if (!ok) {
+                missed++;
+                continue;
+            }
+            if (!s.acknowledged) {
+                nacked++;
+                continue;
+            }
+            if (acked == 0) {
+                min_err = max_err = s.phase_16;
+                min_start = s.start_margin_16;
+                min_end = s.end_margin_16;
+                min_width = max_width = s.width_16;
+            } else {
+                if (s.phase_16 < min_err) min_err = s.phase_16;
+                if (s.phase_16 > max_err) max_err = s.phase_16;
+                if (s.start_margin_16 < min_start) min_start = s.start_margin_16;
+                if (s.end_margin_16 < min_end) min_end = s.end_margin_16;
+                if (s.width_16 < min_width) min_width = s.width_16;
+                if (s.width_16 > max_width) max_width = s.width_16;
+            }
+            sum_err += s.phase_16;
+            acked++;
+        }
+        Serial.print("ack summary: ok=");
+        Serial.print(acked);
+        Serial.print(" nack=");
+        Serial.print(nacked);
+        Serial.print(" miss=");
+        Serial.println(missed);
+        if (acked > 0) {
+            const uint32_t bit_ticks = can_node::bit_ticks();
+            Serial.print("phase err min/max/mean = ");
+            Serial.print(permille(min_err, bit_ticks));
+            Serial.print("/");
+            Serial.print(permille(max_err, bit_ticks));
+            Serial.print("/");
+            Serial.print(permille(sum_err / (int32_t)acked, bit_ticks));
+            Serial.println(" milli-bit");
+            Serial.print("worst sample margins: start=");
+            Serial.print(permille(min_start, bit_ticks));
+            Serial.print("m end=");
+            Serial.print(permille(min_end, bit_ticks));
+            Serial.println("m");
+            Serial.print("ACK width min/max = ");
+            Serial.print(permille(min_width, bit_ticks));
+            Serial.print("/");
+            Serial.print(permille(max_width, bit_ticks));
+            Serial.println(" milli-bit");
+        }
+        return;
+    }
+    Serial.println("usage: can stats|send|pins|arm|raw|dbg|rec [clear]|ack [n] [id]");
+}
+
 void execute(char* line) {
     char* argv[kMaxArgs];
     uint8_t argc = 0;
@@ -656,6 +890,8 @@ void execute(char* line) {
         }
     } else if (strcmp(command, "diag") == 0) {
         command_diag(argc, argv);
+    } else if (strcmp(command, "can") == 0) {
+        command_can(argc, argv);
     } else {
         Serial.print("unknown command: ");
         Serial.println(command);

@@ -203,6 +203,12 @@ void setup() {
     // can_node::begin() claims PIO1. Wait for that claim so the stepper
     // engine can only select PIO0.
     while (!can_node::ready()) {
+        static uint32_t last_stage_ms = 0;
+        if ((uint32_t)(millis() - last_stage_ms) >= 500u) {
+            last_stage_ms = millis();
+            Serial.print("waiting for CAN core 1, stage=");
+            Serial.println(can_node::begin_stage());
+        }
         delay(1);
     }
 
@@ -330,12 +336,15 @@ void loop() {
         Serial.print(" err=");
         Serial.print(s.error);
         Serial.print(" drop=");
-        Serial.println(s.dropped);
+        Serial.print(s.dropped);
+        Serial.print(" nack=");
+        Serial.println(s.nack);
     }
 
     delay(1);
 }
 
 void loop1() {
+    can_node::core1_tick();
     tight_loop_contents();
 }
