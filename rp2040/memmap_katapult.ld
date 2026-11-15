@@ -53,11 +53,9 @@ SECTIONS
          * FLASH ... we will include any thing excluded here in .data below by default */
         *(.init)
         /* Some of these excludes required for PicoDVI library, won't affect most code.
-         * The CAN2040-Lite receive and ACK path must run from RAM at 1 Mbit/s:
-         * the ACK allow has about 1.25 us from the terminal CRC edge to the
-         * fire check. can2040_ram.py applies the same exclude to the
-         * generated default map. */
-        *(EXCLUDE_FILE(*libgcc.a: *libc.a:*lib_a-mem*.o *libm.a: *interp.c.obj *divider.S.obj *PicoDVI.cpp.o *dvi.c.o *can2040_lite*.o *can_edge_sm.c.o *can_pio_program.c.o) .text*)
+         * can2040 must ACK within ~7 µs at 1 Mbit/s, so its text stays out of flash.
+         * can2040_ram.py applies the same exclude to the generated default map. */
+        *(EXCLUDE_FILE(*libgcc.a: *libc.a:*lib_a-mem*.o *libm.a: *interp.c.obj *divider.S.obj *PicoDVI.cpp.o *dvi.c.o *can2040.c.o) .text*)
 
         *(.fini)
         /* Pull all c'tors into .text */
@@ -99,7 +97,7 @@ SECTIONS
     } > FLASH
 
     .rodata : {
-        *(EXCLUDE_FILE(*libgcc.a: *libc.a:*lib_a-mem*.o *libm.a: *can2040_lite*.o *can_edge_sm.c.o *can_pio_program.c.o) .rodata* .big_const*)
+        *(EXCLUDE_FILE(*libgcc.a: *libc.a:*lib_a-mem*.o *libm.a: *can2040.c.o) .rodata* .big_const*)
         . = ALIGN(4);
         *(SORT_BY_ALIGNMENT(SORT_BY_NAME(.flashdata*)))
         . = ALIGN(4);
