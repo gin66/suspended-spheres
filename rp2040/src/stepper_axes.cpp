@@ -94,6 +94,15 @@ void setAcceleration(uint8_t index, uint32_t accel_steps_s2) {
     }
 }
 
+bool forceStopAndSetPosition(uint8_t index, int32_t position) {
+    FastAccelStepper* stepper = axis(index);
+    if (stepper == nullptr) {
+        return false;
+    }
+    stepper->forceStopAndNewPosition(position);
+    return true;
+}
+
 bool move(uint8_t index, int32_t steps) {
     FastAccelStepper* stepper = axis(index);
     if (stepper == nullptr) {

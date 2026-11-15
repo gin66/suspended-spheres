@@ -32,6 +32,7 @@ operator-confirmed by the sound/shaft stopping.
 | `2026-11-10-M0-valid-01` | Firmware `60acd5a` validation: mode, `sg off`, 20-bit TSTEP, IFCNT, 18k/74k smoke. |
 | `2026-11-10-M0-uart-01` | **G6:** SG read 1.5–1.9 ms, refresh 8.6–10.7 ms; no 5 ms sampler. |
 | `2026-11-10-M0-uart-02` | **Baud study:** 250 kBaud is the exact 12 MHz/48 divisor; 369–391 kBaud clean only in short runs; the 4× loop overruns near 80 cycles/sample. No change adopted. |
+| `2026-11-15-M0-SC-300-16-01` | **Load direction / low current:** M0 NEMA-17 pancake + 40 mm spool. −steps up, +steps into the bottom stop. 100–300 mA lift cleanly; 30 mA slips (STALL 60–73 % of lift samples). Top endstop estimated 15–18 turns (48k–58k µsteps). |
 
 ## Gates
 
@@ -40,15 +41,17 @@ operator-confirmed by the sound/shaft stopping.
 | G1 | closed — true stall at ~18.5k; DIAG burst; no fault; stop-flood is re-capture |
 | G2 | closed for M0/M2 in StealthChop vs SpreadCycle; **hybrid open**; noise number not measured |
 | G3 | partial — speed passes for 40 mm in SpreadCycle; 20/10 mm optional tiers outside margin; **acceleration unmeasured** |
-| G4 | partial — free-run window found for M0 and M2; **hard-stop repeatability pending** (rig not built) |
-| G5 | open — needs drum + 50 g load |
+| G4 | partial — free-run window found for M0 and M2; loaded lift at 100–300 mA; 30 mA slips at every tested speed; **hard-stop repeatability pending** |
+| G5 | partial — free-hang up/down SG separation at 100–300 mA (2026-11-15); not calibrated to mNm, friction/repeatability pending |
 | G6 | closed — SG read 1.5–1.9 ms, refresh 8.6–10.7 ms; 250 kBaud is the max; DIAG-only |
 
 ## Open items
 
 Homing rig (Session 4), 500/800 mA, hybrid crossover, interpolation on/off,
 acceleration (needs a firmware command), thermal repeat, three-axis run on the
-installation supply.
+installation supply. Top-endstop location (estimated 15–18 turns from bottom)
+and hard-stop repeatability; minimum reliable lift current between 30 and
+100 mA.
 
 Queued: CHOPCONF/PWMCONF tuning matrix — see
 `doc/tmc2209_characterization.md` §8 Phase 4a. The measured SpreadCycle numbers

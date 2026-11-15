@@ -8,10 +8,10 @@
  * the stepper task, the USB stack or the status printing on core 0.
  *
  * Core 0 decodes COMMAND (type 4) and HOME (type 5) frames. Commands drive
- * the four axes through stepper_axes; a broadcast REIDENTIFY drops the RAM
- * board ID so a rebooted master can find the board again. The TMC2209s are
- * configured over UART at boot; the StallGuard homing state machine itself is
- * still a stub.
+ * the four axes through stepper_axes; HOME runs the StallGuard state machine
+ * in homing.cpp one axis at a time. A broadcast REIDENTIFY drops the RAM board
+ * ID so a rebooted master can find the board again. The TMC2209s are
+ * configured over UART at boot.
  */
 
 #include <Arduino.h>
@@ -21,6 +21,7 @@
 #include "bench_console.h"
 #include "board_pins.h"
 #include "can_node.h"
+#include "homing.h"
 #include "motion_core.h"
 #include "status_led.h"
 #include "stepper_axes.h"
@@ -168,6 +169,7 @@ void handle_frame(const can_node::Frame& frame) {
             return;
         }
         if (cmd.action == MC_CMD_STOP) {
+            homing::cancel();
             stop_axes(cmd.axis_mask);
             s_node_state = MC_STATUS_IDLE;
             if (bench_console::logs_enabled()) {
@@ -186,8 +188,17 @@ void handle_frame(const can_node::Frame& frame) {
         if (board < 0 || mc_board_accepts_id(board, id) == 0) {
             return;
         }
+        if (!homing::start(mask)) {
+            if (bench_console::logs_enabled()) {
+                Serial.print("home: rejected (mask=0x");
+                Serial.print((unsigned)mask, HEX);
+                Serial.println(")");
+            }
+            return;
+        }
+        s_node_state = MC_STATUS_HOMING;
         if (bench_console::logs_enabled()) {
-            Serial.print("home: ignored, StallGuard homing is not implemented (mask=0x");
+            Serial.print("home: start (mask=0x");
             Serial.print((unsigned)mask, HEX);
             Serial.println(")");
         }
@@ -208,14 +219,25 @@ void setup() {
 
     stepper_axes::begin();
 
-    const uint8_t tmc_ready = tmc2209::begin();
+    const uint8_t tmc_all = (uint8_t)((1u << board::kDriveCount) - 1u);
+    uint8_t tmc_ready = tmc2209::begin();
+    // The UART occasionally loses a write-verification frame at power-on.
+    // Re-run the (idempotent, write-only) bring-up before declaring a fault.
+    for (uint8_t attempt = 1; attempt <= 3 && tmc_ready != tmc_all; ++attempt) {
+        Serial.print("TMC init incomplete (ready=0x");
+        Serial.print(tmc_ready, HEX);
+        Serial.print("); retry ");
+        Serial.println(attempt);
+        delay(50);
+        tmc_ready = tmc2209::begin();
+    }
     uint8_t axes_configured = 0;
     for (uint8_t i = 0; i < board::kDriveCount; i++) {
         if (stepper_axes::axis(i) != nullptr) {
             axes_configured++;
         }
     }
-    if (tmc_ready != (uint8_t)((1u << board::kDriveCount) - 1u)) {
+    if (tmc_ready != tmc_all) {
         s_node_state = MC_STATUS_FAULT;
     }
 
@@ -246,6 +268,7 @@ void loop() {
     if (can_node::take_reidentify_request()) {
         /* can_node dropped the RAM ID in the receive path. Leave the
          * outputs enabled so a partly wound ball is held, not dropped. */
+        homing::cancel();
         stepper_axes::stopAll();
         s_node_state = MC_STATUS_IDLE;
         if (bench_console::logs_enabled()) {
@@ -254,10 +277,26 @@ void loop() {
     }
 
     uint32_t now = millis();
-    tmc2209::poll(now);
+    // No UART work during the homing search: tmc2209::poll() reads on a DIAG
+    // edge and that read can stall the loop while FastAccelStepper is moving.
+    // homing reads the DIAG pin directly and refreshes once, stopped.
+    if (!homing::busy()) {
+        tmc2209::poll(now);
+    }
     bench_console::poll();
+    // Fresh timestamp: a command in bench_console::poll() may have started a
+    // search and set its start time after `now` was captured.
+    homing::poll(millis());
+    if (homing::busy()) {
+        s_node_state = MC_STATUS_HOMING;
+    } else if (homing::faulted()) {
+        s_node_state = MC_STATUS_FAULT;
+    } else if (s_node_state == MC_STATUS_HOMING) {
+        s_node_state = MC_STATUS_IDLE;
+    }
 
     if (bench_console::take_reinit_request()) {
+        homing::cancel();
         stepper_axes::stopAll();
         const uint8_t ready = tmc2209::begin();
         if (ready == (uint8_t)((1u << board::kDriveCount) - 1u)) {

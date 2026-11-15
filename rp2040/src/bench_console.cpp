@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "board_pins.h"
+#include "homing.h"
 #include "stepper_axes.h"
 #include "tmc2209.h"
 
@@ -97,6 +98,8 @@ void print_help() {
     Serial.println("  chop <axis> <hex>          raw CHOPCONF, e.g. 0x14020054");
     Serial.println("  pwm <axis> <hex>           raw PWMCONF, e.g. 0xC10D0024");
     Serial.println("  raw <axis> <reg> [value]   register access, hex e.g. 0x6C");
+    Serial.println("  home <axis> [ma] [hz] [sg] StallGuard homing to the upper stop");
+    Serial.println("  home stop                  cancel homing");
     Serial.println("  move <axis> <steps> <hz>   finite move (requires enable)");
     Serial.println("  run <axis> <hz> [0|1]      continuous, 1 = forward (requires enable)");
     Serial.println("  stop [axis]");
@@ -432,6 +435,62 @@ void command_raw(int argc, char** argv) {
     Serial.println(readback, HEX);
 }
 
+bool homing_locked_command(const char* command) {
+    return strcmp(command, "cur") == 0 || strcmp(command, "sg") == 0 ||
+           strcmp(command, "mode") == 0 || strcmp(command, "tcool") == 0 ||
+           strcmp(command, "micro") == 0 || strcmp(command, "chop") == 0 ||
+           strcmp(command, "pwm") == 0 || strcmp(command, "move") == 0 ||
+           strcmp(command, "run") == 0 || strcmp(command, "enable") == 0 ||
+           strcmp(command, "reinit") == 0;
+}
+
+void command_home(int argc, char** argv) {
+    if (argc < 2) {
+        homing::printState();
+        return;
+    }
+    if (strcmp(argv[1], "stop") == 0) {
+        homing::cancel();
+        Serial.println("home: cancel requested");
+        return;
+    }
+    if (strcmp(argv[1], "status") == 0) {
+        homing::printState();
+        return;
+    }
+    uint8_t axis = 0;
+    if (!parse_axis(argv[1], &axis)) {
+        Serial.println("bad axis");
+        return;
+    }
+    homing::Config config = homing::defaults();
+    uint32_t value = 0;
+    if (argc >= 3) {
+        if (!parse_u32(argv[2], &value) || value > 800) {
+            Serial.println("bad start_ma");
+            return;
+        }
+        config.start_ma = (uint16_t)value;
+    }
+    if (argc >= 4) {
+        if (!parse_u32(argv[3], &value) || value < 32) {
+            Serial.println("bad speed_hz");
+            return;
+        }
+        config.speed_hz = value;
+    }
+    if (argc >= 5) {
+        if (!parse_u32(argv[4], &value) || value > 255) {
+            Serial.println("bad sgthrs");
+            return;
+        }
+        config.sgthrs = (uint8_t)value;
+    }
+    if (!homing::start((uint8_t)(1u << axis), &config)) {
+        Serial.println("home: rejected (busy, not ready, or axis running)");
+    }
+}
+
 void command_move(int argc, char** argv) {
     if (argc < 4) {
         Serial.println("usage: move <axis> <steps> <hz>");
@@ -505,6 +564,9 @@ void command_run(int argc, char** argv) {
 }
 
 void command_stop(int argc, char** argv) {
+    if (homing::busy()) {
+        homing::cancel();
+    }
     if (argc < 2) {
         stepper_axes::stopAll();
         Serial.println("stopped all");
@@ -595,6 +657,10 @@ void execute(char* line) {
     }
 
     const char* command = argv[0];
+    if (homing::busy() && homing_locked_command(command)) {
+        Serial.println("home in progress; use stop");
+        return;
+    }
     if (strcmp(command, "help") == 0 || strcmp(command, "?") == 0) {
         print_help();
     } else if (strcmp(command, "status") == 0) {
@@ -631,6 +697,8 @@ void execute(char* line) {
         command_idle(argc, argv);
     } else if (strcmp(command, "raw") == 0) {
         command_raw(argc, argv);
+    } else if (strcmp(command, "home") == 0) {
+        command_home(argc, argv);
     } else if (strcmp(command, "move") == 0) {
         command_move(argc, argv);
     } else if (strcmp(command, "run") == 0) {

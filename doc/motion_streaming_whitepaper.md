@@ -925,6 +925,7 @@ interface, and it can command motion.
 | `raw <axis> <reg> [value]` | Register access in hex; OTP, `VACTUAL`, `IHOLD_IRUN` and unsafe GCONF bits are refused |
 | `move <axis> <steps> <hz>` | Finite move (axis must be enabled) |
 | `run <axis> <hz> [0\|1]` | Continuous move, 1 = forward (axis must be enabled) |
+| `home <axis> [ma] [hz] [sg]` / `home stop` | StallGuard homing to the upper stop; defaults 100 mA / 1000 step/s / `SGTHRS = 10`; `home stop` cancels and restores the normal current |
 | `stop [axis]`, `enable <axis> <0\|1>`, `diag [clear]` | Stop, explicitly enable/disable outputs, print DIAG pins, or clear the latched DIAG event flags |
 | `reinit` | Stop, re-run the TMC bring-up; the drivers stay disabled until an explicit `enable` |
 | `quiet [on\|off]` | Silence the periodic CAN statistics and command logs; CAN traffic is unchanged |
@@ -984,7 +985,10 @@ prints a stall line. That catches a StallGuard pulse that has already ended by
 the time the loop polls, which the level-only `diag` snapshot cannot.
 
 `reinit` is the bring-up path after the motor supply is applied: the Fly-Micro4
-has no reset button, and unplugging USB loses the serial log. It configures the
+has no reset button, and unplugging USB loses the serial log. The node also
+retries `begin()` up to three times at boot when a driver is not fully ready;
+a failed write verification otherwise leaves that axis disabled until
+`reinit`. It configures the
 drivers but leaves every `ENN` high (disabled); use `enable <axis> 1` only after
 the motor supply/current limit is set. `quiet on` keeps
 the console readable. `selftest` proves the SIO output path by driving a fresh
@@ -1168,6 +1172,42 @@ the stable region. Gate `TCOOLTHRS` above ~750 step/s and ignore DIAG at spin-up
 and below it. Free run only: a high-speed stall leaves `SG_RESULT` high, so SG
 is not a motion sensor. The hard-stop/repeatability half of G4 is still
 unmeasured (the rig is not built); do not hard-code the homing threshold yet.
+
+**Implemented 2026-11-15** in `rp2040/src/homing.cpp`; the decision logic
+is the pure, host-tested `lib/homing_core`. The search runs at **300 mA** in
+StealthChop at **2000 µstep/s** (78 mm/s at the 40 mm spool, 1/16) with
+`SGTHRS = 15` (threshold 30) and `TCOOLTHRS = 800000 / speed_hz` (400 at
+2000; the measured 2000 step/s TSTEP is 380, so the ramp and the final
+deceleration are not armed). 300 mA rather than the absolute minimum is used
+because at 100 mA the top signal is too weak: on this rig the lift SG is
+50–116 and the top slip 2–24. The stop is accepted from **DIAG or the software
+SG comparison**, sampled every 20 ms (one `SG_RESULT` read), after 16,000
+steps (5 turns) of commanded travel and at least 1 s of stall-free running;
+`stall_hold_ms = 0`, so the first accepted assert stops the search. The
+5-turn minimum rejects lift SG glitches that a 20 ms sampler otherwise
+accepts. The
+hardware DIAG alone did not assert reliably at the slipping top; the software
+SG comparison did. A sustained assert before both conditions raises the
+current by 25 mA up to the run current and restarts; at the run current it is
+a fault. The finite move is capped at 70,400 steps (22 turns) and 90 s; it is
+a `FastAccelStepper::move()`, not a continuous run, so the PIO stops at the
+cap even if the CPU wedges. Commanded travel comes from the trapezoid
+(`homing_core::travelAt`); `getCurrentPosition()` is not called in the search
+loop because it drains the Pico PIO RX FIFO and stalls the loop. On a valid
+stop `forceStopAndNewPosition(0)` stops the pulse generator immediately and
+sets the top position; the normal current and SpreadCycle are restored, and
+the axis backs off 3,200 steps (one turn, 126 mm). A CAN HOME mask
+is homed sequentially. The measured bench direction is `kHomeUpSign = -1`
+(negative steps raise). Four bench cycles accepted at 45,920 / 46,110 / 46,098 / 46,182 steps
+(14.35–14.43 turns), a 262-step (0.08 turn) spread. The accepted diag to the
+pulse generator stopping was 3–4 ms / 6–8 steps. Repeatability over 20 cycles
+is still not measured, and the residual spread is the 20 ms detection sample
+and the top contact, so the home remains a reference to verify, not a
+calibrated coordinate. The bench procedure parks at the bottom: drive down to
+the bottom and only then disable the driver, rather than dropping the ball.
+The park distance is the accepted top travel minus the one-turn backoff
+(e.g. 46,182 − 3,200 = 42,982 steps), so it inherits the top detection
+offset rather than the 6–8-step stop latency. The optional slack move in step 2 is not implemented.
 
 **Timing:** home one axis at a time or four in parallel per board; run boards
 in parallel over CAN. The official sensorless-homing reference uses

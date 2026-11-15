@@ -20,4 +20,7 @@ void stop(uint8_t index);
 void stopAll();
 bool moveTo(uint8_t index, int32_t position);
 
+// Abrupt stop with no deceleration; the caller owns the position afterwards.
+bool forceStopAndSetPosition(uint8_t index, int32_t position);
+
 }  // namespace stepper_axes

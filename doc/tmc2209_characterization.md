@@ -40,6 +40,28 @@ Four findings contradict the plan text:
 
 The required tach/operator reference is therefore mandatory, not optional.
 
+## Measured results (2026-11-15, M0 NEMA-17 pancake, 40 mm spool)
+
+Per-session evidence: `doc/bench/tmc2209/2026-11-15-M0-SC-300-16-01/`.
+Free hang, 1/16, StealthChop, `SGTHRS = 40`, operator reference. The direction
+on this rig is **−steps raises** and **+steps drives into the bottom stop**
+(repeated accidental bottom-stop drives proved the latter). 300, 150 and 100 mA
+lifted continuously; **30 mA lost sync** on the lift.
+
+| current | SG up (mean) | SG down (mean) | lift |
+|--------:|-------------:|---------------:|------|
+| 300 mA | 146 | 182–188 | clean |
+| 150 mA | 146 | 187–188 | clean |
+| 100 mA | 155 | 164–176 | clean |
+| 30 mA @ 2000 µstep/s | 65–85 | 200–206 | slips |
+
+At 30 mA, 60–73 % of lift samples flag STALL and the log holds 775 DIAG STALL
+lines, while the lower phases stay near SG 200. The up/down separation is in
+the expected direction (higher SG = less load) and is clearest at 300/150 mA;
+it shrinks at 100 mA. This is a magnitude, not a calibrated torque. Bench moves
+were acceleration-limited (2000 µstep/s²), so the 10-turn moves peaked at
+8000 µstep/s (≈0.31 m/s), not the 1 m/s tier.
+
 ---
 
 ## 1. Purpose
@@ -1071,6 +1093,13 @@ and, at 40 mm and 1/16, the 1,000 step/s row of §2. If session 3 found
 inside the stable window. The note says which of the two speeds the gate used.
 Do not silently substitute 0.3 m/s and close G4.
 
+**Measured 2026-11-15** (`doc/bench/tmc2209/2026-11-15-M0-SC-300-16-01/`):
+with the pancake and 40 mm spool, 100 mA lifted continuously to the bench peak
+(8000 µstep/s), while 30 mA lost sync even at 2000 µstep/s. Start the homing
+current at 100 mA and verify at the homing speed. The top stop is estimated at
+15–18 turns (48k–58k µsteps, 1.89–2.26 m) and was not reached; reject an assert
+before a minimum travel and cap travel just past the estimate.
+
 Command the move the installation will use: low current, that speed, upper
 stop, reject an assert before a minimum travel, accept an assert after it,
 back off, and repeat. Compare every DIAG with the tach. A DIAG while the shaft
@@ -1095,6 +1124,13 @@ the stop under test: hold current on, or driver disabled.
 Before the first move, fill the predicted torque of each segment in the run
 note: the table in §3.5 plus a friction line left blank until measured. Sample
 the ramps and the two cruises as separate segments.
+
+**Measured 2026-11-15** (`doc/bench/tmc2209/2026-11-15-M0-SC-300-16-01/`):
+free hang on the 40 mm spool. SG was lower on the lift than on the lower at
+100–300 mA (lift 146–155, lower 164–188), in the expected direction, and
+30 mA slipped. The bench moves were acceleration-limited triangular ramps, so
+this compares ramp-rich up/down segments rather than the constant-velocity
+segments below; it is not yet a classifier and is not calibrated to mNm.
 
 For each speed (0.05, 0.1, 0.3, 0.6 m/s; optionally 1.2 m/s) and both
 directions, free hang first:
