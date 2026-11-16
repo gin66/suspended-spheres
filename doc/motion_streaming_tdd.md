@@ -61,9 +61,8 @@ is 50 ms.
   including `patterns/golden_sine.anim.json`: whitepaper §4.5 and §6.9.
 - `ASK`, `DISC`, and `ASSIGN`: `Fly_Micro4_addressing.md` §3. The board ID
   is volatile. The host map `(uuid, axis) → position` is not on the wire.
-  The checks below still lock the previous 8-byte flash ID and the motor
-  field `board_id × 4 + axis` with no hole at 63. `katapult_whitepaper.md`
-  §9 records that the host tests have not moved.
+  The checks below lock the 6-byte UUID and the motor field
+  `board_id × 4 + axis` with field 63 skipped for Katapult.
 - The other clean cadences and the violation case are built in the test from
   that golden, as §6.9 describes.
 - `tests/fixtures/write_sine.py` is the generator in A8. The checker never
@@ -190,8 +189,9 @@ Whitepaper §3.2, §4.2, Appendix A.
 
 - [x] **I1** `id = (field << 4) | type`, and `id` is in `0 … 0x7FF`. A
   value above 0x7FF is rejected. There is no 29-bit encoder.
-- [x] **I2** Type 0 carries a motor field in `0 … 119`. Motor 0 is legal.
-  Type 1 is reserved and rejected. Motor fields `120 … 127` are rejected.
+- [x] **I2** Type 0 carries a motor field in `0 … 62` and `64 … 120`.
+  Motor 0 is legal. Type 1 is reserved and rejected. Field 63 (Katapult
+  `0x3F0`) and fields `121 … 127` are rejected.
 - [x] **I3** Type 2 (sync) requires field 0.
 - [x] **I4** Types 3–7 carry a board ID in `0 … 29`, or 127 for every board.
   Fields `30 … 126` are rejected. Field 0 is board 0.
@@ -203,14 +203,15 @@ Whitepaper §3.2, §4.2, Appendix A.
 - [x] **I7** Motor 5 / type 0 and board 5 / type 3 produce different
   identifiers. The decoder reports a motor for type 0 and a board for
   types 3–7. Type 9 is rejected (I5).
-- [x] **I8** Board *b* owns motors `4b … 4b+3`. Board 0 owns 0–3. Board 29
-  owns 116–119. Board IDs outside 0–29 own nothing.
+- [x] **I8** Board *b* owns the motor fields for `4b … 4b+3`, skipping 63.
+  Board 0 owns 0–3; board 15 owns 60, 61, 62 and 64; board 29 owns
+  117–120. Board IDs outside 0–29 own nothing.
 - [x] **I9** Board *b* accepts motion for those four motors, frames
   addressed to board *b*, field 127 on types 3–7, and field 0 on types
   2, 8 and 11. Any other motion frame is discarded before the payload is
   parsed. A table drives all 30 boards.
-- [x] **I10** **Property.** For every motor in `0 … 119` (type 0), exactly
-  one board accepts the frame.
+- [x] **I10** **Property.** For every valid motor field (type 0), exactly
+  one board accepts the frame; field 63 is accepted by none.
 
 ---
 
@@ -234,11 +235,12 @@ Whitepaper §4.2, §4.3, §4.5. Addressing §3.
 - [x] **P6** Command, home, and parameter frames are types 4, 5, and 6.
   A motion decoder ignores them. Homing bytes are not part of the motion
   sample buffer.
-- [x] **P7** `DISC` and `ASSIGN` payloads are exactly the 8-byte flash ID,
-  little-endian. `ASK` is 8 zero bytes.
+- [x] **P7** `DISC` and `ASSIGN` payloads carry the 6-byte UUID followed by
+  two zero bytes. `ASK` is 8 zero bytes.
 - [x] **P8** `ASSIGN` is one frame, type 10, field = board ID 0–29, payload
-  = the flash ID. The board stores that field only when the payload matches
-  its own flash ID. A second frame is not required.
+  = the UUID plus two zero bytes. The board stores that field only when the
+  first six bytes match its own UUID and the last two are zero. A second
+  frame is not required.
 - [x] **P9** The per-node alternate (four 16-bit positions, one frame per
   node) packs and unpacks. A flag on the unpacked frame says it is not the
   per-motor baseline.
@@ -413,17 +415,17 @@ and a clock the test advances.
 
 ## 9. Commissioning logic
 
-Addressing §1–§3. No flash chip: the test supplies an 8-byte ID.
+Addressing §1–§3. No flash chip: the test supplies an 8-byte ID and derives the 6-byte UUID from it.
 
-- [x] **M1** The host table is `(flash_id, axis 0–3) → position 0–119`,
-  plus `flash_id → board_id`. Lookup of 30 entries is exact. The board
+- [x] **M1** The host table is `(uuid, axis 0–3) → position 0–119`,
+  plus `uuid → board_id`. Lookup of 30 entries is exact. The board
   under test has no position value.
-- [x] **M2** A repeated advertisement of a known flash ID is assigned the
+- [x] **M2** A repeated advertisement of a known UUID is assigned the
   same board ID. A second board claiming that board ID is not given it.
 - [x] **M3** A board with no board ID answers `ASK` with one `DISC`. A
   board that already has a board ID stays silent.
-- [x] **M4** The advertise delay is `1 ms × (flash_id byte 0 mod 10)`,
-  measured from the `ASK`. The same flash ID always waits the same
+- [x] **M4** The advertise delay is `1 ms × (UUID byte 0 mod 10)`,
+  measured from the `ASK`. The same UUID always waits the same
   amount, and the wait is under 10 ms. The `DISC` identifier is field 0,
   type 8.
 - [x] **M5** `ASSIGN` is the single frame in P8. After a matching payload
@@ -431,7 +433,7 @@ Addressing §1–§3. No flash chip: the test supplies an 8-byte ID.
   draws no `DISC` from that board.
 - [x] **M6** Clearing the board's RAM ID makes it unidentified. The next
   `ASK` produces a `DISC`, and the master assigns the board ID already
-  stored for that flash ID. The host position map is unchanged.
+  stored for that UUID. The host position map is unchanged.
 - [x] **M7** The master sends `ASK` every 5 s, including while a pattern
   is playing. Identified boards still do not answer. An `ASK` that
   receives no `DISC` ends the startup loop.

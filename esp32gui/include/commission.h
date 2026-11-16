@@ -4,8 +4,8 @@
  *
  * Identity rules are in doc/Fly_Micro4_addressing.md. The master sends ASK
  * (type 11) every 5 s; unidentified boards answer DISC (type 8) with their
- * 64-bit QSPI flash ID; the master answers ASSIGN (type 10) with the board ID
- * in the 7-bit field and the flash ID in the payload. The board never learns
+ * 6-byte Katapult/Klipper UUID; the master answers ASSIGN (type 10) with the board ID
+ * in the 7-bit field and the UUID in the payload. The board never learns
  * a grid position.
  *
  * The home/up/down controls use type 5 (HOME) and type 4 (COMMAND). The
@@ -40,7 +40,7 @@ typedef enum {
 
 typedef struct {
   bool used;
-  uint8_t flash_id[SS_FLASH_ID_LEN];
+  uint8_t uuid[SS_UUID_LEN];
   int board_id;  /* -1 until ASSIGN */
   bool advertised;
   bool status_seen;
@@ -63,6 +63,8 @@ typedef struct {
   uint8_t health_seq;
   bool version_seen;
   char sw_version[24];
+  uint8_t version_flags;   /* bit 0 dirty */
+  uint32_t current_build;  /* 0 = unknown */
   uint32_t last_version_ms;
   int assigned_positions;  /* count of grid positions for this board */
 } ss_node_t;
@@ -92,14 +94,14 @@ void commission_on_frame(const ss_can_frame_t *frame, void *ctx);
  * advance the test run. Call at >= 10 Hz. */
 void commission_poll(void);
 
-/* Re-copy the persisted (flash_id -> board_id) map after a config save/reset
+/* Re-copy the persisted (uuid -> board_id) map after a config save/reset
  * or a discovered-board edit. Call from the main loop, not the CAN callback. */
 void commission_reload_config(void);
 
 int commission_node_count(void);
 bool commission_get_node(int index, ss_node_t *out);
 const ss_commission_stats_t *commission_stats(void);
-int commission_find_node(const uint8_t flash_id[8]);
+int commission_find_node(const uint8_t uuid[SS_UUID_LEN]);
 
 /* Selection used by the Grid/Nodes/Motor screens. */
 int commission_selected_index(void);
@@ -108,7 +110,7 @@ void commission_select(int index);
 /* Commission one motor. UP/DOWN jog `distance_mm`; HOME uses the HOME frame;
  * STOP cancels motion on that axis. Returns false when the board is unknown,
  * unassigned, or the transport rejected the frame. */
-bool commission_test_motor(const uint8_t flash_id[8], uint8_t axis,
+bool commission_test_motor(const uint8_t uuid[SS_UUID_LEN], uint8_t axis,
                            ss_motor_action_t action, uint16_t distance_mm,
                            uint16_t speed_mm_s);
 

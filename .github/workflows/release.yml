@@ -1,0 +1,126 @@
+name: firmware release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify the annotated tag and its message
+        id: tagcheck
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          if [ "$(git cat-file -t "$TAG")" != "tag" ]; then
+            echo "release tags must be annotated" >&2
+            exit 1
+          fi
+          if ! printf '%s' "$TAG" | grep -Eq '^v(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})$'; then
+            echo "tag is not a release version in 0..255" >&2
+            exit 1
+          fi
+          for part in $(printf '%s' "$TAG" | tr '.' ' ' | sed 's/^v//'); do
+            if [ "$part" -gt 255 ]; then
+              echo "version component above 255" >&2
+              exit 1
+            fi
+          done
+          git tag -l --format='%(contents)' "$TAG" > RELEASE_NOTES.md
+          if ! grep -q '[^[:space:]]' RELEASE_NOTES.md; then
+            echo "the annotated tag message is the release body and is empty" >&2
+            exit 1
+          fi
+
+      - name: Refuse an existing release for this tag
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "a release already exists for $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+
+      - name: Compute version, build id and git prefix
+        id: meta
+        run: |
+          set -euo pipefail
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "build=$(git log -1 --format=%ct)" >> "$GITHUB_OUTPUT"
+          echo "git8=$(git rev-parse HEAD | cut -c1-8)" >> "$GITHUB_OUTPUT"
+
+      - name: Require a strictly greater build id
+        run: |
+          set -euo pipefail
+          NEW="${{ steps.meta.outputs.build }}"
+          LAST="$(gh release list --limit 1 --json tagName -q '.[0].tagName // ""')"
+          if [ -z "$LAST" ]; then
+            echo "no previous release; build $NEW is the first"
+            exit 0
+          fi
+          gh release download "$LAST" -p release.json -O /tmp/previous-release.json
+          PREV="$(jq '[.targets[].build] | max // 0' /tmp/previous-release.json)"
+          if [ "$NEW" -le "$PREV" ]; then
+            echo "build id $NEW is not greater than the newest published $PREV" >&2
+            exit 1
+          fi
+
+      - name: Host tests
+        run: |
+          set -euo pipefail
+          cmake -S tests -B build
+          cmake --build build
+          ./build/motion_core_tests
+
+      - name: Build the Fly-Micro4 Katapult payload
+        env:
+          SS_FW_VERSION: ${{ steps.meta.outputs.version }}
+          SS_BUILD_ID: ${{ steps.meta.outputs.build }}
+          SS_RELEASE: '1'
+        run: |
+          set -euo pipefail
+          cd rp2040
+          pio run -e fly_micro4_katapult
+
+      - name: Build the panel release image
+        env:
+          SS_FW_VERSION: ${{ steps.meta.outputs.version }}
+          SS_BUILD_ID: ${{ steps.meta.outputs.build }}
+          SS_RELEASE: '1'
+        run: |
+          set -euo pipefail
+          cd esp32gui
+          pio run -e esp32can
+
+      - name: Pack the release directory
+        run: |
+          set -euo pipefail
+          PART_SHA="$(sha256sum esp32gui/.pio/build/esp32can/partitions.bin | cut -d' ' -f1)"
+          ./build/release_pack \
+            --out dist \
+            --version "${{ steps.meta.outputs.version }}" \
+            --build "${{ steps.meta.outputs.build }}" \
+            --git "${{ steps.meta.outputs.git8 }}" \
+            --fly rp2040/.pio/build/fly_micro4_katapult/firmware.bin \
+            --panel-app esp32gui/.pio/build/esp32can/firmware.bin \
+            --panel-factory esp32gui/.pio/build/esp32can/firmware.factory.bin \
+            --partition-sha "$PART_SHA"
+
+      - name: Publish the GitHub Release
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file RELEASE_NOTES.md \
+            dist/*

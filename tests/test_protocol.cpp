@@ -90,19 +90,19 @@ static int test_p6_non_motion_types(void) {
     return 0;
 }
 
-/* P7 — DISC and ASSIGN carry the 8-byte flash ID; ASK is eight zero bytes. */
+/* P7 — DISC and ASSIGN carry the 6-byte UUID followed by two zero bytes;
+ * ASK is eight zero bytes. */
 static int test_p7_discovery_payloads(void) {
-    const uint8_t flash_id[8] = {0x10, 0x23, 0x45, 0x67,
-                                 0x89, 0xAB, 0xCD, 0xEF};
+    const uint8_t uuid[MC_UUID_LEN] = {0x10, 0x23, 0x45, 0x67, 0x89, 0xAB};
     uint8_t buf[8];
-    uint8_t out[8] = {0};
+    uint8_t out[MC_UUID_LEN] = {0};
 
-    ASSERT(mc_pack_flash_id(flash_id, buf) == 0);
-    for (int i = 0; i < 8; ++i)
-        ASSERT(buf[i] == flash_id[i]);
-    ASSERT(mc_unpack_flash_id(buf, out) == 0);
-    for (int i = 0; i < 8; ++i)
-        ASSERT(out[i] == flash_id[i]);
+    ASSERT(mc_pack_uuid(uuid, buf) == 0);
+    for (int i = 0; i < MC_UUID_LEN; ++i)
+        ASSERT(buf[i] == uuid[i]);
+    ASSERT(buf[6] == 0 && buf[7] == 0);
+    ASSERT(mc_unpack_uuid(buf, out) == 0);
+    ASSERT(mc_uuid_equal(out, uuid) == 1);
 
     for (int i = 0; i < 8; ++i)
         buf[i] = 0xAA;
@@ -115,12 +115,13 @@ static int test_p7_discovery_payloads(void) {
     return 0;
 }
 
-/* P8 — ASSIGN is one frame: payload matches the board's own flash ID, the
- * field is the new board ID. A mismatch leaves the board unchanged. */
+/* P8 — ASSIGN is one frame: the first six payload bytes match the board's
+ * own UUID and bytes 6–7 are zero; the field is the new board ID. */
 static int test_p8_assign(void) {
-    const uint8_t own[8] = {1, 2, 3, 4, 5, 6, 7, 8};
-    const uint8_t other[8] = {1, 2, 3, 4, 5, 6, 7, 9};
-    const uint8_t *payload = own;
+    const uint8_t own[MC_UUID_LEN] = {1, 2, 3, 4, 5, 6};
+    uint8_t payload[8] = {1, 2, 3, 4, 5, 6, 0, 0};
+    const uint8_t other[8] = {1, 2, 3, 4, 5, 7, 0, 0};
+    const uint8_t nonzero_tail[8] = {1, 2, 3, 4, 5, 6, 1, 0};
     int board_id = -1;
 
     ASSERT(mc_id_make(7, 10) == ((7 << 4) | 10));
@@ -129,8 +130,10 @@ static int test_p8_assign(void) {
 
     ASSERT(mc_assign_board(&board_id, 8, other, own) == -1);
     ASSERT(board_id == 7);
+    ASSERT(mc_assign_board(&board_id, 8, nonzero_tail, own) == -1);
+    ASSERT(board_id == 7);
 
-    ASSERT(mc_assign_board(&board_id, 30, own, own) == -1);
+    ASSERT(mc_assign_board(&board_id, 30, payload, own) == -1);
     ASSERT(board_id == 7);
     return 0;
 }

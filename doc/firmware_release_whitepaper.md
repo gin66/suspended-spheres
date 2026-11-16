@@ -311,7 +311,7 @@ node is not present yet.
 4. Learn the identity. This is the only point in the procedure where the
    master broadcasts Katapult's `QUERY_UNASSIGNED`: exactly one Katapult node
    can answer, so there is no collision. Record the 6-byte UUID.
-5. Send `SET_NODEID` with that UUID and node byte `372`
+5. Send `SET_NODEID` with that UUID and node byte `116`
    (`katapult_whitepaper.md` §7.1).
 6. `CONNECT`. Require start address `0x10004000`, block size 64 and
    `rp2040`. Any other value aborts.
@@ -809,7 +809,7 @@ IDLE
        ├─ stop show, stop test run, confirm safe hold
        └─ for each board, ascending board ID:
             ENTERING    COMMAND opcode 4 to that board only. Tile turns yellow
-            CONNECTING  SET_NODEID(uuid, 372), CONNECT, GET_CANBUS_ID == uuid
+            CONNECTING  SET_NODEID(uuid, 116), CONNECT, GET_CANBUS_ID == uuid
             WRITING     SEND_BLOCK from 0x10004000, 64 B blocks, in order
             VERIFYING   EOF, REQUEST_BLOCK, compare with the padded image
             REBOOTING   COMPLETE, wait for the app, ASSIGN(uuid → board ID)

@@ -2,7 +2,8 @@
  *
  * Contract: Fly_Micro4_addressing.md §2 and §4.
  *   id = (field << 4) | type, 11-bit standard identifier only.
- *   Motor fields 0–119, board IDs 0–29, field 127 addresses all boards.
+ *   Motor fields 0–62 and 64–120; board IDs 0–29; field 127 addresses all
+ *   boards.  Field 63 belongs to Katapult's admin identifier 0x3F0.
  */
 
 #include "assert.h"
@@ -16,12 +17,13 @@ static int test_i1_make_and_range(void) {
     /* Field 0 is legal for motor 0 and for the system/broadcast types. */
     for (int type : {0, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14})
         ASSERT(mc_id_make(0, type) == type);
-    /* reserved types and motion fields above the motor range are rejected */
+    /* reserved types and motion fields outside the motor map are rejected */
     for (int type : {1, 9, 15})
         ASSERT(mc_id_make(0, type) == -1);
 
     ASSERT(mc_id_make(5, 0) == 80);          /* (5<<4)|0 */
-    ASSERT(mc_id_make(119, 0) == 119 * 16);
+    ASSERT(mc_id_make(120, 0) == 120 * 16);
+    ASSERT(mc_id_make(63, 0) == -1);         /* Katapult 0x3F0 */
     ASSERT(mc_id_make(29, 3) == 29 * 16 + 3);
     ASSERT(mc_id_make(127, 7) == 127 * 16 + 7);
 
@@ -36,14 +38,18 @@ static int test_i1_make_and_range(void) {
     return 0;
 }
 
-/* I2 — type 0 carries a motor field 0…119; motor 0 is legal; type 1 is
- * reserved; 120…127 are rejected. */
+/* I2 — type 0 carries a motor field 0…62 and 64…120; motor 0 is legal;
+ * type 1 is reserved; field 63 and 121…127 are rejected. */
 static int test_i2_motion_field_rules(void) {
     ASSERT(mc_id_make(0, 0) == 0x00);
     ASSERT(mc_id_valid(0x00) == 1);
     ASSERT(mc_id_make(1, 0) == 0x10);
-    ASSERT(mc_id_valid(mc_id_make(119, 0)) == 1);
-    ASSERT(mc_id_make(120, 0) == -1);
+    ASSERT(mc_id_valid(mc_id_make(62, 0)) == 1);
+    ASSERT(mc_id_make(63, 0) == -1);
+    ASSERT(mc_id_valid(0x3F0) == 0);         /* the Katapult admin id */
+    ASSERT(mc_id_make(64, 0) == 0x400);
+    ASSERT(mc_id_valid(mc_id_make(120, 0)) == 1);
+    ASSERT(mc_id_make(121, 0) == -1);
     ASSERT(mc_id_make(127, 0) == -1);
     ASSERT(mc_id_make(0, 1) == -1);
     ASSERT(mc_id_make(5, 1) == -1);
@@ -119,7 +125,10 @@ static int test_i7_decoder_entities(void) {
 
     ASSERT(mc_id_motor(motor_id) == 5);
     ASSERT(mc_id_motor(mc_id_make(0, 0)) == 0);
-    ASSERT(mc_id_motor(mc_id_make(119, 0)) == 119);
+    ASSERT(mc_id_motor(mc_id_make(62, 0)) == 62);
+    ASSERT(mc_id_motor(mc_id_make(64, 0)) == 64);
+    ASSERT(mc_id_motor(mc_id_make(120, 0)) == 120);
+    ASSERT(mc_id_motor(mc_id_make(63, 0)) == -1);
     ASSERT(mc_id_motor(board_id) == -1);
 
     ASSERT(mc_id_board(board_id) == 5);
@@ -134,23 +143,33 @@ static int test_i7_decoder_entities(void) {
     return 0;
 }
 
-/* I8 — board b owns motors 4b … 4b+3. Boards outside 0–29 own nothing. */
+/* I8 — board b owns the four motor fields for raw 4b … 4b+3.  The field
+ * skips 63.  Boards outside 0–29 own nothing. */
 static int test_i8_ownership_table(void) {
-    for (int board = 0; board < 30; ++board) {
-        int first = 4 * board;
-        ASSERT(mc_board_first_motor(board) == first);
-        for (int m = 0; m <= 119; ++m) {
-            int expect = (m >= first && m <= first + 3) ? 1 : 0;
-            ASSERT(mc_board_owns_motor(board, m) == expect);
-        }
+    for (int board = 0; board < 30; ++board)
+        ASSERT(mc_board_first_motor(board) ==
+               mc_raw_to_motor_field(4 * board));
+    for (int m = 0; m <= 127; ++m) {
+        int owners = 0;
+        for (int board = 0; board < 30; ++board)
+            if (mc_board_owns_motor(board, m))
+                ++owners;
+        ASSERT(owners == (mc_motor_field_valid(m) ? 1 : 0));
     }
     ASSERT(mc_board_first_motor(-1) == -1);
     ASSERT(mc_board_first_motor(30) == -1);
     ASSERT(mc_board_owns_motor(30, 0) == 0);
     ASSERT(mc_board_first_motor(0) == 0);
-    ASSERT(mc_board_first_motor(29) == 116);
+    ASSERT(mc_board_first_motor(15) == 60);
+    ASSERT(mc_board_first_motor(29) == 117);
+    ASSERT(mc_board_owns_motor(15, 60) == 1);
+    ASSERT(mc_board_owns_motor(15, 61) == 1);
+    ASSERT(mc_board_owns_motor(15, 62) == 1);
+    ASSERT(mc_board_owns_motor(15, 64) == 1);
+    ASSERT(mc_board_owns_motor(15, 63) == 0);
+    ASSERT(mc_board_owns_motor(29, 120) == 1);
     ASSERT(mc_node_first_motor(0) == 0);
-    ASSERT(mc_node_owns_motor(29, 119) == 1);
+    ASSERT(mc_node_owns_motor(29, 120) == 1);
     return 0;
 }
 
@@ -158,11 +177,16 @@ static int test_i8_ownership_table(void) {
  * board b, field 127 on types 3–7 and 12, and field 0 on types 2, 8 and 11. */
 static int test_i9_acceptance(void) {
     const int board = 3;
-    const int first = 4 * board;             /* 12, 13, 14, 15 */
+    const int first_raw = 4 * board;         /* 12, 13, 14, 15 */
 
-    for (int m = 0; m <= 119; ++m) {
-        int expect = (m >= first && m < first + 4) ? 1 : 0;
-        ASSERT(mc_board_accepts_id(board, mc_id_make(m, 0)) == expect);
+    for (int m = 0; m <= 127; ++m) {
+        int own = 0;
+        for (int axis = 0; axis < 4; ++axis)
+            if (mc_raw_to_motor_field(first_raw + axis) == m)
+                own = 1;
+        if (!mc_motor_field_valid(m))
+            continue;
+        ASSERT(mc_board_accepts_id(board, mc_id_make(m, 0)) == own);
     }
     ASSERT(mc_board_accepts_id(board, mc_id_make(12, 1)) == 0);
 
@@ -191,20 +215,20 @@ static int test_i9_acceptance(void) {
     ASSERT(mc_board_accepts_id(board, 0x800) == 0);
     ASSERT(mc_board_accepts_id(board, mc_id_make(5, 1)) == 0);
     ASSERT(mc_board_accepts_id(board, mc_id_make(30, 4)) == 0);
-    ASSERT(mc_node_accepts_id(board, mc_id_make(first, 0)) == 1);
+    ASSERT(mc_node_accepts_id(board, mc_id_make(first_raw, 0)) == 1);
     return 0;
 }
 
-/* I10 — property: for every motor 0…119 (type 0) exactly one board
- * accepts the frame. */
+/* I10 — property: for every valid motor field (type 0) exactly one board
+ * accepts the frame; field 63 is not a motor and is accepted by none. */
 static int test_i10_unique_acceptor_property(void) {
-    for (int motor = 0; motor <= 119; ++motor) {
+    for (int motor = 0; motor <= 127; ++motor) {
         int id = mc_id_make(motor, 0);
         int acceptors = 0;
         for (int board = 0; board < 30; ++board)
             if (mc_board_accepts_id(board, id))
                 ++acceptors;
-        ASSERT(acceptors == 1);
+        ASSERT(acceptors == (mc_motor_field_valid(motor) ? 1 : 0));
     }
     return 0;
 }

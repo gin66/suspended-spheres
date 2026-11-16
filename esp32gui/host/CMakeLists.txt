@@ -46,6 +46,7 @@ target_include_directories(esp32gui_host PRIVATE
   ${CMAKE_SOURCE_DIR}
   ${LVGL_ROOT_DIR}/src/libs/lodepng
   ${CMAKE_SOURCE_DIR}/../ui
+  ${CMAKE_SOURCE_DIR}/../include
 )
 
 target_link_libraries(esp32gui_host PRIVATE lvgl)

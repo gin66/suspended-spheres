@@ -460,7 +460,7 @@ node owns, and how a board is commissioned are in `Fly_Micro4_addressing.md`.
 
   | Offset | Type | Field |
   |--------|------|--------|
-  | 0 | `uint8` | `action`: 1 up, 2 down, 3 stop, `0x7F` re-identify |
+  | 0 | `uint8` | `action`: 1 up, 2 down, 3 stop, 4 enter bootloader, `0x7F` re-identify |
   | 1 | `uint8` | `axis_mask`, bits 0–3 |
   | 2–3 | `uint16` | `distance_mm` |
   | 4–5 | `uint16` | `speed_mm_s` |
@@ -470,7 +470,8 @@ node owns, and how a board is commissioned are in `Fly_Micro4_addressing.md`.
   Field 127 addresses every board; a single board ID addresses one. `0x7F`
   is re-identify: the board stops its axes, drops its RAM board ID and
   answers the next `ASK`. A stop on field 127 with mask `0x0F` is the
-  operational stop.
+  operational stop. Action 4 (`ENTER_BOOTLOADER`) is sent to one board ID
+  only and is never broadcast (`katapult_whitepaper.md` §6.2).
 - **Home** (master → node, type 5, field = board ID). One 8-byte frame:
   `[0]` axis mask, `[1..7]` reserved zero. Homing and calibration are on
   demand and are not part of the motion stream.

@@ -74,15 +74,15 @@ Those holes are §4 of the addressing note. This paper uses them as follows.
 |--------|-----------|-----|
 | `0x3F0` | master → nodes | Katapult / Klipper admin |
 | `0x3F1` | node → master | Admin response |
-| `0x3E8` | master → the board being programmed | Bootloader data. Node byte **372** (`372 × 2 + 0x100 = 0x3E8`) |
-| `0x3E9` | that board → master | Bootloader data response |
+| `0x1E8` | master → the board being programmed | Bootloader data. Node byte **116** (`116 × 2 + 0x100 = 0x1E8`) |
+| `0x1E9` | that board → master | Bootloader data response |
 
 `0x3F0` is the identifier the old motor numbering used for motor 63
 (`(63 << 4) | 0`). The addressing note skips that motor field so a board left
 in the bootloader is not fed motion frames on the admin ID. Stock
 `flashtool.py` assigns a different data ID (the first node lands on `0x202`)
 and broadcasts a node-id clear. Do not point it at this bus. The show
-controller is the flasher, and it uses node byte 372 only.
+controller is the flasher, and it uses node byte 116 only.
 
 ---
 
@@ -94,7 +94,7 @@ those four axes already disabled or mechanically safe. The enter-bootloader
 command in §6 disables the four drivers before it writes the request word.
 
 The other boards stay in the application. They keep their board IDs. They do
-not see a valid show frame on `0x3F0`, `0x3F1`, `0x3E8`, or `0x3E9`.
+not see a valid show frame on `0x3F0`, `0x3F1`, `0x1E8`, or `0x1E9`.
 
 ---
 
@@ -161,7 +161,7 @@ Per board, at the bench or on the rack with a USB cable:
 3. Copy `out/katapult.uf2` onto that drive. The drive ejects itself.
 4. Power-cycle on the CAN trunk at 1 Mbit/s, with the bus terminated as in
    `controller_analysis.md`. No application is present, so Katapult stays in
-   the bootloader and will answer §7 once the master assigns node byte 372.
+   the bootloader and will answer §7 once the master assigns node byte 116.
 
 The first application image then goes over CAN (§7), not by a second UF2.
 A UF2 of the application, linked at address 0, would remove Katapult.
@@ -209,7 +209,9 @@ requests Katapult the same way Klipper's `try_request_canboot()` does:
 #define CANBOOT_REQUEST   0x5984E3FA6CA1589BULL
 
 void enter_katapult(void) {
-    uint32_t *vectors = (uint32_t *)0x10000000;
+    /* RP2040: stage-2 occupies 0x10000000; the Katapult vector table is at
+     * CONFIG_FLASH_BOOT_ADDRESS = 0x10000100. */
+    uint32_t *vectors = (uint32_t *)0x10000100;
     uint64_t *sig = (uint64_t *)(vectors[1] - 9);
     uint64_t *slot = (uint64_t *)vectors[0];
     if (((uintptr_t)sig & 7) || *sig != CANBOOT_SIGNATURE)
@@ -223,9 +225,18 @@ void enter_katapult(void) {
 ```
 
 The signature check returns without resetting when the CAN Katapult image is
-absent. The running application does not listen on `0x3F0`. Klipper's admin
-reboot (`0x3F0`, first data byte `0x02`) is not the enter path, and stock
-`flashtool.py -r` will not move this firmware into the bootloader.
+absent. On RP2040 the stage-2 occupies `0x10000000`, so the Katapult vector
+table is at `0x10000100`, not `0x10000000`; the signature is nine **bytes**
+before that table's reset vector. The running application does not listen on
+`0x3F0`. Klipper's admin reboot (`0x3F0`, first data byte `0x02`) is not the
+enter path, and stock `flashtool.py -r` will not move this firmware into the
+bootloader.
+
+Katapult starts the application when the first word at `0x10004000` is
+neither `0` nor `0xFFFFFFFF` (`application_check_valid`). After installing
+Katapult over a stale application, invalidate that word (write `0xFF` to the
+first 256 bytes) unless a valid application already starts there. Otherwise
+Katapult jumps into the old image and never stays on CAN.
 
 ---
 
@@ -247,9 +258,9 @@ One standard frame, identifier `0x3F0`, 8 data bytes:
 |------|--------|
 | 0 | `0x11` (`SET_NODEID`) |
 | 1–6 | UUID byte 0 first, the same order as `DISC` |
-| 7 | `372` |
+| 7 | `116` |
 
-The board then accepts bootloader bytes on `0x3E8` and answers on `0x3E9`.
+The board then accepts bootloader bytes on `0x1E8` and answers on `0x1E9`.
 A `CLEAR_NODE_ID` (`0x3F0`, byte `0x12`) is a broadcast to every Katapult
 node. This procedure does not send it. Only one board is in Katapult.
 
@@ -332,7 +343,7 @@ NOR timings. The panel shows that wait as 30 tiles on one page
 Do not put a second board into Katapult while the first is still there.
 
 Katapult can in principle hold several node bytes at once. This installation
-reserves one data pair (`0x3E8` / `0x3E9`). `QUERY_UNASSIGNED` on a bus with
+reserves one data pair (`0x1E8` / `0x1E9`). `QUERY_UNASSIGNED` on a bus with
 more than one Katapult node collides the answers. The master already knows
 each UUID, so it never needs that query.
 

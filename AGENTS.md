@@ -23,13 +23,18 @@ Suspended_Spheres/
 │   ├── motion_core/            # Shared integer core (PC and firmware)
 │   │   ├── include/motion_core.h
 │   │   └── src/motion_core.cpp
-│   └── pattern_core/           # Pattern bake, limits, report, .hbp export, live reload
+│   ├── pattern_core/           # Pattern bake, limits, report, .hbp export, live reload
+│   ├── release_core/           # SHA-256, tag/filename, manifest, selectors
+│   ├── fleet_core/             # Outdated set, Katapult queue, tile colour
+│   ├── panel_core/             # Config v2, version retry, SD list, OTA policy
+│   └── net_core/               # WiFi/web/GitHub release host policy
 ├── tests/                      # Host-only harness (CMake, no hardware)
 │   ├── CMakeLists.txt
 │   ├── assert.h
 │   ├── test_runner.cpp
 │   └── abi_c.c
-├── tools/                      # Headless pattern checker (pattern_check)
+├── tools/                      # pattern_check and release_pack
+├── .github/workflows/          # release.yml: the only tag publisher
 ├── wasm/                       # Native/Emscripten parity driver
 ├── webapp/                     # Vite + Three.js designer viewer
 ├── patterns/                   # .anim.json sources and the golden sine
@@ -64,7 +69,8 @@ All technical Markdown belongs in `doc/`. Only `README.md` and `AGENTS.md` sit a
 
 ## 3. Development Environment
 
-- **Host build (CMake).** The PC harness has no Pico SDK, no PIO and no CAN:
+- **Host build (CMake).** The PC harness has no Pico SDK, no PIO and no CAN.
+  `release_pack` is built beside `pattern_check`:
   ```sh
   cmake -S tests -B build
   cmake --build build
@@ -79,6 +85,15 @@ All technical Markdown belongs in `doc/`. Only `README.md` and `AGENTS.md` sit a
 - **TMC2209 bring-up console.** USB serial on the Fly-Micro4 accepts `help`.
   Current and StallGuard commands are in `doc/motion_streaming_whitepaper.md`
   §5.6.1. It can command motion and is a bench tool, not a production interface.
+- **BOOTSEL over USB.** The same Fly-Micro4 console has `bootsel`, which calls
+  `reset_usb_boot(0, 0)` and enumerates `RPI-RP2` with no BOOT-button press.
+  This works only while an application is running; a dead board still needs
+  the physical BOOT gesture. Load a Katapult payload with
+  `picotool load <file.uf2>`, or copy the UF2 to `/Volumes/RPI-RP2`. A UF2
+  linked at `0x10004000` (env `fly_micro4_katapult`) keeps Katapult; one
+  linked at `0x10000000` removes it. After installing Katapult, invalidate
+  the old first word at `0x10004000` if no valid app is present, otherwise
+  Katapult jumps into the stale image and does not stay on CAN.
 - **Show-controller firmware (PlatformIO).** `esp32gui/` is the Waveshare 7"
   panel. It builds with the mock CAN transport because the bus is not wired:
   ```sh

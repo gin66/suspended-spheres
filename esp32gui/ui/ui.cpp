@@ -1,4 +1,5 @@
 #include "ui.h"
+#include "release_gate.h"
 
 #include <cstdio>
 #include <cstring>
@@ -119,7 +120,7 @@ uint32_t s_can_shown_hash = 0;
 uint32_t s_can_last_ms = 0;
 
 /* Upgrade screen */
-lv_obj_t *s_upgrade_list;
+lv_obj_t *s_upgrade_tiles;
 lv_obj_t *s_upgrade_summary;
 lv_obj_t *s_upgrade_status;
 lv_obj_t *s_upgrade_progress;
@@ -489,10 +490,12 @@ void on_can_toggle(lv_event_t *e) {
   }
 }
 
+#ifdef SS_CAN_MOCK
 void on_mock_inject(lv_event_t *e) {
   (void)e;
   if (s_actions.mock_inject != nullptr) s_actions.mock_inject();
 }
+#endif
 
 void on_anim_row(lv_event_t *e) {
   const int index = (int)(intptr_t)lv_event_get_user_data(e);
@@ -522,6 +525,17 @@ void on_version_query(lv_event_t *e) {
 void on_upgrade_start(lv_event_t *e) {
   (void)e;
   if (s_actions.upgrade_selected != nullptr) s_actions.upgrade_selected();
+}
+
+void on_upgrade_all(lv_event_t *e) {
+  (void)e;
+  if (s_actions.upgrade_all_outdated != nullptr)
+    s_actions.upgrade_all_outdated();
+}
+
+void on_upgrade_stop(lv_event_t *e) {
+  (void)e;
+  if (s_actions.upgrade_stop != nullptr) s_actions.upgrade_stop();
 }
 
 void on_upgrade_row(lv_event_t *e) {
@@ -772,11 +786,13 @@ void build_show(void) {
   lv_obj_t *can = make_button(actions, "CAN START/STOP", 170, 46,
                               on_can_toggle, nullptr);
   lv_obj_set_pos(can, 334, 6);
+#ifdef SS_CAN_MOCK
   if (s_actions.mock_inject != nullptr) {
     lv_obj_t *mock = make_button(actions, "MOCK NODE", 150, 46,
                                  on_mock_inject, nullptr);
     lv_obj_set_pos(mock, 512, 6);
   }
+#endif
   (void)can;
 }
 
@@ -1181,20 +1197,26 @@ void build_upgrade(void) {
   s_upgrade_summary = make_label(head, "", &lv_font_montserrat_12, C_MUTED);
   lv_obj_align(s_upgrade_summary, LV_ALIGN_RIGHT_MID, -12, 0);
 
-  lv_obj_t *controls = make_panel(s, 12, 64, 688, 84);
-  lv_obj_t *query = make_button(controls, "QUERY ALL", 140, 44,
+  lv_obj_t *controls = make_panel(s, 12, 62, 688, 76);
+  lv_obj_t *query = make_button(controls, "QUERY ALL", 116, 40,
                                 on_version_query, nullptr);
   lv_obj_set_pos(query, 8, 8);
-  lv_obj_t *upgrade = make_button(controls, "UPGRADE SELECTED", 190, 44,
-                                  on_upgrade_start, nullptr);
-  lv_obj_set_pos(upgrade, 156, 8);
+  lv_obj_t *all = make_button(controls, "UPGRADE ALL OUTDATED", 200, 40,
+                              on_upgrade_all, nullptr);
+  lv_obj_set_pos(all, 132, 8);
+  lv_obj_t *sel = make_button(controls, "UPGRADE SELECTED", 180, 40,
+                              on_upgrade_start, nullptr);
+  lv_obj_set_pos(sel, 340, 8);
+  lv_obj_t *stop = make_button(controls, "STOP", 80, 40, on_upgrade_stop,
+                               nullptr);
+  lv_obj_set_pos(stop, 528, 8);
   s_upgrade_status = make_label(controls, "idle", &lv_font_montserrat_12, C_MUTED);
-  lv_obj_set_pos(s_upgrade_status, 356, 10);
-  lv_label_set_long_mode(s_upgrade_status, LV_LABEL_LONG_WRAP);
-  lv_obj_set_width(s_upgrade_status, 190);
+  lv_obj_set_pos(s_upgrade_status, 8, 54);
+  lv_label_set_long_mode(s_upgrade_status, LV_LABEL_LONG_CLIP);
+  lv_obj_set_width(s_upgrade_status, 420);
   s_upgrade_progress = lv_bar_create(controls);
-  lv_obj_set_pos(s_upgrade_progress, 356, 44);
-  lv_obj_set_size(s_upgrade_progress, 300, 8);
+  lv_obj_set_pos(s_upgrade_progress, 436, 58);
+  lv_obj_set_size(s_upgrade_progress, 244, 8);
   lv_bar_set_range(s_upgrade_progress, 0, 100);
   lv_bar_set_value(s_upgrade_progress, 0, LV_ANIM_OFF);
   lv_obj_set_style_bg_color(s_upgrade_progress, C_OFF, 0);
@@ -1202,23 +1224,16 @@ void build_upgrade(void) {
   lv_obj_set_style_radius(s_upgrade_progress, 4, 0);
   lv_obj_set_style_radius(s_upgrade_progress, 4, LV_PART_INDICATOR);
 
-  lv_obj_t *list = lv_obj_create(s);
-  lv_obj_remove_style_all(list);
-  lv_obj_set_pos(list, 12, 156);
-  lv_obj_set_size(list, 688, 288);
-  lv_obj_set_style_bg_color(list, C_PANEL, 0);
-  lv_obj_set_style_bg_opa(list, LV_OPA_COVER, 0);
-  lv_obj_set_style_radius(list, 8, 0);
-  lv_obj_set_style_border_width(list, 1, 0);
-  lv_obj_set_style_border_color(list, C_LINE, 0);
-  lv_obj_set_style_pad_all(list, 8, 0);
-  lv_obj_set_style_pad_row(list, 6, 0);
-  lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_scroll_dir(list, LV_DIR_VER);
-  lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_ACTIVE);
-  s_upgrade_list = list;
+  /* 30 tiles on one page: 6 columns by 5 rows, no second page and no
+   * scrolling list (firmware_release_whitepaper.md §4.10). */
+  lv_obj_t *tiles = lv_obj_create(s);
+  lv_obj_remove_style_all(tiles);
+  lv_obj_set_pos(tiles, 12, 146);
+  lv_obj_set_size(tiles, 688, 324);
+  lv_obj_set_style_bg_opa(tiles, LV_OPA_TRANSP, 0);
+  lv_obj_clear_flag(tiles, LV_OBJ_FLAG_SCROLLABLE);
+  s_upgrade_tiles = tiles;
   s_upgrade_shown_hash = 0;
-  add_scroll_buttons(controls, list, 568, 8, 48, 48, 8, false);
 }
 
 void build_settings(void) {
@@ -1549,10 +1564,9 @@ void ui_update(const ui_snapshot_t *snapshot) {
       lv_obj_add_event_cb(row, on_node_row, LV_EVENT_CLICKED,
                           (void *)(intptr_t)i);
       char flash[24];
-      std::snprintf(flash, sizeof(flash), "%02x%02x%02x%02x%02x%02x%02x%02x",
-                    n->flash_id[0], n->flash_id[1], n->flash_id[2],
-                    n->flash_id[3], n->flash_id[4], n->flash_id[5],
-                    n->flash_id[6], n->flash_id[7]);
+      std::snprintf(flash, sizeof(flash), "%02x%02x%02x%02x%02x%02x",
+                    n->uuid[0], n->uuid[1], n->uuid[2],
+                    n->uuid[3], n->uuid[4], n->uuid[5]);
       char board[24];
       if (n->board_id >= 0) {
         std::snprintf(board, sizeof(board), "board %d", n->board_id);
@@ -1604,10 +1618,9 @@ void ui_update(const ui_snapshot_t *snapshot) {
   }
   if (sel != nullptr) {
     char flash[24];
-    std::snprintf(flash, sizeof(flash), "%02x%02x%02x%02x%02x%02x%02x%02x",
-                  sel->flash_id[0], sel->flash_id[1], sel->flash_id[2],
-                  sel->flash_id[3], sel->flash_id[4], sel->flash_id[5],
-                  sel->flash_id[6], sel->flash_id[7]);
+    std::snprintf(flash, sizeof(flash), "%02x%02x%02x%02x%02x%02x",
+                  sel->uuid[0], sel->uuid[1], sel->uuid[2],
+                  sel->uuid[3], sel->uuid[4], sel->uuid[5]);
     lv_label_set_text_fmt(s_motor_node, "#%d  %s", s_snap.selected_node,
                           sel->online ? "online" : "offline");
     lv_label_set_text(s_motor_flash, flash);
@@ -1747,77 +1760,114 @@ void ui_update(const ui_snapshot_t *snapshot) {
     }
   }
 
-  /* Upgrade */
+  /* Upgrade — one page of 30 tiles, 6 columns by 5 rows. */
   int versioned = 0;
+  int done = 0;
   uint32_t up_hash = 2166136261u;
+  up_hash = (up_hash ^ s_snap.upgrade_image_build) * 16777619u;
+  up_hash = (up_hash ^ (uint32_t)s_snap.upgrade_done) * 16777619u;
+  up_hash = (up_hash ^ (uint32_t)s_snap.upgrade_yellow_board) * 16777619u;
+  for (const char *p = s_snap.upgrade_image_version; *p != '\0'; ++p)
+    up_hash = (up_hash ^ (uint8_t)*p) * 16777619u;
   for (int i = 0; i < s_snap.node_count; ++i) {
     const ui_node_t *n = &s_snap.nodes[i];
     if (n->version_seen) versioned++;
+    if (n->upgrade_state == UI_UPG_DONE) done++;
     up_hash = (up_hash ^ n->board_id) * 16777619u;
-    up_hash = (up_hash ^ (n->online ? 1u : 0u)) * 16777619u;
-    up_hash = (up_hash ^ (n->version_seen ? 1u : 0u)) * 16777619u;
-    for (const char *p = n->sw_version; *p != '\0'; ++p) {
-      up_hash = (up_hash ^ (uint8_t)*p) * 16777619u;
-    }
+    up_hash = (up_hash ^ n->upgrade_state) * 16777619u;
+    up_hash = (up_hash ^ n->upgrade_color) * 16777619u;
+    up_hash = (up_hash ^ n->upgrade_progress) * 16777619u;
   }
-  up_hash = (up_hash ^ (uint32_t)s_snap.selected_node) * 16777619u;
-  up_hash = (up_hash ^ s_snap.upgrade_progress) * 16777619u;
   if (up_hash != s_upgrade_shown_hash) {
     s_upgrade_shown_hash = up_hash;
-    lv_obj_clean(s_upgrade_list);
-    if (s_snap.node_count == 0) {
-      lv_obj_t *l = make_label(s_upgrade_list, "No boards discovered yet.",
-                               &lv_font_montserrat_16, C_MUTED);
-      lv_obj_set_style_pad_all(l, 12, 0);
-    }
-    for (int i = 0; i < s_snap.node_count; ++i) {
-      const ui_node_t *n = &s_snap.nodes[i];
-      lv_obj_t *row = lv_button_create(s_upgrade_list);
-      lv_obj_set_size(row, 664, 48);
-      lv_obj_set_style_radius(row, 6, 0);
-      lv_obj_set_style_bg_color(
-          row, (i == s_snap.selected_node) ? C_PANEL2 : C_PANEL, 0);
-      lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
-      lv_obj_set_style_border_width(row, 1, 0);
-      lv_obj_set_style_border_color(
-          row, (i == s_snap.selected_node) ? C_ACCENT : C_LINE, 0);
-      lv_obj_set_style_shadow_width(row, 0, 0);
-      lv_obj_set_style_pad_left(row, 10, 0);
-      lv_obj_set_style_pad_right(row, 10, 0);
-      lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-      lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
-                            LV_FLEX_ALIGN_CENTER);
-      lv_obj_set_style_pad_column(row, 14, 0);
-      lv_obj_add_event_cb(row, on_upgrade_row, LV_EVENT_CLICKED,
-                          (void *)(intptr_t)i);
-      char flash[24];
-      std::snprintf(flash, sizeof(flash), "%02x%02x%02x%02x%02x%02x%02x%02x",
-                    n->flash_id[0], n->flash_id[1], n->flash_id[2],
-                    n->flash_id[3], n->flash_id[4], n->flash_id[5],
-                    n->flash_id[6], n->flash_id[7]);
-      char board[24];
-      if (n->board_id >= 0) {
-        std::snprintf(board, sizeof(board), "board %d", n->board_id);
+    lv_obj_clean(s_upgrade_tiles);
+    const int cols = 6;
+    const int tw = 104, th = 54, gap = 10;
+    for (int slot = 0; slot < 30; ++slot) {
+      const ui_node_t *n =
+          (slot < s_snap.node_count) ? &s_snap.nodes[slot] : nullptr;
+      const int col = slot % cols;
+      const int row = slot / cols;
+      lv_obj_t *tile = lv_obj_create(s_upgrade_tiles);
+      lv_obj_remove_style_all(tile);
+      lv_obj_set_pos(tile, col * (tw + gap), row * (th + gap));
+      lv_obj_set_size(tile, tw, th);
+      lv_obj_set_style_radius(tile, 6, 0);
+      lv_obj_set_style_bg_opa(tile, LV_OPA_COVER, 0);
+      lv_obj_set_style_border_width(tile, 1, 0);
+      lv_obj_set_style_pad_all(tile, 4, 0);
+      lv_obj_set_style_shadow_width(tile, 0, 0);
+      lv_color_t bg = C_PANEL2;
+      lv_color_t border = C_LINE;
+      const char *phase = "";
+      if (n != nullptr) {
+        switch (n->upgrade_color) {
+          case UI_UPG_COLOR_RED:
+            bg = C_ERR; border = C_ERR; break;
+          case UI_UPG_COLOR_YELLOW:
+            bg = C_WARN; border = C_WARN;
+            switch (n->upgrade_state) {
+              case UI_UPG_ENTERING: phase = "enter"; break;
+              case UI_UPG_CONNECTING: phase = "connect"; break;
+              case UI_UPG_WRITING: phase = "write"; break;
+              case UI_UPG_VERIFYING: phase = "verify"; break;
+              case UI_UPG_REBOOTING: phase = "reboot"; break;
+              default: phase = "wait"; break;
+            }
+            break;
+          case UI_UPG_COLOR_GREEN:
+            bg = C_OK; border = C_OK; phase = "done"; break;
+          case UI_UPG_COLOR_FAILED:
+            bg = C_ERR; border = C_ERR; phase = "X"; break;
+          case UI_UPG_COLOR_DIM:
+          default:
+            bg = C_OFF; border = C_LINE;
+            phase = n->upgrade_result[0] ? n->upgrade_result : "dim";
+            break;
+        }
+        lv_obj_add_event_cb(tile, on_upgrade_row, LV_EVENT_CLICKED,
+                            (void *)(intptr_t)slot);
       } else {
-        std::snprintf(board, sizeof(board), "unassigned");
+        bg = C_OFF;
       }
-      char version[32];
-      std::snprintf(version, sizeof(version), "%s",
-                    n->version_seen && n->sw_version[0] ? n->sw_version : "--");
-      char state[40];
-      std::snprintf(state, sizeof(state), "%s%s",
-                    n->online ? "online" : "offline",
-                    n->version_seen ? "" : " (no version)");
-      make_label(row, flash, &lv_font_montserrat_12, C_TEXT);
-      make_label(row, board, &lv_font_montserrat_14,
-                 n->board_id >= 0 ? C_OK : C_WARN);
-      make_label(row, version, &lv_font_montserrat_14,
-                 n->version_seen ? C_TEXT : C_MUTED);
-      make_label(row, state, &lv_font_montserrat_12, C_MUTED);
+      lv_obj_set_style_bg_color(tile, bg, 0);
+      lv_obj_set_style_border_color(tile, border, 0);
+      char id[8];
+      if (n != nullptr && n->board_id >= 0)
+        std::snprintf(id, sizeof(id), "%02d", n->board_id);
+      else
+        std::snprintf(id, sizeof(id), "--");
+      lv_obj_t *idlabel = make_label(tile, id, &lv_font_montserrat_20,
+                                     n != nullptr ? C_TEXT : C_MUTED);
+      lv_obj_set_pos(idlabel, 8, 0);
+      char phase_txt[20];
+      if (n != nullptr && n->upgrade_state == UI_UPG_WRITING &&
+          n->upgrade_color == UI_UPG_COLOR_YELLOW) {
+        std::snprintf(phase_txt, sizeof(phase_txt), "write %u%%",
+                      (unsigned)n->upgrade_progress);
+        phase = phase_txt;
+      }
+      lv_obj_t *pl = make_label(tile, phase, &lv_font_montserrat_12,
+                                n != nullptr ? C_TEXT : C_MUTED);
+      lv_obj_set_pos(pl, 8, 30);
     }
   }
-  lv_label_set_text_fmt(s_upgrade_summary, "%d boards, %d report version",
-                        s_snap.node_count, versioned);
+  char head[128];
+  if (s_snap.upgrade_image_build != 0) {
+    std::snprintf(head, sizeof(head), "fly_micro4 %s  build %lu  %s  %d/30  %s",
+                  s_snap.upgrade_image_version[0]
+                      ? s_snap.upgrade_image_version
+                      : "--",
+                  (unsigned long)s_snap.upgrade_image_build,
+                  s_snap.upgrade_source[0] ? s_snap.upgrade_source : "SD",
+                  s_snap.upgrade_done, s_snap.upgrade_status);
+  } else {
+    std::snprintf(head, sizeof(head),
+                  "no image selected   %d/30   %s",
+                  s_snap.upgrade_done,
+                  s_snap.upgrade_status[0] ? s_snap.upgrade_status : "idle");
+  }
+  lv_label_set_text(s_upgrade_summary, head);
   lv_label_set_text(s_upgrade_status,
                     s_snap.upgrade_status[0] ? s_snap.upgrade_status : "idle");
   lv_obj_set_style_text_color(s_upgrade_status,

@@ -256,12 +256,12 @@ to a PNG before it is treated as done; the PNGs live in
 | Show | Pattern name, play / stop, elapsed time, bus state, discovered/assigned/online counts, unassigned steppers, thermal summary, test-run state |
 | Animations | HBP2 files on the card: name, size, duration, validity; refresh, select and load |
 | Grid | One cell per ball: assigned, free, thermal warning, fault; click a cell to select its board |
-| Nodes | Discovered boards by 6-byte UUID, board ID, online state, assigned positions, MCU temperature, TMC OTPW/OT, health age |
+| Nodes | Discovered boards by 6-byte UUID, board ID, online state, build, assigned positions, MCU temperature, TMC OTPW/OT, health age |
 | Motor | Selected board and axis (assigned axes are green); board health; HOME, UP, DOWN, STOP; tap a grid cell to choose the position, then assign/unassign |
 | Config | Grid size, test-run drop/speed/gap, serpentine, save/reset/clear, SPIFFS state |
 | Log | Recent PSRAM log ring, boot count, last watchpoint, last safe hold, thermal transitions |
 | CAN | Received-frame scope by identifier (raw ID, type, count, last data), TX sent/rejected, RX drops, bus-off state; clear |
-| Upgrade | Per-board software version, `QUERY ALL` (type-12 request), selected board, upgrade status and progress |
+| Upgrade | 30 tiles on one page in 6 × 5 order; board ID, waiting red, the one yellow Katapult board, green verified, dim excluded; `QUERY ALL`, `UPGRADE ALL OUTDATED`, `UPGRADE SELECTED`, `STOP`, image version/build/source and `n / 30` |
 | Settings | WiFi/SSID/IP/RSSI and CAN state, firmware, boot, uptime, position capacity, service path |
 
 The Animations screen is the file-selection UI. The SD enumeration and HBP2
@@ -275,12 +275,14 @@ per-motor type-0 IDs plus 30 status IDs, 30 health IDs and the sync ID, and
 commissioning and version traffic need headroom on top. Only received frames
 are counted.
 
-`QUERY ALL` sends `VERSION_REQ` (type 12) to field 127. Boards answer with
-`VERSION_RSP` (type 13) and the panel keeps the last version per board; see
-`motion_streaming_whitepaper.md` §4.5. In-place update is
-`katapult_whitepaper.md`: one board at a time, over Katapult. The CAN
-transfer is not implemented on the Fly-Micro4 yet, so `UPGRADE SELECTED`
-currently reports that the transfer is pending and makes no bus transaction.
+`QUERY ALL` clears `version_valid`, sends `VERSION_REQ` (type 12) to field
+127, waits 2 s and retries only the missing board IDs, up to three attempts.
+Boards answer with `VERSION_RSP` (type 13) after `1 ms × (board_id mod 10)`;
+the panel keeps the version, build and dirty flag per board
+(`motion_streaming_whitepaper.md` §4.5). In-place update is
+`katapult_whitepaper.md`: one board at a time, over Katapult. `UPGRADE ALL
+OUTDATED` and `UPGRADE SELECTED` use the same `lib/fleet_core` queue and one
+yellow tile.
 The release identity, the panel image load and the identified board list with
 `UPGRADE ALL OUTDATED` are `firmware_release_whitepaper.md`. The host test
 order is `firmware_release_tdd.md`. GitHub Releases of that image are created

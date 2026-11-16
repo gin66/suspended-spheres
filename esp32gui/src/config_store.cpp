@@ -11,78 +11,34 @@
 namespace {
 
 ss_config_t s_cfg;
+/* The v2 record is about 2 KiB.  Keep the serialise scratch off the loop
+ * task stack; the panel's loop stack is tight enough without two copies. */
+uint8_t s_blob[sizeof(ss_config_t)];
+ss_config_t s_loaded;
 bool s_dirty = false;
 bool s_mounted = false;
-
-uint32_t crc32_bytes(const uint8_t *data, size_t len) {
-  uint32_t crc = 0xFFFFFFFFu;
-  for (size_t i = 0; i < len; ++i) {
-    crc ^= data[i];
-    for (int b = 0; b < 8; ++b) {
-      crc = (crc >> 1) ^ (0xEDB88320u & (uint32_t)(-(int32_t)(crc & 1u)));
-    }
-  }
-  return ~crc;
-}
-
-uint32_t config_crc(const ss_config_t *cfg) {
-  return crc32_bytes(reinterpret_cast<const uint8_t *>(cfg),
-                     offsetof(ss_config_t, crc));
-}
 
 int capacity_from(const ss_config_t *cfg) {
   return (int)cfg->grid_cols * (int)cfg->grid_rows;
 }
 
 void set_defaults(ss_config_t *cfg) {
-  std::memset(cfg, 0, sizeof(*cfg));
-  cfg->magic = SS_CONFIG_MAGIC;
-  cfg->version = SS_CONFIG_VERSION;
-  cfg->grid_cols = 10;
-  cfg->grid_rows = 12;
-  cfg->test_drop_mm = 100;
-  cfg->test_speed_mm_s = 20;
-  cfg->test_step_delay_ms = 300;
-  cfg->test_serpentine = 1;
-  cfg->brightness = 100;
-  for (auto &p : cfg->positions) {
-    p.assigned = false;
-    p.axis = 0;
-  }
-  for (auto &b : cfg->boards) b.board_id = -1;
-}
-
-bool valid_config(const ss_config_t *cfg) {
-  if (cfg->magic != SS_CONFIG_MAGIC) return false;
-  if (cfg->version != SS_CONFIG_VERSION) return false;
-  if (cfg->grid_cols < 1 || cfg->grid_cols > SS_GRID_MAX_COLS) return false;
-  if (cfg->grid_rows < 1 || cfg->grid_rows > SS_GRID_MAX_ROWS) return false;
-  if (cfg->test_drop_mm == 0 || cfg->test_drop_mm > 2000) return false;
-  if (cfg->test_speed_mm_s == 0 || cfg->test_speed_mm_s > 1000) return false;
-  if (cfg->test_step_delay_ms == 0 || cfg->test_step_delay_ms > 60000u) return false;
-  if (cfg->brightness < 10 || cfg->brightness > 100) return false;
-  for (const auto &b : cfg->boards) {
-    if (b.board_id < -1 || b.board_id >= SS_MAX_BOARDS) return false;
-  }
-  if (cfg->crc != config_crc(cfg)) return false;
-  return true;
+  pc_config_v2_defaults(cfg);
 }
 
 bool write_config(const ss_config_t *cfg) {
-  ss_config_t tmp = *cfg;
-  tmp.crc = config_crc(&tmp);
+  if (pc_config_v2_pack(cfg, s_blob, sizeof(s_blob)) != 0) return false;
 
   File f = SPIFFS.open(SS_CONFIG_TMP_FILE, FILE_WRITE);
   if (!f) {
     SS_LOGE("cfg", "open %s failed", SS_CONFIG_TMP_FILE);
     return false;
   }
-  const size_t written = f.write(reinterpret_cast<const uint8_t *>(&tmp),
-                                 sizeof(tmp));
+  const size_t written = f.write(s_blob, sizeof(s_blob));
   f.close();
-  if (written != sizeof(tmp)) {
+  if (written != sizeof(s_blob)) {
     SS_LOGE("cfg", "short write %u/%u", (unsigned)written,
-            (unsigned)sizeof(tmp));
+            (unsigned)sizeof(s_blob));
     SPIFFS.remove(SS_CONFIG_TMP_FILE);
     return false;
   }
@@ -92,6 +48,26 @@ bool write_config(const ss_config_t *cfg) {
             SS_CONFIG_FILE);
     return false;
   }
+  return true;
+}
+
+/* Version 1 keys rows by the 8-byte flash id.  Keep only the header that is
+ * layout-identical (grid, test parameters, brightness) and leave every UUID
+ * unknown; the operator re-assigns the positions. */
+bool migrate_v1(const uint8_t *blob, size_t len, ss_config_t *out) {
+  if (len < offsetof(ss_config_t, positions)) return false;
+  uint32_t magic = 0;
+  uint16_t version = 0;
+  std::memcpy(&magic, blob, sizeof(magic));
+  std::memcpy(&version, blob + sizeof(magic), sizeof(version));
+  if (magic != SS_CONFIG_MAGIC || version != 1u) return false;
+  set_defaults(out);
+  const size_t header = offsetof(ss_config_t, positions);
+  std::memcpy(out, blob, header);
+  out->magic = SS_CONFIG_MAGIC;
+  out->version = SS_CONFIG_VERSION;
+  if (out->grid_cols < 1 || out->grid_cols > SS_GRID_MAX_COLS) return false;
+  if (out->grid_rows < 1 || out->grid_rows > SS_GRID_MAX_ROWS) return false;
   return true;
 }
 
@@ -105,20 +81,29 @@ bool config_store_init(void) {
 
   if (s_mounted) {
     File f = SPIFFS.open(SS_CONFIG_FILE, FILE_READ);
-    if (f && f.size() == sizeof(ss_config_t)) {
-      const size_t got =
-          f.read(reinterpret_cast<uint8_t *>(&s_cfg), sizeof(s_cfg));
+    if (f) {
+      const size_t size = f.size();
+      size_t want = size < sizeof(s_blob) ? size : sizeof(s_blob);
+      const size_t got = f.read(s_blob, want);
       f.close();
-      if (got == sizeof(s_cfg) && valid_config(&s_cfg)) {
+      if (size == sizeof(ss_config_t) && got == sizeof(s_blob) &&
+          pc_config_v2_unpack(s_blob, sizeof(s_blob), &s_loaded) == 0) {
+        s_cfg = s_loaded;
         s_dirty = false;
-        SS_LOGI("cfg", "loaded %ux%u, %d positions assigned",
+        SS_LOGI("cfg", "loaded v2 %ux%u, %d positions assigned",
                 (unsigned)s_cfg.grid_cols, (unsigned)s_cfg.grid_rows,
                 config_store_assigned_count());
         return true;
       }
+      if (migrate_v1(s_blob, got, &s_cfg)) {
+        s_cfg.version = SS_CONFIG_VERSION;
+        s_dirty = true;
+        SS_LOGW("cfg", "version 1 migrated as version unknown; re-assign rows");
+        config_store_save();
+        return s_mounted;
+      }
       SS_LOGW("cfg", "config invalid (magic/version/crc); writing defaults");
     } else {
-      if (f) f.close();
       SS_LOGW("cfg", "no valid config; writing defaults");
     }
   }
@@ -166,22 +151,22 @@ bool config_store_set_brightness(uint8_t percent) {
   return true;
 }
 
-bool config_store_assign_position(uint8_t position, const uint8_t flash_id[8],
+bool config_store_assign_position(uint8_t position, const uint8_t uuid[6],
                                   uint8_t axis) {
-  if (flash_id == nullptr) return false;
+  if (uuid == nullptr) return false;
   if (axis >= SS_AXES_PER_BOARD) return false;
   if (position >= capacity_from(&s_cfg)) return false;
 
   for (auto &p : s_cfg.positions) {
     if (p.assigned && p.axis == axis &&
-        std::memcmp(p.flash_id, flash_id, SS_FLASH_ID_LEN) == 0) {
+        std::memcmp(p.uuid, uuid, SS_UUID_LEN) == 0) {
       p.assigned = false;
     }
   }
   ss_position_map_t *slot = &s_cfg.positions[position];
   slot->assigned = true;
   slot->axis = axis;
-  std::memcpy(slot->flash_id, flash_id, SS_FLASH_ID_LEN);
+  std::memcpy(slot->uuid, uuid, SS_UUID_LEN);
   s_dirty = true;
   return true;
 }
@@ -198,16 +183,8 @@ void config_store_clear_positions(void) {
   s_dirty = true;
 }
 
-int config_store_find_position(const uint8_t flash_id[8], uint8_t axis) {
-  if (flash_id == nullptr || axis >= SS_AXES_PER_BOARD) return -1;
-  for (int i = 0; i < capacity_from(&s_cfg); ++i) {
-    const ss_position_map_t *p = &s_cfg.positions[i];
-    if (p->assigned && p->axis == axis &&
-        std::memcmp(p->flash_id, flash_id, SS_FLASH_ID_LEN) == 0) {
-      return i;
-    }
-  }
-  return -1;
+int config_store_find_position(const uint8_t uuid[6], uint8_t axis) {
+  return pc_config_v2_find_position(&s_cfg, uuid, axis);
 }
 
 int config_store_assigned_count(void) {
@@ -221,42 +198,41 @@ int config_store_assigned_count(void) {
 
 int config_store_capacity(void) { return capacity_from(&s_cfg); }
 
-int config_store_get_board_id(const uint8_t flash_id[8]) {
-  if (flash_id == nullptr) return -1;
-  for (const auto &b : s_cfg.boards) {
-    if (b.board_id >= 0 &&
-        std::memcmp(b.flash_id, flash_id, SS_FLASH_ID_LEN) == 0) {
-      return b.board_id;
-    }
-  }
-  return -1;
+int config_store_get_board_id(const uint8_t uuid[6]) {
+  return pc_config_v2_get_board_id(&s_cfg, uuid);
 }
 
-bool config_store_set_board_id(const uint8_t flash_id[8], int board_id) {
-  if (flash_id == nullptr) return false;
+bool config_store_set_board_id(const uint8_t uuid[6], int board_id) {
+  if (uuid == nullptr) return false;
   if (board_id < -1 || board_id >= SS_MAX_BOARDS) return false;
-
-  ss_board_map_t *slot = nullptr;
-  for (auto &b : s_cfg.boards) {
-    if (std::memcmp(b.flash_id, flash_id, SS_FLASH_ID_LEN) == 0) {
-      slot = &b;
-      break;
-    }
-  }
-  if (slot == nullptr) {
-    for (auto &b : s_cfg.boards) {
-      if (b.board_id < 0) {
-        slot = &b;
-        break;
-      }
-    }
-  }
-  if (slot == nullptr) return false;
-
-  std::memcpy(slot->flash_id, flash_id, SS_FLASH_ID_LEN);
-  slot->board_id = (int8_t)board_id;
+  const ss_board_map_t *old = config_store_get_board(uuid);
+  uint32_t build = old ? old->last_build : 0;
+  uint8_t flags = old ? old->version_flags : 0;
+  const char *result = old ? old->last_result : "";
+  if (!pc_config_v2_set_board(&s_cfg, uuid, board_id, build, flags, result))
+    return false;
   s_dirty = true;
   return true;
+}
+
+bool config_store_set_board_version(const uint8_t uuid[6], int board_id,
+                                    uint32_t build, uint8_t flags,
+                                    const char *result) {
+  if (!pc_config_v2_set_board(&s_cfg, uuid, board_id, build, flags, result))
+    return false;
+  s_dirty = true;
+  return true;
+}
+
+const ss_board_map_t *config_store_get_board(const uint8_t uuid[6]) {
+  if (uuid == nullptr) return nullptr;
+  for (const auto &b : s_cfg.boards) {
+    if (b.board_id >= 0 &&
+        std::memcmp(b.uuid, uuid, SS_UUID_LEN) == 0) {
+      return &b;
+    }
+  }
+  return nullptr;
 }
 
 int config_store_free_board_id(void) {
@@ -274,9 +250,8 @@ int config_store_free_board_id(void) {
 }
 
 void config_store_clear_boards(void) {
-  for (auto &b : s_cfg.boards) {
-    b.board_id = -1;
-  }
+  std::memset(s_cfg.boards, 0, sizeof(s_cfg.boards));
+  for (auto &b : s_cfg.boards) b.board_id = -1;
   s_dirty = true;
 }
 

@@ -131,8 +131,8 @@ Four identifiers are reserved for Katapult and are never a legal show frame.
 
 | Identifier | Why it is free under the rules below |
 |------------|----------------------------------------|
-| `0x3E8` | field 62, type 8. `DISC` allows field 0 only |
-| `0x3E9` | field 62, type 9. Type 9 is rejected |
+| `0x1E8` | field 30, type 8. `DISC` allows field 0 only |
+| `0x1E9` | field 30, type 9. Type 9 is rejected |
 | `0x3F0` | field 63, type 0. Field 63 is not a motor |
 | `0x3F1` | field 63, type 1. Type 1 is rejected |
 
@@ -183,7 +183,7 @@ The 7-bit field is a motor field, a board ID, 127, or zero. The type says which:
   on types 2, 8 and 11. Every other motion frame is discarded before the
   payload is parsed. The receive-path timing is in
   `motion_streaming_whitepaper.md` §5.5.
-- Identifiers `0x3E8`, `0x3E9`, `0x3F0`, and `0x3F1` are dropped even if a
+- Identifiers `0x1E8`, `0x1E9`, `0x3F0`, and `0x3F1` are dropped even if a
   later type code would have produced them.
 - Types 12 and 13 are the version query and response; type 14 is the periodic
   health record. Type 15 remains reserved.

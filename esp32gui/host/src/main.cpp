@@ -83,14 +83,12 @@ void add_node(ui_snapshot_t *s, int index, uint8_t tag, int board, bool online,
               uint8_t state, uint8_t fault) {
   ui_node_t *n = &s->nodes[index];
   n->used = true;
-  n->flash_id[0] = tag;
-  n->flash_id[1] = 0x51;
-  n->flash_id[2] = 0x3A;
-  n->flash_id[3] = 0x00;
-  n->flash_id[4] = 0x11;
-  n->flash_id[5] = 0x22;
-  n->flash_id[6] = 0x33;
-  n->flash_id[7] = (uint8_t)(0x40 + board);
+  n->uuid[0] = tag;
+  n->uuid[1] = 0x51;
+  n->uuid[2] = 0x3A;
+  n->uuid[3] = 0x00;
+  n->uuid[4] = 0x11;
+  n->uuid[5] = (uint8_t)(0x40 + board);
   n->board_id = board;
   n->online = online;
   n->status_seen = true;
@@ -112,6 +110,52 @@ void add_node(ui_snapshot_t *s, int index, uint8_t tag, int board, bool online,
   std::snprintf(n->sw_version, sizeof(n->sw_version), "%s",
                 (board == 3) ? "1.1.0-dirty" : "1.1.0");
   n->assigned_positions = 3;
+  n->current_build = 1794839000u;
+  n->version_flags = 0;
+  n->version_age_ms = 300u;
+  n->upgrade_color = UI_UPG_COLOR_DIM;
+  n->upgrade_state = UI_UPG_SKIPPED;
+}
+
+ui_snapshot_t make_upgrade_snapshot(const ui_snapshot_t &base) {
+  ui_snapshot_t s = base;
+  std::memset(s.nodes, 0, sizeof(s.nodes));
+  s.node_count = 30;
+  for (int i = 0; i < 30; ++i) {
+    add_node(&s, i, (uint8_t)(0x10 + i), i, true, 0, 0);
+    ui_node_t *n = &s.nodes[i];
+    n->version_seen = (i != 25);
+    n->current_build = (i == 25) ? 0u : 1794839000u;
+    std::snprintf(n->sw_version, sizeof(n->sw_version), "%s",
+                  (i == 25) ? "--" : "1.4.0");
+    if (i < 2) {
+      n->upgrade_color = UI_UPG_COLOR_GREEN;
+      n->upgrade_state = UI_UPG_DONE;
+      std::snprintf(n->upgrade_result, sizeof(n->upgrade_result), "build 1794839525");
+    } else if (i == 2) {
+      n->upgrade_color = UI_UPG_COLOR_YELLOW;
+      n->upgrade_state = UI_UPG_WRITING;
+      n->upgrade_progress = 46;
+    } else if (i == 25) {
+      n->upgrade_color = UI_UPG_COLOR_DIM;
+      n->upgrade_state = UI_UPG_SKIPPED;
+      std::snprintf(n->upgrade_result, sizeof(n->upgrade_result), "version unknown");
+    } else {
+      n->upgrade_color = UI_UPG_COLOR_RED;
+      n->upgrade_state = UI_UPG_QUEUED;
+    }
+  }
+  std::snprintf(s.upgrade_image_version, sizeof(s.upgrade_image_version), "%s",
+                "1.4.2");
+  s.upgrade_image_build = 1794839525u;
+  std::snprintf(s.upgrade_source, sizeof(s.upgrade_source), "%s", "SD");
+  s.upgrade_done = 2;
+  s.upgrade_total = 30;
+  s.upgrade_yellow_board = 2;
+  std::snprintf(s.upgrade_status, sizeof(s.upgrade_status), "%s", "write 46%");
+  s.upgrade_active = true;
+  s.upgrade_progress = 46;
+  return s;
 }
 
 ui_snapshot_t make_snapshot() {
@@ -289,9 +333,10 @@ int main(int argc, char **argv) {
   static const char *names[UI_SCREEN_COUNT] = {
       "show", "animations", "grid",  "nodes", "motor",
       "config", "log", "can", "upgrade", "settings"};
+  ui_snapshot_t upgrade_snap = make_upgrade_snapshot(snap);
   for (int i = 0; i < UI_SCREEN_COUNT; ++i) {
     ui_show_screen(i);
-    ui_update(&snap);
+    ui_update(i == UI_SCREEN_UPGRADE ? &upgrade_snap : &snap);
     clear_background();
     lv_obj_invalidate(lv_screen_active());
     lv_refr_now(s_disp);

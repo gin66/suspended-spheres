@@ -81,7 +81,7 @@ The largest internal-RAM objects in this build:
 | CAN snapshot scratch | 14 336 | 256 × 56 B copy before the UI snapshot |
 | Commission node registry | 2 640 | 30 nodes, including health |
 | CAN monitor ring | 2 560 | 128 queued RX frames |
-| SPIFFS config | 1 490 | `/config.bin` |
+| SPIFFS config | 2 060 | `/config.bin`, version 2 keyed by UUID |
 | Config test order | 480 | 120 positions |
 
 The CAN scope costs about 54 KiB of internal RAM (table + scratch + text

@@ -38,6 +38,8 @@ uint32_t s_last_ask_ms = 0;
 uint8_t s_cmd_seq = 0;
 int s_selected = 0;
 ss_commission_stats_t s_stats;
+pc_vquery_t s_vquery;
+bool s_vquery_active = false;
 
 bool s_test_active = false;
 int s_test_order[SS_MAX_POSITIONS];
@@ -53,10 +55,10 @@ constexpr uint32_t kReidentifyRetryMs = 1000u;
  * schedule another re-identify in a loop. */
 constexpr uint32_t kReidentifyHoldoffMs = 2000u;
 
-int find_node_locked(const uint8_t flash_id[SS_FLASH_ID_LEN]) {
+int find_node_locked(const uint8_t uuid[SS_UUID_LEN]) {
   for (int i = 0; i < s_count; ++i) {
     if (s_nodes[i].used &&
-        std::memcmp(s_nodes[i].flash_id, flash_id, SS_FLASH_ID_LEN) == 0) {
+        std::memcmp(s_nodes[i].uuid, uuid, SS_UUID_LEN) == 0) {
       return i;
     }
   }
@@ -70,10 +72,10 @@ int find_board_locked(int board_id) {
   return -1;
 }
 
-int known_lookup_locked(const uint8_t flash_id[SS_FLASH_ID_LEN]) {
+int known_lookup_locked(const uint8_t uuid[SS_UUID_LEN]) {
   for (const auto &k : s_known) {
     if (k.board_id >= 0 &&
-        std::memcmp(k.flash_id, flash_id, SS_FLASH_ID_LEN) == 0) {
+        std::memcmp(k.uuid, uuid, SS_UUID_LEN) == 0) {
       return k.board_id;
     }
   }
@@ -97,17 +99,17 @@ int free_board_id_locked(void) {
   return -1;
 }
 
-void known_add_locked(const uint8_t flash_id[SS_FLASH_ID_LEN], int board_id) {
+void known_add_locked(const uint8_t uuid[SS_UUID_LEN], int board_id) {
   for (auto &k : s_known) {
     if (k.board_id >= 0 &&
-        std::memcmp(k.flash_id, flash_id, SS_FLASH_ID_LEN) == 0) {
+        std::memcmp(k.uuid, uuid, SS_UUID_LEN) == 0) {
       k.board_id = (int8_t)board_id;
       return;
     }
   }
   for (auto &k : s_known) {
     if (k.board_id < 0) {
-      std::memcpy(k.flash_id, flash_id, SS_FLASH_ID_LEN);
+      std::memcpy(k.uuid, uuid, SS_UUID_LEN);
       k.board_id = (int8_t)board_id;
       return;
     }
@@ -154,26 +156,31 @@ bool send_reidentify(int board_id) {
   return ok;
 }
 
-void send_version_req(void) {
+void send_version_req_to(int board_id) {
   ss_can_frame_t f;
   std::memset(&f, 0, sizeof(f));
-  f.id = (uint32_t)mc_id_make(MC_BOARD_ALL, kTypeVersionReq);
+  const int field = (board_id < 0) ? MC_BOARD_ALL : board_id;
+  f.id = (uint32_t)mc_id_make(field, kTypeVersionReq);
   f.len = 8;
   mc_pack_version_req(f.data);
   if (!can_transport_send(&f)) s_stats.tx_errors++;
 }
 
-void send_assign(int board_id, const uint8_t flash_id[SS_FLASH_ID_LEN]) {
+void send_version_req(void) {
+  send_version_req_to(-1);
+}
+
+void send_assign(int board_id, const uint8_t uuid[SS_UUID_LEN]) {
   ss_can_frame_t f;
   std::memset(&f, 0, sizeof(f));
   f.id = (uint32_t)mc_id_make(board_id, kTypeAssign);
   f.len = 8;
-  mc_pack_flash_id(flash_id, f.data);
+  mc_pack_uuid(uuid, f.data);
   if (can_transport_send(&f)) {
     s_stats.assign_count++;
-    SS_LOGI("commission", "ASSIGN board %d flash %02x%02x%02x%02x%02x%02x%02x%02x",
-            board_id, flash_id[0], flash_id[1], flash_id[2], flash_id[3],
-            flash_id[4], flash_id[5], flash_id[6], flash_id[7]);
+    SS_LOGI("commission", "ASSIGN board %d uuid %02x%02x%02x%02x%02x%02x",
+            board_id, uuid[0], uuid[1], uuid[2], uuid[3],
+            uuid[4], uuid[5]);
   } else {
     s_stats.tx_errors++;
     SS_LOGW("commission", "ASSIGN board %d send failed", board_id);
@@ -181,18 +188,18 @@ void send_assign(int board_id, const uint8_t flash_id[SS_FLASH_ID_LEN]) {
 }
 
 void handle_disc(const ss_can_frame_t *frame) {
-  uint8_t flash_id[SS_FLASH_ID_LEN];
-  if (mc_unpack_flash_id(frame->data, flash_id) != 0) return;
+  uint8_t uuid[SS_UUID_LEN];
+  if (mc_unpack_uuid(frame->data, uuid) != 0) return;
 
   int assign_board = -1;
   portENTER_CRITICAL(&s_lock);
-  int idx = find_node_locked(flash_id);
+  int idx = find_node_locked(uuid);
   if (idx < 0 && s_count < SS_MAX_BOARDS) {
     idx = s_count++;
     std::memset(&s_nodes[idx], 0, sizeof(s_nodes[idx]));
     s_nodes[idx].used = true;
     s_nodes[idx].board_id = -1;
-    std::memcpy(s_nodes[idx].flash_id, flash_id, SS_FLASH_ID_LEN);
+    std::memcpy(s_nodes[idx].uuid, uuid, SS_UUID_LEN);
   }
   if (idx < 0) {
     portEXIT_CRITICAL(&s_lock);
@@ -206,19 +213,19 @@ void handle_disc(const ss_can_frame_t *frame) {
   s_stats.disc_count++;
 
   /* A board that answers DISC has no live board ID, so always (re)assign.
-   * A known flash ID keeps the ID it had in the host map. */
-  int board_id = known_lookup_locked(flash_id);
+   * A known UUID keeps the ID it had in the host map. */
+  int board_id = known_lookup_locked(uuid);
   if (board_id < 0) board_id = free_board_id_locked();
   if (board_id >= 0) {
     node->board_id = board_id;
-    known_add_locked(flash_id, board_id);
+    known_add_locked(uuid, board_id);
     s_persist_dirty = true;
     assign_board = board_id;
   }
   portEXIT_CRITICAL(&s_lock);
 
   if (assign_board >= 0) {
-    send_assign(assign_board, flash_id);
+    send_assign(assign_board, uuid);
   } else {
     SS_LOGE("commission", "no free board ID for a discovered node");
   }
@@ -320,6 +327,8 @@ void handle_version(const ss_can_frame_t *frame) {
     ss_node_t *node = &s_nodes[idx];
     node->version_seen = true;
     node->last_version_ms = frame->timestamp_ms;
+    node->version_flags = v.flags;
+    node->current_build = v.build;
     if ((v.flags & MC_VERSION_FLAG_DIRTY) != 0) {
       std::snprintf(node->sw_version, sizeof(node->sw_version),
                     "%u.%u.%u-dirty", (unsigned)v.major, (unsigned)v.minor,
@@ -328,6 +337,8 @@ void handle_version(const ss_can_frame_t *frame) {
       std::snprintf(node->sw_version, sizeof(node->sw_version), "%u.%u.%u",
                     (unsigned)v.major, (unsigned)v.minor, (unsigned)v.patch);
     }
+    if (s_vquery_active) pc_vquery_response(&s_vquery, board_id);
+    s_persist_dirty = true;
   } else if (!s_reidentify_pending &&
              (uint32_t)(now - s_last_reidentify_ms) >= kReidentifyHoldoffMs) {
     s_reidentify_pending = true;
@@ -389,11 +400,7 @@ void commission_init(void) {
 void commission_reload_config(void) {
   const ss_config_t *cfg = config_store_get();
   portENTER_CRITICAL(&s_lock);
-  for (auto &k : s_known) k.board_id = -1;
-  for (const auto &b : cfg->boards) {
-    if (b.board_id < 0) continue;
-    known_add_locked(b.flash_id, b.board_id);
-  }
+  for (int i = 0; i < SS_MAX_BOARDS; ++i) s_known[i] = cfg->boards[i];
   portEXIT_CRITICAL(&s_lock);
 }
 
@@ -449,6 +456,23 @@ void commission_poll(void) {
     }
   }
 
+  if (s_vquery_active) {
+    const int r = pc_vquery_poll(&s_vquery, now);
+    if (r == 1) {
+      for (int i = 0; i < s_vquery.missing_count; ++i) {
+        send_version_req_to(s_vquery.missing[i]);
+      }
+      SS_LOGI("commission", "VERSION retry %d to %d boards",
+              s_vquery.attempt, s_vquery.missing_count);
+    } else if (r < 0) {
+      s_vquery_active = false;
+      if (s_vquery.missing_count > 0) {
+        SS_LOGW("commission", "%d boards did not answer VERSION_REQ",
+                s_vquery.missing_count);
+      }
+    }
+  }
+
   /* Board IDs are assigned in the CAN callback but persisted here, on the
    * main loop, so the config store is only mutated from one task. */
   if (s_persist_dirty) {
@@ -456,13 +480,29 @@ void commission_poll(void) {
     portENTER_CRITICAL(&s_lock);
     for (int i = 0; i < s_count; ++i) {
       if (!s_nodes[i].used || s_nodes[i].board_id < 0) continue;
-      if (config_store_get_board_id(s_nodes[i].flash_id) ==
+      if (config_store_get_board_id(s_nodes[i].uuid) !=
           s_nodes[i].board_id) {
-        continue;
+        if (!config_store_set_board_id(s_nodes[i].uuid,
+                                       s_nodes[i].board_id)) {
+          still_dirty = true;
+          continue;
+        }
       }
-      if (!config_store_set_board_id(s_nodes[i].flash_id,
-                                     s_nodes[i].board_id)) {
-        still_dirty = true;
+      if (s_nodes[i].version_seen) {
+        const ss_board_map_t *old =
+            config_store_get_board(s_nodes[i].uuid);
+        if (old == nullptr || old->last_build != s_nodes[i].current_build ||
+            old->version_flags != s_nodes[i].version_flags) {
+          char result[24];
+          std::snprintf(result, sizeof(result), "build %lu",
+                        (unsigned long)s_nodes[i].current_build);
+          if (!config_store_set_board_version(
+                  s_nodes[i].uuid, s_nodes[i].board_id,
+                  s_nodes[i].current_build, s_nodes[i].version_flags,
+                  result)) {
+            still_dirty = true;
+          }
+        }
       }
     }
     portEXIT_CRITICAL(&s_lock);
@@ -495,7 +535,7 @@ bool commission_get_node(int index, ss_node_t *out) {
     for (int i = 0; i < config_store_capacity(); ++i) {
       const ss_position_map_t *p = &cfg->positions[i];
       if (p->assigned &&
-          std::memcmp(p->flash_id, out->flash_id, SS_FLASH_ID_LEN) == 0) {
+          std::memcmp(p->uuid, out->uuid, SS_UUID_LEN) == 0) {
         out->assigned_positions++;
       }
     }
@@ -508,18 +548,30 @@ const ss_commission_stats_t *commission_stats(void) {
   return &s_stats;
 }
 
-int commission_find_node(const uint8_t flash_id[8]) {
-  if (flash_id == nullptr) return -1;
+int commission_find_node(const uint8_t uuid[8]) {
+  if (uuid == nullptr) return -1;
   portENTER_CRITICAL(&s_lock);
-  const int idx = find_node_locked(flash_id);
+  const int idx = find_node_locked(uuid);
   portEXIT_CRITICAL(&s_lock);
   return idx;
 }
 
 bool commission_query_versions(void) {
   if (!can_transport_running()) return false;
+  int ids[SS_MAX_BOARDS];
+  int count = 0;
+  portENTER_CRITICAL(&s_lock);
+  for (int i = 0; i < s_count; ++i) {
+    if (!s_nodes[i].used || s_nodes[i].board_id < 0) continue;
+    /* QUERY ALL clears version_valid before it asks. */
+    s_nodes[i].version_seen = false;
+    ids[count++] = s_nodes[i].board_id;
+  }
+  portEXIT_CRITICAL(&s_lock);
   send_version_req();
-  SS_LOGI("commission", "VERSION query sent to all boards");
+  pc_vquery_start(&s_vquery, ids, count, millis());
+  s_vquery_active = true;
+  SS_LOGI("commission", "VERSION query sent to %d boards", count);
   return true;
 }
 
@@ -536,11 +588,11 @@ void commission_select(int index) {
   s_selected = index;
 }
 
-bool commission_test_motor(const uint8_t flash_id[8], uint8_t axis,
+bool commission_test_motor(const uint8_t uuid[8], uint8_t axis,
                            ss_motor_action_t action, uint16_t distance_mm,
                            uint16_t speed_mm_s) {
-  if (flash_id == nullptr || axis >= SS_AXES_PER_BOARD) return false;
-  const int idx = commission_find_node(flash_id);
+  if (uuid == nullptr || axis >= SS_AXES_PER_BOARD) return false;
+  const int idx = commission_find_node(uuid);
   if (idx < 0) return false;
 
   ss_node_t node;
@@ -607,7 +659,7 @@ bool commission_test_run_start(void) {
   for (int i = 0; i < capacity; ++i) {
     const ss_position_map_t *p = &cfg->positions[i];
     if (!p->assigned) continue;
-    const int idx = commission_find_node(p->flash_id);
+    const int idx = commission_find_node(p->uuid);
     ss_node_t node;
     if (idx < 0 || !commission_get_node(idx, &node) || node.board_id < 0 ||
         (uint32_t)(millis() - node.last_seen_ms) > kOnlineWindowMs) {
@@ -658,7 +710,7 @@ void commission_test_run_poll(void) {
   const ss_config_t *cfg = config_store_get();
   const int pos = s_test_order[s_test_index++];
   const ss_position_map_t *p = &cfg->positions[pos];
-  const int idx = commission_find_node(p->flash_id);
+  const int idx = commission_find_node(p->uuid);
   ss_node_t node;
   if (idx < 0 || !commission_get_node(idx, &node) || node.board_id < 0 ||
       (uint32_t)(millis() - node.last_seen_ms) > kOnlineWindowMs) {
@@ -668,7 +720,7 @@ void commission_test_run_poll(void) {
     return;
   }
 
-  if (!commission_test_motor(p->flash_id, p->axis, SS_MOTOR_DOWN,
+  if (!commission_test_motor(p->uuid, p->axis, SS_MOTOR_DOWN,
                              cfg->test_drop_mm, cfg->test_speed_mm_s)) {
     SS_LOGE("testrun", "position %d command failed; stopping", pos);
     s_test_active = false;

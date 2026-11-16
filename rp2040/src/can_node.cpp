@@ -12,6 +12,13 @@
 #include "board_pins.h"
 #include "motion_core.h"
 
+#ifndef SS_FW_VERSION
+#define SS_FW_VERSION "0.1.0"
+#endif
+#ifndef SS_BUILD_ID
+#define SS_BUILD_ID 0
+#endif
+
 extern "C" {
 #include "can2040.h"
 }
@@ -33,10 +40,27 @@ volatile uint32_t drop_count = 0;
 volatile bool ready_flag = false;
 
 uint8_t own_flash_id[8] = {};
+uint8_t own_uuid[MC_UUID_LEN] = {};
+mc_version_t own_version = {};
 volatile int board_id = -1;
 volatile bool disc_pending = false;
 volatile bool reidentify_requested = false;
 volatile uint32_t disc_due_us = 0;
+volatile bool version_pending = false;
+volatile uint32_t version_due_us = 0;
+
+void parse_version(void) {
+    unsigned major = 0, minor = 0, patch = 0;
+    (void)sscanf(SS_FW_VERSION, "%u.%u.%u", &major, &minor, &patch);
+    own_version.major = (uint8_t)major;
+    own_version.minor = (uint8_t)minor;
+    own_version.patch = (uint8_t)patch;
+    own_version.flags = 0;
+#ifdef SS_FW_DIRTY
+    own_version.flags |= MC_VERSION_FLAG_DIRTY;
+#endif
+    own_version.build = (uint32_t)SS_BUILD_ID;
+}
 
 /* The ACK must be armed within about 7 µs at 1 Mbit/s. These two run inside
  * the can2040 IRQ, so they stay in RAM with can2040 itself. */
@@ -50,16 +74,26 @@ void __not_in_flash_func(on_can)(struct can2040*, uint32_t notify,
         if (frame_type == kAsk && field(id) == 0 && board_id < 0) {
             /* The addressing document staggers advertisements by up to
              * 9 ms so unidentified boards do not all answer at once. */
-            disc_due_us = time_us_32() + 1000u * (own_flash_id[0] % 10u);
+            disc_due_us = time_us_32() + 1000u * (own_uuid[0] % 10u);
             disc_pending = true;
         } else if (frame_type == kAssign) {
             int assigned = board_id;
             if (mc_assign_board(&assigned, field(id), msg->data,
-                                own_flash_id) == 0) {
+                                own_uuid) == 0) {
                 board_id = assigned;
                 disc_pending = false;
             }
-        } else if (frame_type == kCommand && msg->dlc >= 1 &&
+        } else if (frame_type == kVersionReq) {
+            /* One response per request.  A query to field 127 reaches every
+             * board; field 127 is not copied into the response field. */
+            int bid = board_id;
+            if (bid >= 0 &&
+                (field(id) == MC_BOARD_ALL || (int)field(id) == bid)) {
+                version_due_us = time_us_32() +
+                                 1000u * ((uint32_t)bid % 10u);
+                version_pending = true;
+            }
+        } else if (frame_type == kCommand && msg->dlc >= 8 &&
                    msg->data[0] == MC_CMD_REIDENTIFY &&
                    (field(id) == MC_BOARD_ALL || (int)field(id) == board_id)) {
             /* The master reboots into an empty node table, or has a board ID
@@ -114,6 +148,8 @@ void begin() {
     for (uint8_t i = 0; i < 8; i++) {
         own_flash_id[i] = uid.id[i];
     }
+    mc_uuid_from_flash_id(own_flash_id, own_uuid);
+    parse_version();
 
     can2040_callback_config(&cbus, on_can);
     irq_set_exclusive_handler(PIO1_IRQ_0, pio1_irq);
@@ -162,6 +198,22 @@ bool send(uint16_t id, const uint8_t data[8], uint8_t dlc) {
 }
 
 void tick() {
+    if (version_pending) {
+        int bid = board_id;
+        if ((int32_t)(time_us_32() - version_due_us) >= 0) {
+            uint8_t payload[8];
+            if (bid >= 0 && mc_pack_version_rsp(&own_version, payload) == 0) {
+                int id = mc_id_make(bid, kVersionRsp);
+                if (id >= 0 &&
+                    send((uint16_t)id, payload, 8)) {
+                    version_pending = false;
+                }
+            } else {
+                version_pending = false;
+            }
+        }
+    }
+
     if (!disc_pending || board_id >= 0) {
         return;
     }
@@ -170,7 +222,7 @@ void tick() {
     }
 
     uint8_t payload[8];
-    mc_pack_flash_id(own_flash_id, payload);
+    mc_pack_uuid(own_uuid, payload);
     if (send((uint16_t)mc_id_make(0, kDisc), payload, 8)) {
         disc_pending = false;
     } else {

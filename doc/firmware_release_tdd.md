@@ -367,3 +367,46 @@ Gate: host tests exit 0, then the release env builds. Do not upload.
 - It does not move motion payloads, CAN identifiers or the cubic frame.
 - It does not treat a green host test as a bus test. The first release tag
   is still a maintainer action after W6.
+
+---
+
+## Phase notes (implementation record)
+
+Local dry run on 2026-11-16, commit `3a7d6db1`:
+
+- `cmake --build build && ./build/motion_core_tests` — all host tests pass.
+- `SS_FW_VERSION=1.4.2 SS_BUILD_ID=1794848847 SS_RELEASE=1 pio run -e
+  fly_micro4_katapult` — success; the image links at `0x10004000`.
+- `SS_FW_VERSION=1.4.2 SS_BUILD_ID=1794848847 SS_RELEASE=1 pio run -e
+  esp32can` — success.
+- `release_pack` wrote a clean directory from the commit's `%ct` and the
+  archive's `partitions.bin` SHA-256, without `--dirty`.
+- The 800 × 480 upgrade PNG was reviewed: 30 tiles, 6 × 5, boards 00 and 01
+  green, 02 yellow at 46 %, 25 dim, the rest red, header `2/30`.
+
+Bench flash (explicit operator permission): the panel boots the release
+image with TWAI at 1 Mbit/s, loads config version 2, discovers the node by
+UUID and assigns board 0. The node boots the stamped application and answers
+on CAN. The release workflow was not pushed and no GitHub Release was
+created.
+
+### Bench correction (2026-11-16)
+
+The hardware run found three details that the earlier text did not have:
+
+- Katapult's admin `SET_NODEID` takes an **8-bit** node byte. Node 372
+  cannot be encoded; `116` gives the real data pair `0x1E8` / `0x1E9`, both
+  invalid show identifiers. The addressing and Katapult documents now use
+  that pair.
+- RP2040 Katapult's vector table is at `0x10000100` (stage-2 occupies the
+  first 256 bytes). The CanBoot signature is at `reset_vector - 9` **bytes**.
+- Katapult jumps to `0x10004000` when the first word there is non-zero and
+  not `0xFFFFFFFF`. After a first install over a stale application, that
+  word must be invalidated, or Katapult jumps into the old image instead of
+  staying on CAN.
+
+Verified on the bench: app action 4 entered Katapult (CAN stayed error-free,
+node traffic stopped), then the panel wrote 1470 blocks with `SEND_BLOCK`,
+read them back, sent `COMPLETE`, and the restarted app answered
+`VERSION_RSP` with `1.4.2` build `1794848847`. A second CAN pass restored the
+app after the action-4 entry.

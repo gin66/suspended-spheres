@@ -54,12 +54,23 @@ int mc_um_in_range(int32_t um) {
 /*  11-bit identifiers (I1–I10, Fly_Micro4_addressing.md §2, §4)       */
 /* ------------------------------------------------------------------ */
 
+int mc_raw_to_motor_field(int raw) {
+    if (raw < 0 || raw > 119)
+        return -1;
+    return (raw < MC_MOTOR_FIELD_SKIP) ? raw : raw + 1;
+}
+
+int mc_motor_field_valid(int field) {
+    return (field >= 0 && field <= MC_MOTOR_FIELD_MAX &&
+            field != MC_MOTOR_FIELD_SKIP) ? 1 : 0;
+}
+
 int mc_id_make(int field, int type) {
     if (field < 0 || field > 127)
         return -1;
     switch (type) {
-    case 0:   /* motion: motor 0…119 (I2) */
-        return (field <= 119) ? ((field << 4) | type) : -1;
+    case 0:   /* motion: motor fields 0…62 and 64…120 (I2) */
+        return mc_motor_field_valid(field) ? ((field << 4) | type) : -1;
     case 1:   /* reserved; reject (I2) */
         return -1;
     case 2:   /* sync: field 0 only (I3) */
@@ -114,7 +125,7 @@ int mc_id_motor(int id) {
     if (mc_id_type(id) != 0)
         return -1;
     int field = mc_id_field(id);
-    return (field <= 119) ? field : -1;
+    return mc_motor_field_valid(field) ? field : -1;
 }
 
 int mc_id_board(int id) {
@@ -134,14 +145,19 @@ int mc_id_node(int id) {
 int mc_board_first_motor(int board) {
     if (board < 0 || board >= MC_BOARD_COUNT)
         return -1;
-    return board * MC_AXES_PER_NODE;
+    return mc_raw_to_motor_field(board * MC_AXES_PER_NODE);
 }
 
 int mc_board_owns_motor(int board, int motor) {
-    int first = mc_board_first_motor(board);
-    if (first < 0 || motor < 0 || motor > 119)
+    if (board < 0 || board >= MC_BOARD_COUNT)
         return 0;
-    return (motor >= first && motor < first + MC_AXES_PER_NODE) ? 1 : 0;
+    if (!mc_motor_field_valid(motor))
+        return 0;
+    int first_raw = board * MC_AXES_PER_NODE;
+    for (int axis = 0; axis < MC_AXES_PER_NODE; ++axis)
+        if (mc_raw_to_motor_field(first_raw + axis) == motor)
+            return 1;
+    return 0;
 }
 
 int mc_board_accepts_id(int board, int id) {
@@ -322,7 +338,19 @@ int mc_unpack_status(const uint8_t buf[8], mc_status_t *s) {
 
 static int command_action_valid(uint8_t action) {
     return action == MC_CMD_UP || action == MC_CMD_DOWN ||
-           action == MC_CMD_STOP || action == MC_CMD_REIDENTIFY;
+           action == MC_CMD_STOP || action == MC_CMD_ENTER_BOOTLOADER ||
+           action == MC_CMD_REIDENTIFY;
+}
+
+int mc_command_field_ok(uint8_t action, int field) {
+    if (field < 0 || field > 127)
+        return 0;
+    if (action == MC_CMD_ENTER_BOOTLOADER)
+        return field <= 29 ? 1 : 0;
+    if (action == MC_CMD_UP || action == MC_CMD_DOWN ||
+        action == MC_CMD_STOP || action == MC_CMD_REIDENTIFY)
+        return (field <= 29 || field == MC_BOARD_ALL) ? 1 : 0;
+    return 0;
 }
 
 int mc_pack_command(const mc_command_t *c, uint8_t buf[8]) {
@@ -443,19 +471,79 @@ int mc_unpack_health(const uint8_t buf[8], mc_health_t *h) {
     return 0;
 }
 
-int mc_pack_flash_id(const uint8_t flash_id[8], uint8_t buf[8]) {
-    if (flash_id == 0 || buf == 0)
+static uint64_t fh_mix(uint64_t h) {
+    h ^= h >> 23;
+    h *= 0x2127599bf4325c37ULL;
+    h ^= h >> 47;
+    return h;
+}
+
+uint64_t mc_fasthash64(const uint8_t *buf, uint32_t len, uint64_t seed) {
+    /* Klipper lib/fast-hash/fasthash.c, with a byte-copy load so an unaligned
+     * address and a big-endian host produce the same little-endian value. */
+    const uint64_t m = 0x880355f21e6d1965ULL;
+    uint64_t h = seed ^ ((uint64_t)len * m);
+    uint32_t whole = len / 8;
+    for (uint32_t i = 0; i < whole; ++i) {
+        uint64_t v = 0;
+        for (int b = 0; b < 8; ++b)
+            v |= (uint64_t)buf[i * 8 + (uint32_t)b] << (8 * b);
+        h ^= fh_mix(v);
+        h *= m;
+    }
+    const uint8_t *tail = buf + whole * 8;
+    uint64_t v = 0;
+    switch (len & 7u) {
+    case 7: v ^= (uint64_t)tail[6] << 48; /* fallthrough */
+    case 6: v ^= (uint64_t)tail[5] << 40; /* fallthrough */
+    case 5: v ^= (uint64_t)tail[4] << 32; /* fallthrough */
+    case 4: v ^= (uint64_t)tail[3] << 24; /* fallthrough */
+    case 3: v ^= (uint64_t)tail[2] << 16; /* fallthrough */
+    case 2: v ^= (uint64_t)tail[1] << 8;  /* fallthrough */
+    case 1:
+        v ^= (uint64_t)tail[0];
+        h ^= fh_mix(v);
+        h *= m;
+        break;
+    default:
+        break;
+    }
+    return fh_mix(h);
+}
+
+int mc_uuid_from_flash_id(const uint8_t flash_id[8], uint8_t uuid[MC_UUID_LEN]) {
+    if (flash_id == 0 || uuid == 0)
         return -1;
-    for (int i = 0; i < 8; ++i)
-        buf[i] = flash_id[i];
+    uint64_t hash = mc_fasthash64(flash_id, 8, MC_UUID_SEED);
+    for (int i = 0; i < MC_UUID_LEN; ++i)
+        uuid[i] = (uint8_t)((hash >> (8 * i)) & 0xFFu);
     return 0;
 }
 
-int mc_unpack_flash_id(const uint8_t buf[8], uint8_t flash_id[8]) {
-    if (buf == 0 || flash_id == 0)
+int mc_uuid_equal(const uint8_t a[MC_UUID_LEN], const uint8_t b[MC_UUID_LEN]) {
+    if (a == 0 || b == 0)
+        return 0;
+    for (int i = 0; i < MC_UUID_LEN; ++i)
+        if (a[i] != b[i])
+            return 0;
+    return 1;
+}
+
+int mc_pack_uuid(const uint8_t uuid[MC_UUID_LEN], uint8_t buf[8]) {
+    if (uuid == 0 || buf == 0)
         return -1;
-    for (int i = 0; i < 8; ++i)
-        flash_id[i] = buf[i];
+    for (int i = 0; i < MC_UUID_LEN; ++i)
+        buf[i] = uuid[i];
+    buf[6] = 0;
+    buf[7] = 0;
+    return 0;
+}
+
+int mc_unpack_uuid(const uint8_t buf[8], uint8_t uuid[MC_UUID_LEN]) {
+    if (buf == 0 || uuid == 0)
+        return -1;
+    for (int i = 0; i < MC_UUID_LEN; ++i)
+        uuid[i] = buf[i];
     return 0;
 }
 
@@ -467,16 +555,29 @@ void mc_pack_ask(uint8_t buf[8]) {
 }
 
 int mc_assign_board(int *board_id, int field, const uint8_t payload[8],
-                    const uint8_t own_flash_id[8]) {
-    if (board_id == 0 || payload == 0 || own_flash_id == 0)
+                    const uint8_t own_uuid[MC_UUID_LEN]) {
+    if (board_id == 0 || payload == 0 || own_uuid == 0)
         return -1;
     if (field < 0 || field >= MC_BOARD_COUNT)
         return -1;
-    for (int i = 0; i < 8; ++i)
-        if (payload[i] != own_flash_id[i])
+    for (int i = 0; i < MC_UUID_LEN; ++i)
+        if (payload[i] != own_uuid[i])
             return -1;
+    if (payload[6] != 0 || payload[7] != 0)
+        return -1;
     *board_id = field;
     return 0;
+}
+
+uintptr_t mc_katapult_signature_address(uint32_t reset_vector) {
+    return (uintptr_t)reset_vector - MC_CANBOOT_SIG_OFFSET;
+}
+
+int mc_katapult_request_ok(uint64_t signature, int signature_aligned,
+                           int slot_aligned) {
+    if (!signature_aligned || !slot_aligned)
+        return 0;
+    return signature == MC_CANBOOT_SIGNATURE ? 1 : 0;
 }
 
 /* ------------------------------------------------------------------ */

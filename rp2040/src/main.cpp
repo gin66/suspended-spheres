@@ -22,6 +22,7 @@
 #include "board_pins.h"
 #include "can_node.h"
 #include "homing.h"
+#include "katapult_enter.h"
 #include "motion_core.h"
 #include "status_led.h"
 #include "stepper_axes.h"
@@ -179,6 +180,22 @@ void handle_frame(const can_node::Frame& frame) {
             jog(true, cmd.axis_mask, cmd.distance_mm, cmd.speed_mm_s, cmd.seq);
         } else if (cmd.action == MC_CMD_DOWN) {
             jog(false, cmd.axis_mask, cmd.distance_mm, cmd.speed_mm_s, cmd.seq);
+        } else if (cmd.action == MC_CMD_ENTER_BOOTLOADER) {
+            /* Action 4 is one board only; field 127 is not an enter request.
+             * Disable the four drivers before the bootloader reset. */
+            if (!mc_command_field_ok(cmd.action, mc_id_field(id)) ||
+                mc_id_field(id) != board) {
+                return;
+            }
+            homing::cancel();
+            stepper_axes::stopAll();
+            stepper_axes::setEnabled(false);
+            if (katapult_enter::request()) {
+                return;   /* resets into Katapult */
+            }
+            if (bench_console::logs_enabled()) {
+                Serial.println("enter bootloader: request refused");
+            }
         }
     } else if (type == can_node::kHome) {
         uint8_t mask = 0;

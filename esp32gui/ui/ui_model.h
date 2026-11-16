@@ -33,9 +33,27 @@ extern "C" {
 #define UI_HEALTH_VALID_NTC_BED    0x04u
 #define UI_HEALTH_VALID_DRV_STATUS 0x08u
 
+/* Mirrors fleet_core fl_color_t and fl_state_t without including the core. */
+#define UI_UPG_COLOR_RED     0u
+#define UI_UPG_COLOR_YELLOW  1u
+#define UI_UPG_COLOR_GREEN   2u
+#define UI_UPG_COLOR_DIM     3u
+#define UI_UPG_COLOR_FAILED  4u
+
+#define UI_UPG_IDLE       0u
+#define UI_UPG_QUEUED     1u
+#define UI_UPG_ENTERING   2u
+#define UI_UPG_CONNECTING 3u
+#define UI_UPG_WRITING    4u
+#define UI_UPG_VERIFYING  5u
+#define UI_UPG_REBOOTING  6u
+#define UI_UPG_DONE       7u
+#define UI_UPG_FAILED     8u
+#define UI_UPG_SKIPPED    9u
+
 typedef struct {
   bool used;
-  uint8_t flash_id[8];
+  uint8_t uuid[6];
   int board_id;       /* -1 unassigned */
   bool online;
   bool status_seen;
@@ -54,7 +72,14 @@ typedef struct {
   uint8_t health_seq;
   bool version_seen;
   char sw_version[24];
+  uint8_t version_flags;   /* bit 0 dirty */
+  uint32_t current_build;  /* 0 unknown */
+  uint32_t version_age_ms;
   int assigned_positions;
+  uint8_t upgrade_state;   /* fleet_core fl_state_t */
+  uint8_t upgrade_color;   /* fleet_core fl_color_t */
+  uint8_t upgrade_progress;
+  char upgrade_result[28];
 } ui_node_t;
 
 typedef struct {
@@ -149,6 +174,12 @@ typedef struct {
   bool upgrade_active;
   uint8_t upgrade_progress;  /* 0…100 */
   char upgrade_status[64];
+  char upgrade_image_version[24];
+  uint32_t upgrade_image_build;
+  char upgrade_source[8];
+  int upgrade_done;
+  int upgrade_total;
+  int upgrade_yellow_board;   /* -1 when none */
 
   /* Network and service information (read-only on the panel) */
   bool wifi_present;
@@ -186,6 +217,8 @@ typedef struct {
   void (*animation_load)(void);
   void (*version_query_all)(void);
   void (*upgrade_selected)(void);
+  void (*upgrade_all_outdated)(void);
+  void (*upgrade_stop)(void);
   void (*mock_inject)(void);  /* host harness only; may be NULL */
 } ui_actions_t;
 

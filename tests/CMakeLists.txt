@@ -15,6 +15,10 @@ set(MOTION_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib/motion_core")
 set(PATTERN_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib/pattern_core")
 set(TMC_UART_BITS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib/tmc_uart_bits")
 set(HOMING_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib/homing_core")
+set(RELEASE_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib/release_core")
+set(FLEET_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib/fleet_core")
+set(PANEL_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib/panel_core")
+set(NET_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib/net_core")
 
 add_library(motion_core STATIC
     "${MOTION_CORE_DIR}/src/motion_core.cpp"
@@ -49,6 +53,37 @@ target_include_directories(homing_core PUBLIC
     "${HOMING_CORE_DIR}/include"
 )
 
+add_library(release_core STATIC
+    "${RELEASE_CORE_DIR}/src/release_core.cpp"
+)
+target_include_directories(release_core PUBLIC
+    "${RELEASE_CORE_DIR}/include"
+)
+
+add_library(panel_core STATIC
+    "${PANEL_CORE_DIR}/src/panel_core.cpp"
+)
+target_link_libraries(panel_core PUBLIC release_core)
+target_include_directories(panel_core PUBLIC
+    "${PANEL_CORE_DIR}/include"
+)
+
+add_library(net_core STATIC
+    "${NET_CORE_DIR}/src/net_core.cpp"
+)
+target_link_libraries(net_core PUBLIC release_core panel_core)
+target_include_directories(net_core PUBLIC
+    "${NET_CORE_DIR}/include"
+)
+
+add_library(fleet_core STATIC
+    "${FLEET_CORE_DIR}/src/fleet_core.cpp"
+)
+target_link_libraries(fleet_core PUBLIC release_core motion_core)
+target_include_directories(fleet_core PUBLIC
+    "${FLEET_CORE_DIR}/include"
+)
+
 # One host executable.  test_runner.cpp is C++17; abi_c.c is the C caller
 # that proves H4 (unmangled names, matching integer widths).
 add_executable(motion_core_tests
@@ -67,14 +102,28 @@ add_executable(motion_core_tests
     test_live.cpp
     test_tmc_uart_bits.cpp
     test_homing_core.cpp
+    test_release_r0.cpp
+    test_release_core.cpp
+    test_release_pack.cpp
+    test_fleet_core.cpp
+    test_panel_core.cpp
+    test_ota_core.cpp
+    test_workflow.cpp
+    test_net_core.cpp
     abi_c.c
 )
 
 target_link_libraries(motion_core_tests PRIVATE motion_core pattern_core
-    tmc_uart_bits homing_core)
+    tmc_uart_bits homing_core release_core fleet_core panel_core net_core)
 target_include_directories(motion_core_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+# Release packer: writes a release directory, never publishes.
+add_executable(release_pack
+    "${CMAKE_CURRENT_SOURCE_DIR}/../tools/release_pack.cpp"
+)
+target_link_libraries(release_pack PRIVATE release_core)
 
 # Headless authoring tool: bake one file, write its report, optionally export.
 add_executable(pattern_check
@@ -103,3 +152,9 @@ endforeach()
 
 # The runtime H3 test only passes if this configure-time scan ran.
 target_compile_definitions(motion_core_tests PRIVATE MC_H3_CHECK_RAN=1)
+target_compile_definitions(motion_core_tests PRIVATE
+    RELEASE_PACK_BIN="$<TARGET_FILE:release_pack>"
+    ESP32GUI_PLATFORMIO_INI="${CMAKE_CURRENT_SOURCE_DIR}/../esp32gui/platformio.ini"
+    ESP32GUI_RELEASE_GATE_H="${CMAKE_CURRENT_SOURCE_DIR}/../esp32gui/include/release_gate.h"
+    RELEASE_WORKFLOW_YML="${CMAKE_CURRENT_SOURCE_DIR}/../.github/workflows/release.yml")
+add_dependencies(motion_core_tests release_pack)

@@ -54,8 +54,20 @@ int mc_um_in_range(int32_t um);
 #define MC_NODE_COUNT   30     /* legacy alias for MC_BOARD_COUNT */
 #define MC_AXES_PER_NODE 4
 
+/* Motor fields skip 63 because (63 << 4) | 0 is Katapult's admin
+ * identifier 0x3F0 (Fly_Micro4_addressing.md §2).  raw = board × 4 + axis
+ * maps to 0…62 and 64…120.  Field 63 and fields 121…127 are never motors. */
+#define MC_MOTOR_FIELD_SKIP 63
+#define MC_MOTOR_FIELD_MAX  120
+
+/* raw is board × 4 + axis, 0…119.  Returns the wire motor field, or -1. */
+int mc_raw_to_motor_field(int raw);
+
+/* A field in 0…120 other than 63 is a motor field. */
+int mc_motor_field_valid(int field);
+
 /* id = (field << 4) | type; -1 on any invalid combination:
- *   type 0     motion        field = motor 0…119     (I2)
+ *   type 0     motion        field = a motor field (0…62, 64…120) (I2)
  *   type 1     reserved      rejected                (I2)
  *   type 2     sync          field = 0               (I3)
  *   type 3–7   board frames  field = board 0…29 or 127 (I4)
@@ -81,8 +93,10 @@ int mc_id_motor(int id);
 int mc_id_board(int id);
 int mc_id_node(int id);    /* legacy alias for mc_id_board */
 
-/* Ownership (I8): board b owns motors 4b … 4b+3. Board 0 owns 0–3.
- * Board 29 owns 116–119. Board IDs outside 0–29 own nothing. */
+/* Ownership (I8): board b owns the four motor fields for raw
+ * 4b … 4b+3. Board 0 owns 0–3; board 15 owns 60, 61, 62, 64; board 29
+ * owns 117–120. Field 63 is never a motor. Board IDs outside 0–29 own
+ * nothing. */
 int mc_board_first_motor(int board);      /* -1 outside 0…29 */
 int mc_board_owns_motor(int board, int motor);
 int mc_node_first_motor(int node);        /* legacy aliases */
@@ -191,16 +205,22 @@ int mc_pack_status(const mc_status_t *s, uint8_t buf[8]);
 int mc_unpack_status(const uint8_t buf[8], mc_status_t *s);
 
 /* Command frame, type 4, exactly 8 bytes, little-endian:
- *   [0] action: 1 up, 2 down, 3 stop, 0x7F re-identify
+ *   [0] action: 1 up, 2 down, 3 stop, 4 enter bootloader, 0x7F re-identify
  *   [1] axis_mask, bit n selects axis n
  *   [2..3] distance_mm   [4..5] speed_mm_s   [6] seq   [7] reserved (0)
+ * Action 4 is sent to one board ID only (0…29); field 127 is rejected.
  * A re-identify command is broadcast to field 127. It tells every board to
  * drop its RAM board ID and stop; the board then answers the next ASK. */
-#define MC_CMD_UP          1
-#define MC_CMD_DOWN        2
-#define MC_CMD_STOP        3
-#define MC_CMD_REIDENTIFY  0x7F
-#define MC_AXIS_MASK_ALL   0x0F
+#define MC_CMD_UP               1
+#define MC_CMD_DOWN             2
+#define MC_CMD_STOP             3
+#define MC_CMD_ENTER_BOOTLOADER 4
+#define MC_CMD_REIDENTIFY       0x7F
+#define MC_AXIS_MASK_ALL        0x0F
+
+/* Field rules shared by the panel and the node. Actions 1, 2, 3 and 0x7F
+ * accept a board ID 0…29 or field 127. Action 4 accepts only one board ID. */
+int mc_command_field_ok(uint8_t action, int field);
 
 typedef struct {
     uint8_t  action;
@@ -267,15 +287,40 @@ typedef struct {
 int mc_pack_health(const mc_health_t *h, uint8_t buf[8]);
 int mc_unpack_health(const uint8_t buf[8], mc_health_t *h);
 
-/* DISC and ASSIGN carry the 64-bit flash ID; ASK is eight zero bytes. */
-int mc_pack_flash_id(const uint8_t flash_id[8], uint8_t buf[8]);
-int mc_unpack_flash_id(const uint8_t buf[8], uint8_t flash_id[8]);
+/* DISC and ASSIGN carry the 6-byte Katapult/Klipper UUID followed by two
+ * zero bytes; ASK is eight zero bytes.  The UUID is derived from the 8-byte
+ * QSPI flash id with fasthash64 (Fly_Micro4_addressing.md §1). */
+#define MC_UUID_LEN   6
+#define MC_UUID_SEED  0xA16231A7u
+
+uint64_t mc_fasthash64(const uint8_t *buf, uint32_t len, uint64_t seed);
+int mc_uuid_from_flash_id(const uint8_t flash_id[8], uint8_t uuid[MC_UUID_LEN]);
+int mc_uuid_equal(const uint8_t a[MC_UUID_LEN], const uint8_t b[MC_UUID_LEN]);
+
+int mc_pack_uuid(const uint8_t uuid[MC_UUID_LEN], uint8_t buf[8]);
+int mc_unpack_uuid(const uint8_t buf[8], uint8_t uuid[MC_UUID_LEN]);
 void mc_pack_ask(uint8_t buf[8]);
 
-/* ASSIGN acceptance: store field (board 0…29) only when the payload is
- * this board's own flash ID. *board_id is -1 while unidentified. */
+/* ASSIGN acceptance: store field (board 0…29) only when the first six
+ * payload bytes are this board's own UUID and the last two are zero.
+ * *board_id is -1 while unidentified. */
 int mc_assign_board(int *board_id, int field, const uint8_t payload[8],
-                    const uint8_t own_flash_id[8]);
+                    const uint8_t own_uuid[MC_UUID_LEN]);
+
+/* Katapult enter request (katapult_whitepaper.md §6.2).  The application
+ * checks the signature and both pointer alignments before writing the
+ * request word.  Returns 1 when the write and reset are safe, 0 otherwise. */
+#define MC_CANBOOT_SIG_OFFSET 9u
+#define MC_CANBOOT_SIGNATURE 0x21746f6f426e6143ULL  /* "CanBoot!" */
+#define MC_CANBOOT_REQUEST   0x5984E3FA6CA1589BULL
+
+int mc_katapult_request_ok(uint64_t signature, int signature_aligned,
+                           int slot_aligned);
+
+/* The CanBoot signature is nine bytes before the bootloader reset vector
+ * (katapult_whitepaper.md §6.2).  Host-tested so the byte offset cannot
+ * regress to nine words. */
+uintptr_t mc_katapult_signature_address(uint32_t reset_vector);
 
 /* ------------------------------------------------------------------ */
 /*  Bus budget (§5 B1–B5/B7, whitepaper §3.3, §4.6, Appendix A)        */

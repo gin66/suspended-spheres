@@ -7,6 +7,7 @@
  */
 
 #include <Arduino.h>
+#include "release_gate.h"
 #include <lvgl.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -23,10 +24,15 @@
 #include "commission.h"
 #include "config_store.h"
 #include "motion_core.h"
+#include "katapult_client.h"
+#include "panel_console.h"
 #include "ui.h"
 
 #ifndef SS_FW_VERSION
 #define SS_FW_VERSION "dev"
+#endif
+#ifndef SS_BUILD_ID
+#define SS_BUILD_ID 0
 #endif
 
 namespace {
@@ -53,6 +59,7 @@ static uint32_t lv_tick_cb(void) { return (uint32_t)millis(); }
 void can_rx_callback(const ss_can_frame_t *frame, void *ctx) {
   (void)ctx;
   app_watchdog_note_can_rx();
+  katapult_on_frame(frame);
   can_monitor_push(frame);
   commission_on_frame(frame, nullptr);
 }
@@ -98,7 +105,7 @@ void action_motor(int action, int axis) {
       distance = 0;
       break;
   }
-  commission_test_motor(node.flash_id, (uint8_t)axis, op, distance, speed);
+  commission_test_motor(node.uuid, (uint8_t)axis, op, distance, speed);
 }
 
 void action_assign_position(int position, int axis) {
@@ -107,7 +114,7 @@ void action_assign_position(int position, int axis) {
     SS_LOGW("motor", "cannot assign: no assigned board selected");
     return;
   }
-  if (config_store_assign_position((uint8_t)position, node.flash_id,
+  if (config_store_assign_position((uint8_t)position, node.uuid,
                                    (uint8_t)axis)) {
     SS_LOGI("motor", "position %d <- board %d axis %d", position, node.board_id,
             axis);
@@ -123,7 +130,7 @@ void action_grid_select(int position) {
   if (position < 0 || position >= config_store_capacity()) return;
   const ss_position_map_t *p = &cfg->positions[position];
   if (!p->assigned) return;
-  const int idx = commission_find_node(p->flash_id);
+  const int idx = commission_find_node(p->uuid);
   if (idx >= 0) commission_select(idx);
 }
 
@@ -218,6 +225,17 @@ void action_upgrade_selected(void) {
                 node.board_id);
   SS_LOGW("upgrade", "upgrade requested for board %d, transfer not implemented",
           node.board_id);
+}
+
+void action_upgrade_all_outdated(void) {
+  std::snprintf(s_upgrade_status, sizeof(s_upgrade_status),
+                "no Fly image selected (copy /firmware/fly to SD)");
+  SS_LOGW("upgrade", "UPGRADE ALL OUTDATED refused: no image selected");
+}
+
+void action_upgrade_stop(void) {
+  s_upgrade_active = false;
+  std::snprintf(s_upgrade_status, sizeof(s_upgrade_status), "stop requested");
 }
 
 void action_can_start(void) {
@@ -325,7 +343,7 @@ void build_snapshot(ui_snapshot_t *snap) {
     if (!commission_get_node(i, &n)) continue;
     ui_node_t *u = &snap->nodes[i];
     u->used = n.used;
-    std::memcpy(u->flash_id, n.flash_id, sizeof(u->flash_id));
+    std::memcpy(u->uuid, n.uuid, sizeof(u->uuid));
     u->board_id = n.board_id;
     u->online = (uint32_t)(millis() - n.last_seen_ms) <= 10000u;
     u->status_seen = n.status_seen;
@@ -345,6 +363,11 @@ void build_snapshot(ui_snapshot_t *snap) {
     u->health_seq = n.health_seq;
     u->version_seen = n.version_seen;
     std::snprintf(u->sw_version, sizeof(u->sw_version), "%s", n.sw_version);
+    u->version_flags = n.version_flags;
+    u->current_build = n.current_build;
+    u->version_age_ms = n.version_seen
+                            ? (uint32_t)(millis() - n.last_version_ms)
+                            : 0u;
     u->assigned_positions = n.assigned_positions;
   }
   snap->selected_node = commission_selected_index();
@@ -368,7 +391,7 @@ void build_snapshot(ui_snapshot_t *snap) {
     snap->cells[pos].axis = p->axis;
     snap->cells[pos].node_index = -1;
     if (p->assigned) {
-      const int idx = commission_find_node(p->flash_id);
+      const int idx = commission_find_node(p->uuid);
       if (idx >= 0) snap->cells[pos].node_index = idx;
     }
   }
@@ -383,8 +406,8 @@ void build_snapshot(ui_snapshot_t *snap) {
 
   snap->boot_count = wd->boot_count;
   snap->last_watchpoint = wd->last_watchpoint;
-  std::snprintf(snap->firmware_version, sizeof(snap->firmware_version), "%s",
-                SS_FW_VERSION);
+  std::snprintf(snap->firmware_version, sizeof(snap->firmware_version),
+                "%s+%lu", SS_FW_VERSION, (unsigned long)SS_BUILD_ID);
   app_log_dump(snap->log_text, sizeof(snap->log_text));
 }
 
@@ -482,6 +505,8 @@ void setup() {
   actions.animation_load = action_animation_load;
   actions.version_query_all = action_version_query_all;
   actions.upgrade_selected = action_upgrade_selected;
+  actions.upgrade_all_outdated = action_upgrade_all_outdated;
+  actions.upgrade_stop = action_upgrade_stop;
 #ifdef SS_CAN_MOCK
   actions.mock_inject = action_mock_inject;
 #endif
@@ -492,6 +517,7 @@ void setup() {
     board_ws7_backlight(true);
   }
 
+  panel_console_begin();
   WATCH(3);
   SS_LOGI("boot", "ready: %s transport, %d position capacity",
           can_transport_is_mock() ? "mock" : "TWAI",
@@ -509,6 +535,7 @@ void setup() {
 }
 
 void loop() {
+  panel_console_poll();
   if (s_lvgl_mux != nullptr) xSemaphoreTake(s_lvgl_mux, portMAX_DELAY);
   lv_task_handler();
   if (s_lvgl_mux != nullptr) xSemaphoreGive(s_lvgl_mux);

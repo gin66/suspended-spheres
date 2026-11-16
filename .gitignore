@@ -14,3 +14,5 @@ esp32gui/host/build/
 webapp/node_modules/
 webapp/dist/
 *.report.json
+
+esp32gui/src/fly_image_data.h

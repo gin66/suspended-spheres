@@ -1,6 +1,7 @@
 #include "bench_console.h"
 
 #include <Arduino.h>
+#include <pico/bootrom.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -83,6 +84,7 @@ void print_help() {
     Serial.println("  stats [axis]               UART read/write/IFCNT health counters");
     Serial.println("  reinit                     stop, re-run TMC bring-up; axes stay disabled");
     Serial.println("  quiet [on|off]             silence periodic CAN stats and command logs");
+    Serial.println("  bootsel                    reboot into the RP2040 USB boot ROM");
     Serial.println("  selftest                   bit-banged TX pad readback");
     Serial.println("  scan                       read GCONF at UART addresses 0..3");
     Serial.println("  bbprobe [addr]             pure bit-banged GCONF read + raw samples");
@@ -651,6 +653,12 @@ void command_quiet(int argc, char** argv) {
     Serial.println(s_quiet ? "off" : "on");
 }
 
+void command_bootsel() {
+    Serial.println("rebooting into BOOTSEL (RPI-RP2)");
+    Serial.flush();
+    reset_usb_boot(0, 0);
+}
+
 void command_reinit() {
     s_reinit_requested = true;
     Serial.println("reinit requested");
@@ -732,6 +740,8 @@ void execute(char* line) {
         command_stop(argc, argv);
     } else if (strcmp(command, "enable") == 0) {
         command_enable(argc, argv);
+    } else if (strcmp(command, "bootsel") == 0) {
+        command_bootsel();
     } else if (strcmp(command, "quiet") == 0) {
         command_quiet(argc, argv);
     } else if (strcmp(command, "reinit") == 0) {
