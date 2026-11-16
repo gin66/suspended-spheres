@@ -51,7 +51,7 @@ static int test_w2_permissions(void) {
 static int test_w3_order(void) {
     std::string w = read_workflow();
     size_t tests = w.find("motion_core_tests");
-    size_t build = w.find("pio run");
+    size_t build = w.find("run -e fly_micro4_katapult");
     size_t publish = w.find("gh release create");
     ASSERT(tests != std::string::npos);
     ASSERT(build != std::string::npos);
@@ -64,8 +64,8 @@ static int test_w3_order(void) {
 /* W4 — release environments and flags. */
 static int test_w4_environments(void) {
     std::string w = read_workflow();
-    ASSERT(has(w, "pio run -e fly_micro4_katapult"));
-    ASSERT(has(w, "pio run -e esp32can"));
+    ASSERT(has(w, "run -e fly_micro4_katapult"));
+    ASSERT(has(w, "run -e esp32can"));
     ASSERT(has(w, "SS_RELEASE"));
     ASSERT(!has(w, "SS_CAN_MOCK"));
     ASSERT(!has(w, "esp32usb"));
