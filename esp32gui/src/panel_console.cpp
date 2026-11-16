@@ -11,6 +11,7 @@
 #include "commission.h"
 #include "config_store.h"
 #include "firmware_image.h"
+#include "github_client.h"
 #include "katapult_client.h"
 #include "motion_core.h"
 #include "net_manager.h"
@@ -82,6 +83,7 @@ void print_help(void) {
   Serial.println("  wifi key                    setup AP key (bench only)");
   Serial.println("  wifi list                   last scan results");
   Serial.println("  webget <path>               loopback HTTP GET for the bench");
+  Serial.println("  github check|install|status GitHub release client (pinned repo)");
   Serial.println("  service on|off              HTTP service for this power cycle");
   Serial.println("  image                       embedded Fly image size");
   Serial.println("  can                         USB_SEL/CAN state and counters");
@@ -251,6 +253,16 @@ void execute(char *line) {
       net_manager_status(text, sizeof(text));
       Serial.println(text);
     }
+  } else if (strcmp(cmd, "github") == 0) {
+    char *arg = strtok(nullptr, " ");
+    if (arg != nullptr && strcmp(arg, "check") == 0) {
+      github_client_check();
+    } else if (arg != nullptr && strcmp(arg, "install") == 0) {
+      github_client_install();
+    }
+    char text[96];
+    github_client_status(text, sizeof(text));
+    Serial.println(text);
   } else if (strcmp(cmd, "webget") == 0) {
     char *arg = strtok(nullptr, " ");
     web_get(arg != nullptr ? arg : "/api/status");

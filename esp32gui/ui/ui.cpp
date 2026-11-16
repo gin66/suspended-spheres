@@ -145,6 +145,7 @@ lv_obj_t *s_set_boot;
 lv_obj_t *s_set_uptime;
 lv_obj_t *s_set_capacity;
 lv_obj_t *s_set_watch;
+lv_obj_t *s_set_github;
 lv_obj_t *s_set_service;
 
 /* ── helpers ───────────────────────────────────────────────────────────── */
@@ -564,6 +565,11 @@ void on_wifi_scan(lv_event_t *e) {
 void on_service_toggle(lv_event_t *e) {
   (void)e;
   if (s_actions.service_toggle != nullptr) s_actions.service_toggle();
+}
+
+void on_github_check(lv_event_t *e) {
+  (void)e;
+  if (s_actions.github_check != nullptr) s_actions.github_check();
 }
 
 void on_panel_update(lv_event_t *e) {
@@ -1297,6 +1303,7 @@ void build_settings(void) {
   s_set_uptime = make_kv(sys, "Uptime", 82);
   s_set_capacity = make_kv(sys, "Capacity", 106);
   s_set_watch = make_kv(sys, "Watchpoint", 130);
+  s_set_github = make_kv(sys, "GitHub", 154);
 
   lv_obj_t *service = make_panel(s, 12, 306, 688, 110);
   make_label(service, "SERVICE", &lv_font_montserrat_14, C_MUTED);
@@ -1308,18 +1315,21 @@ void build_settings(void) {
   lv_obj_set_pos(s_set_service, 12, 28);
   lv_label_set_long_mode(s_set_service, LV_LABEL_LONG_WRAP);
   lv_obj_set_width(s_set_service, 620);
-  lv_obj_t *log = make_button(service, "OPEN LOG", 120, 40,
+  lv_obj_t *log = make_button(service, "OPEN LOG", 110, 40,
                               on_tab, (void *)(intptr_t)UI_SCREEN_LOG);
   lv_obj_set_pos(log, 8, 56);
-  lv_obj_t *cfg = make_button(service, "OPEN CONFIG", 140, 40,
+  lv_obj_t *cfg = make_button(service, "OPEN CONFIG", 130, 40,
                               on_tab, (void *)(intptr_t)UI_SCREEN_CONFIG);
-  lv_obj_set_pos(cfg, 136, 56);
-  lv_obj_t *ota = make_button(service, "PANEL UPDATE", 150, 40,
+  lv_obj_set_pos(cfg, 126, 56);
+  lv_obj_t *ota = make_button(service, "PANEL UPDATE", 140, 40,
                               on_panel_update, nullptr);
-  lv_obj_set_pos(ota, 284, 56);
-  s_set_server = make_button(service, "SERVER ON", 110, 40,
+  lv_obj_set_pos(ota, 264, 56);
+  s_set_server = make_button(service, "SERVER ON", 100, 40,
                              on_service_toggle, nullptr);
-  lv_obj_set_pos(s_set_server, 442, 56);
+  lv_obj_set_pos(s_set_server, 412, 56);
+  lv_obj_t *github = make_button(service, "CHECK UPDATES", 150, 40,
+                                 on_github_check, nullptr);
+  lv_obj_set_pos(github, 520, 56);
 }
 
 }  // namespace
@@ -1976,6 +1986,8 @@ void ui_update(const ui_snapshot_t *snapshot) {
   lv_label_set_text_fmt(s_set_capacity, "%lu positions",
                         (unsigned long)s_snap->capacity);
   lv_label_set_text_fmt(s_set_watch, "%u", (unsigned)s_snap->last_watchpoint);
+  lv_label_set_text(s_set_github,
+                    s_snap->github_status[0] ? s_snap->github_status : "--");
 
   /* Log */
   uint32_t log_hash = 2166136261u;

@@ -19,7 +19,8 @@
 > setup AP, NVS credentials, HTTP server and upload endpoints are in
 > `esp32gui/src/net_manager.cpp`. The panel-side SSID list/password keyboard
 > and a second-client association test remain. The panel's GitHub pull is
-> still planned (R10).
+> is in the tree (R10) as `esp32gui/src/github_client.cpp`; a live GitHub
+> association/download test remains.
 > They change where an image comes from, not what an image is: the identity,
 > SHA-256, OTA slot, self-test and rollback rules in sections 1 and 3 apply to
 > every source. Until the WiFi stack and web server are in the tree, those

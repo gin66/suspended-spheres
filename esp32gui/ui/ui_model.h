@@ -192,6 +192,7 @@ typedef struct {
   char wifi_ap_ssid[32];
   char wifi_ap_password[16];
   bool service_on;
+  char github_status[64];
 
   /* Diagnostics */
   uint32_t boot_count;
@@ -229,6 +230,7 @@ typedef struct {
   void (*wifi_forget)(void);
   void (*wifi_scan)(void);
   void (*service_toggle)(void);
+  void (*github_check)(void);
   void (*mock_inject)(void);  /* host harness only; may be NULL */
 } ui_actions_t;
 

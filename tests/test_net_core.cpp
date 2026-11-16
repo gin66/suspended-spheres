@@ -185,11 +185,11 @@ static int test_b5_status_json(void) {
     net_link_t l;
     net_link_init(&l);
     net_link_enable_setup(&l, 0);
-    net_link_submit(&l, "ssid", "hunter2", 0);
+    net_link_submit(&l, "ssid", "fixture-password", 0);
     net_link_result(&l, true, 0);
     char json[256];
     ASSERT(net_status_json(json, sizeof(json), &l, true, "10.0.0.5") == 0);
-    ASSERT(strstr(json, "hunter2") == 0);
+    ASSERT(strstr(json, "fixture-password") == 0);
     ASSERT(strstr(json, "password") == 0);
     ASSERT(strstr(json, "CONNECTED") != 0);
     return 0;

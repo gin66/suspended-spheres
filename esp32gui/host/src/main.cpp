@@ -220,11 +220,13 @@ ui_snapshot_t make_snapshot() {
   std::snprintf(s.wifi_ap_ssid, sizeof(s.wifi_ap_ssid), "%s",
                 "SuspendedSpheres-A1B2");
   std::snprintf(s.wifi_ap_password, sizeof(s.wifi_ap_password), "%s",
-                "K7mQ2pX9aB");
+                "REDACTED");
   std::snprintf(s.wifi_reason, sizeof(s.wifi_reason), "%s",
                 "scan: 6 networks");
   s.wifi_rssi = 0;
   s.service_on = true;
+  std::snprintf(s.github_status, sizeof(s.github_status), "%s",
+                "current (1.4.2)");
 
   s.upgrade_active = false;
   s.upgrade_progress = 0;

@@ -224,6 +224,7 @@ void action_wifi_setup(void) { net_manager_setup(); }
 void action_wifi_forget(void) { net_manager_forget(); }
 void action_wifi_scan(void) { net_manager_scan(); }
 void action_service_toggle(void) { net_manager_service_toggle(); }
+void action_github_check(void) { net_manager_github_check(); }
 
 void action_panel_update(void) {
   char text[80] = "idle";
@@ -527,6 +528,7 @@ void setup() {
   actions.wifi_forget = action_wifi_forget;
   actions.wifi_scan = action_wifi_scan;
   actions.service_toggle = action_service_toggle;
+  actions.github_check = action_github_check;
 #ifdef SS_CAN_MOCK
   actions.mock_inject = action_mock_inject;
 #endif

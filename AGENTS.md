@@ -114,8 +114,10 @@ All technical Markdown belongs in `doc/`. Only `README.md` and `AGENTS.md` sit a
   **SCAN**, **FORGET** and **SERVER** control the same state. Credentials and
   the admin hash live in NVS. The setup page is `http://192.168.4.1` while the
   AP is up; the panel-side SSID list/keyboard is still pending. The bench
-  console has `wifi setup|forget|scan|status|list|key`, `service on|off` and
-  `panelota`. LVGL objects, the UI snapshot and the CAN scratch copy are in
+  console has `wifi setup|forget|scan|status|list|key`, `service on|off`,
+  `github check|install|status` and `panelota`.  The GitHub owner/repository
+  are compiled from `SS_GITHUB_OWNER`/`SS_GITHUB_REPO` (workflow repository
+  variables); an empty value disables the pull. LVGL objects, the UI snapshot and the CAN scratch copy are in
   PSRAM so internal DRAM remains for lwIP and the WiFi driver. `release_gate.h` rejects a
   build that sets both `SS_RELEASE` and `SS_CAN_MOCK`. Never upload or flash
   without an explicit request.

@@ -18,6 +18,7 @@
 
 #include "app_log.h"
 #include "firmware_image.h"
+#include "github_client.h"
 #include "net_core.h"
 #include "panel_core.h"
 #include "panel_ota.h"
@@ -54,7 +55,8 @@ bool s_server_on = false;
 bool s_sntp_started = false;
 uint32_t s_connect_deadline = 0;
 
-enum cmd_t { CMD_NONE, CMD_SETUP, CMD_FORGET, CMD_SCAN, CMD_SERVICE };
+enum cmd_t { CMD_NONE, CMD_SETUP, CMD_FORGET, CMD_SCAN, CMD_SERVICE,
+             CMD_GITHUB_CHECK };
 volatile cmd_t s_cmd = CMD_NONE;
 volatile bool s_cmd_service_on = false;
 
@@ -463,6 +465,12 @@ String control_page(void) {
   p += "<form method=post action=/api/upgrade/all>";
   p += csrf_input();
   p += "<button>UPGRADE ALL OUTDATED</button></form>";
+  p += "<form method=post action=/api/github/check>";
+  p += csrf_input();
+  p += "<button>CHECK GITHUB</button></form>";
+  p += "<form method=post action=/api/github/install>";
+  p += csrf_input();
+  p += "<button>INSTALL GITHUB UPDATE</button></form>";
   p += "</body></html>";
   return p;
 }
@@ -569,6 +577,40 @@ void handle_service(void) {
   do_service(s_server.arg("on") == "1");
   s_server.sendHeader("Location", "/");
   s_server.send(303, "text/plain", "");
+}
+
+void handle_github_check(void) {
+  if (!csrf_ok()) {
+    send_error(422, "csrf");
+    return;
+  }
+  if (!authorized()) {
+    send_unauthorized();
+    return;
+  }
+  github_client_check();
+  char text[96];
+  github_client_status(text, sizeof(text));
+  s_server.send(200, "application/json", ("{\"status\":\"" +
+                 String(text) + "\"}").c_str());
+}
+
+void handle_github_install(void) {
+  if (!csrf_ok()) {
+    send_error(422, "csrf");
+    return;
+  }
+  if (!authorized()) {
+    send_unauthorized();
+    return;
+  }
+  if (!github_client_update_available()) {
+    send_error(409, "no update checked");
+    return;
+  }
+  s_server.send(200, "application/json", "{\"status\":\"installing\"}");
+  vTaskDelay(pdMS_TO_TICKS(100));
+  github_client_install();
 }
 
 void handle_upgrade(void) {
@@ -741,6 +783,8 @@ void register_handlers(void) {
   s_server.on("/api/wifi", HTTP_POST, handle_wifi);
   s_server.on("/api/service", HTTP_POST, handle_service);
   s_server.on("/api/upgrade/all", HTTP_POST, handle_upgrade);
+  s_server.on("/api/github/check", HTTP_POST, handle_github_check);
+  s_server.on("/api/github/install", HTTP_POST, handle_github_install);
   s_server.on("/api/update/panel", HTTP_POST, handle_upload_final, handle_upload);
   s_server.on("/api/images/fly", HTTP_POST, handle_upload_final, handle_upload);
 }
@@ -761,6 +805,7 @@ void net_task(void *arg) {
       case CMD_FORGET: do_forget(); break;
       case CMD_SCAN: do_scan(); break;
       case CMD_SERVICE: do_service(service_on); break;
+      case CMD_GITHUB_CHECK: github_client_check(); break;
       default: break;
     }
     poll_link();
@@ -825,6 +870,12 @@ extern "C" void net_manager_service_toggle(void) {
   unlock();
 }
 
+extern "C" void net_manager_github_check(void) {
+  lock();
+  s_cmd = CMD_GITHUB_CHECK;
+  unlock();
+}
+
 extern "C" bool net_manager_service_on(void) {
   lock();
   const bool on = s_service_on;
@@ -865,6 +916,7 @@ extern "C" void net_manager_snapshot(ui_snapshot_t *snap) {
   std::snprintf(snap->wifi_reason, sizeof(snap->wifi_reason), "%s",
                 s_link.reason);
   snap->service_on = s_service_on;
+  github_client_status(snap->github_status, sizeof(snap->github_status));
   snap->wifi_rssi = s_rssi;
   std::snprintf(snap->wifi_ip, sizeof(snap->wifi_ip), "%s", s_ip);
   if (s_link.state == NET_AP_SETUP) {

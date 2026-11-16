@@ -492,3 +492,23 @@ On clean commit `bc954a62`, build id `1794858657`:
 - LVGL object memory now uses PSRAM via `lv_mem_custom.cpp`; the internal
   heap after setting up the AP was about 120 KiB, versus 2 KiB before that
   change.
+
+### R10 firmware (2026-11-16)
+
+- `esp32gui/src/github_client.cpp` uses `WiFiClientSecure` with the built-in
+  CA bundle and `HTTPClient` to read
+  `.../releases/latest/download/release.json` from the pinned
+  `SS_GITHUB_OWNER`/`SS_GITHUB_REPO` build flags.
+- SNTP must be valid and the link connected; otherwise the pull is refused
+  with a reason.  The parsed release is compared with `SS_BUILD_ID` by
+  `net_github_check`.
+- Install downloads the panel app manifest/bin and the Fly manifest/bin from
+  `.../releases/download/<tag>/<asset>`, rejects an asset URL outside the
+  pinned repository, verifies SHA-256, stores the Fly bundle on SD and applies
+  the panel image with `panel_ota_apply` (reboot).
+- Settings has **CHECK UPDATES**; the web control page has check and
+  install (the POST is the confirmation); the bench console has
+  `github check|install|status`.
+- Not exercised against GitHub in this session: the setup AP was started and
+  the panel scanned 9 networks, but the Mac did not list the soft AP.  R10 is
+  therefore compile- and policy-verified, not network-verified.
