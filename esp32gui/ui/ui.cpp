@@ -653,7 +653,7 @@ void build_nav(int active) {
 
   for (int i = 0; i < UI_SCREEN_COUNT; ++i) {
     const bool is_active = (i == active);
-    const lv_color_t color = is_active ? C_TEXT : C_MUTED;
+    const lv_color_t color = is_active ? C_ACCENT : C_MUTED;
 
     lv_obj_t *tab = lv_obj_create(s_nav);
     lv_obj_remove_style_all(tab);
@@ -699,11 +699,6 @@ void build_nav(int active) {
     lv_obj_set_width(label, kRailW);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_pos(label, 0, 32);
-
-    if (is_active) {
-      lv_obj_t *rule = nav_part(tab, 0, 10, 3, tab_h - 20, C_ACCENT);
-      lv_obj_set_style_radius(rule, 1, 0);
-    }
   }
 }
 
