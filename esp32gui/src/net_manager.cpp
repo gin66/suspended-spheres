@@ -56,12 +56,15 @@ bool s_sntp_started = false;
 uint32_t s_connect_deadline = 0;
 
 enum cmd_t { CMD_NONE, CMD_SETUP, CMD_FORGET, CMD_SCAN, CMD_SERVICE,
-             CMD_GITHUB_CHECK };
+             CMD_GITHUB_CHECK, CMD_CONNECT, CMD_SET_ADMIN };
 volatile cmd_t s_cmd = CMD_NONE;
 volatile bool s_cmd_service_on = false;
 
 char s_scan[12][33];
 int s_scan_count = 0;
+char s_pending_ssid[33] = "";
+char s_pending_pass[65] = "";
+char s_pending_admin[65] = "";
 
 uint8_t *s_up_json = nullptr;
 size_t s_up_json_len = 0;
@@ -291,11 +294,13 @@ void do_scan(void) {
   net_link_scan_start(&s_link);
   unlock();
   const int n = WiFi.scanNetworks();
+  lock();
   s_scan_count = n < 0 ? 0 : (n > 12 ? 12 : n);
   for (int i = 0; i < s_scan_count; ++i) {
     std::snprintf(s_scan[i], sizeof(s_scan[i]), "%s",
                   WiFi.SSID(i).c_str());
   }
+  unlock();
   WiFi.scanDelete();
   lock();
   net_link_scan_done(&s_link, s_scan_count);
@@ -806,6 +811,32 @@ void net_task(void *arg) {
       case CMD_SCAN: do_scan(); break;
       case CMD_SERVICE: do_service(service_on); break;
       case CMD_GITHUB_CHECK: github_client_check(); break;
+      case CMD_CONNECT: {
+        lock();
+        std::snprintf(s_ssid, sizeof(s_ssid), "%s", s_pending_ssid);
+        std::snprintf(s_pass, sizeof(s_pass), "%s", s_pending_pass);
+        s_have_cred = true;
+        unlock();
+        s_pending_pass[0] = '\0';
+        connect_sta();
+        break;
+      }
+      case CMD_SET_ADMIN: {
+        char pass[65];
+        lock();
+        std::snprintf(pass, sizeof(pass), "%s", s_pending_admin);
+        s_pending_admin[0] = '\0';
+        unlock();
+        if (pass[0] != '\0') {
+          hash_admin(s_admin_salt, pass, s_admin_hash);
+          s_prefs.putString("adm_hash", s_admin_hash);
+          lock();
+          std::snprintf(s_link.reason, sizeof(s_link.reason),
+                        "admin password set");
+          unlock();
+        }
+        break;
+      }
       default: break;
     }
     poll_link();
@@ -870,6 +901,28 @@ extern "C" void net_manager_service_toggle(void) {
   unlock();
 }
 
+extern "C" bool net_manager_connect(const char *ssid,
+                                    const char *password) {
+  if (ssid == nullptr || password == nullptr || ssid[0] == '\0' ||
+      password[0] == '\0')
+    return false;
+  lock();
+  std::snprintf(s_pending_ssid, sizeof(s_pending_ssid), "%s", ssid);
+  std::snprintf(s_pending_pass, sizeof(s_pending_pass), "%s", password);
+  s_cmd = CMD_CONNECT;
+  unlock();
+  return true;
+}
+
+extern "C" bool net_manager_set_admin(const char *password) {
+  if (password == nullptr || password[0] == '\0') return false;
+  lock();
+  std::snprintf(s_pending_admin, sizeof(s_pending_admin), "%s", password);
+  s_cmd = CMD_SET_ADMIN;
+  unlock();
+  return true;
+}
+
 extern "C" void net_manager_github_check(void) {
   lock();
   s_cmd = CMD_GITHUB_CHECK;
@@ -916,6 +969,10 @@ extern "C" void net_manager_snapshot(ui_snapshot_t *snap) {
   std::snprintf(snap->wifi_reason, sizeof(snap->wifi_reason), "%s",
                 s_link.reason);
   snap->service_on = s_service_on;
+  snap->wifi_scan_count = s_scan_count;
+  for (int i = 0; i < s_scan_count && i < UI_MAX_WIFI_SCAN; ++i)
+    std::snprintf(snap->wifi_scan_ssid[i], sizeof(snap->wifi_scan_ssid[i]),
+                  "%s", s_scan[i]);
   github_client_status(snap->github_status, sizeof(snap->github_status));
   snap->wifi_rssi = s_rssi;
   std::snprintf(snap->wifi_ip, sizeof(snap->wifi_ip), "%s", s_ip);

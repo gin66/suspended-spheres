@@ -486,9 +486,11 @@ On clean commit `bc954a62`, build id `1794858657`:
   `webget /`): `200 OK`, the status JSON and the 676-byte setup page with its
   CSRF token.  Every upload re-checks SHA-256 before `panel_ota_apply` or
   `firmware_image_store_fly`.
-- The panel-side SSID list and password keyboard are still pending; the web
-  setup page accepts the SSID and password.  R10 (GitHub pull) is still
-  planned.
+- The panel now has a **WIFI** screen: SCAN fills a 12-entry SSID list,
+  tapping a row selects it, the password textarea opens the LVGL keyboard,
+  JOIN submits, SET ADMIN stores the salted admin hash, and FORGET clears the
+  credentials.  The web setup page remains the same alternative.
+- R10 (GitHub pull) is in the tree; see the R10 note below.
 - LVGL object memory now uses PSRAM via `lv_mem_custom.cpp`; the internal
   heap after setting up the AP was about 120 KiB, versus 2 KiB before that
   change.
@@ -509,6 +511,8 @@ On clean commit `bc954a62`, build id `1794858657`:
 - Settings has **CHECK UPDATES**; the web control page has check and
   install (the POST is the confirmation); the bench console has
   `github check|install|status`.
+- The panel WIFI screen and keyboard are compiled and shown in the host PNG;
+  touch/keyboard interaction on the panel has not been exercised yet.
 - Not exercised against GitHub in this session: the setup AP was started and
   the panel scanned 9 networks, but the Mac did not list the soft AP.  R10 is
   therefore compile- and policy-verified, not network-verified.

@@ -146,6 +146,14 @@ lv_obj_t *s_set_uptime;
 lv_obj_t *s_set_capacity;
 lv_obj_t *s_set_watch;
 lv_obj_t *s_set_github;
+lv_obj_t *s_wifi_list;
+lv_obj_t *s_wifi_status;
+lv_obj_t *s_wifi_selected;
+lv_obj_t *s_wifi_pass;
+lv_obj_t *s_wifi_admin;
+lv_obj_t *s_wifi_keyboard;
+int s_wifi_selected_index = -1;
+uint32_t s_wifi_shown_hash = 0;
 lv_obj_t *s_set_service;
 
 /* ── helpers ───────────────────────────────────────────────────────────── */
@@ -572,6 +580,62 @@ void on_github_check(lv_event_t *e) {
   if (s_actions.github_check != nullptr) s_actions.github_check();
 }
 
+void on_wifi_join(lv_event_t *e) {
+  (void)e;
+  if (s_actions.wifi_connect == nullptr || s_wifi_selected_index < 0) return;
+  const char *ssid = s_snap->wifi_scan_ssid[s_wifi_selected_index];
+  const char *pass = lv_textarea_get_text(s_wifi_pass);
+  if (ssid != nullptr && ssid[0] != '\0' && pass != nullptr && pass[0] != '\0') {
+    s_actions.wifi_connect(ssid, pass);
+    lv_textarea_set_text(s_wifi_pass, "");
+    if (s_wifi_keyboard != nullptr)
+      lv_obj_add_flag(s_wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
+  }
+}
+
+void on_wifi_admin(lv_event_t *e) {
+  (void)e;
+  if (s_actions.wifi_set_admin == nullptr) return;
+  const char *pass = lv_textarea_get_text(s_wifi_admin);
+  if (pass != nullptr && pass[0] != '\0') {
+    s_actions.wifi_set_admin(pass);
+    lv_textarea_set_text(s_wifi_admin, "");
+  }
+}
+
+void on_wifi_forget_btn(lv_event_t *e) {
+  (void)e;
+  if (s_actions.wifi_forget != nullptr) s_actions.wifi_forget();
+}
+
+void on_wifi_row(lv_event_t *e) {
+  s_wifi_selected_index = (int)(intptr_t)lv_event_get_user_data(e);
+}
+
+void on_wifi_pass_focus(lv_event_t *e) {
+  (void)e;
+  if (s_wifi_keyboard != nullptr) {
+    lv_keyboard_set_textarea(s_wifi_keyboard, s_wifi_pass);
+    lv_obj_clear_flag(s_wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_wifi_keyboard);
+  }
+}
+
+void on_wifi_admin_focus(lv_event_t *e) {
+  (void)e;
+  if (s_wifi_keyboard != nullptr) {
+    lv_keyboard_set_textarea(s_wifi_keyboard, s_wifi_admin);
+    lv_obj_clear_flag(s_wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_wifi_keyboard);
+  }
+}
+
+void on_wifi_kb_ready(lv_event_t *e) {
+  (void)e;
+  if (s_wifi_keyboard != nullptr)
+    lv_obj_add_flag(s_wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
+}
+
 void on_panel_update(lv_event_t *e) {
   (void)e;
   if (s_actions.panel_update != nullptr) s_actions.panel_update();
@@ -680,10 +744,11 @@ void build_nav(int active) {
   lv_obj_t *edge = nav_part(s_nav, 0, 0, 1, kHeight, C_LINE);
 
   static const char *names[UI_SCREEN_COUNT] = {
-      "SHOW", "ANIM", "GRID",  "NODES", "MOTOR",
-      "CONFIG", "LOG", "CAN", "UPGRADE", "SETTINGS"};
+      "SHOW", "ANIM", "GRID",  "NODES", "MOTOR", "CONFIG",
+      "LOG",  "CAN",  "UPGRADE", "SETTINGS", "WIFI"};
   const int tab_h = kHeight / UI_SCREEN_COUNT;
-  const int icon_cy = 16;
+  const int icon_cy = (tab_h >= 46) ? 16 : 13;
+  const int label_y = (tab_h >= 46) ? 32 : 27;
 
   for (int i = 0; i < UI_SCREEN_COUNT; ++i) {
     const bool is_active = (i == active);
@@ -724,6 +789,9 @@ void build_nav(int active) {
       case UI_SCREEN_UPGRADE:
         nav_icon_symbol(tab, LV_SYMBOL_DOWNLOAD, color);
         break;
+      case UI_SCREEN_WIFI:
+        nav_icon_symbol(tab, LV_SYMBOL_WIFI, color);
+        break;
       default:
         nav_icon_symbol(tab, LV_SYMBOL_SETTINGS, color);
         break;
@@ -732,7 +800,7 @@ void build_nav(int active) {
     lv_obj_t *label = make_label(tab, names[i], &lv_font_montserrat_12, color);
     lv_obj_set_width(label, kRailW);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_pos(label, 0, 32);
+    lv_obj_set_pos(label, 0, label_y);
   }
 }
 
@@ -1270,6 +1338,77 @@ void build_upgrade(void) {
   s_upgrade_shown_hash = 0;
 }
 
+void build_wifi(void) {
+  lv_obj_t *s = s_screens[UI_SCREEN_WIFI];
+  lv_obj_t *head = make_panel(s, 12, 8, 688, 48);
+  make_label(head, "WIFI", &lv_font_montserrat_20, C_TEXT);
+  s_wifi_status = make_label(head, "OFF", &lv_font_montserrat_12, C_MUTED);
+  lv_obj_align(s_wifi_status, LV_ALIGN_RIGHT_MID, -12, 0);
+
+  lv_obj_t *list = make_panel(s, 12, 64, 300, 190);
+  make_label(list, "NETWORKS", &lv_font_montserrat_14, C_MUTED);
+  s_wifi_list = lv_obj_create(list);
+  lv_obj_remove_style_all(s_wifi_list);
+  lv_obj_set_pos(s_wifi_list, 4, 26);
+  lv_obj_set_size(s_wifi_list, 292, 158);
+  lv_obj_set_style_bg_opa(s_wifi_list, LV_OPA_TRANSP, 0);
+  lv_obj_clear_flag(s_wifi_list, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_t *scan = make_button(list, "SCAN", 80, 30, on_wifi_scan, nullptr);
+  lv_obj_set_pos(scan, 210, 0);
+
+  lv_obj_t *right = make_panel(s, 324, 64, 364, 190);
+  lv_obj_t *sel_lbl = make_label(right, "SELECTED", &lv_font_montserrat_14,
+                                 C_MUTED);
+  lv_obj_set_pos(sel_lbl, 8, 0);
+  s_wifi_selected = make_label(right, "--", &lv_font_montserrat_14, C_TEXT);
+  lv_obj_set_pos(s_wifi_selected, 100, 0);
+  lv_obj_set_width(s_wifi_selected, 250);
+  lv_label_set_long_mode(s_wifi_selected, LV_LABEL_LONG_CLIP);
+
+  lv_obj_t *pass_lbl = make_label(right, "Password", &lv_font_montserrat_12,
+                                  C_MUTED);
+  lv_obj_set_pos(pass_lbl, 8, 30);
+  s_wifi_pass = lv_textarea_create(right);
+  lv_obj_set_pos(s_wifi_pass, 8, 48);
+  lv_obj_set_size(s_wifi_pass, 344, 34);
+  lv_textarea_set_one_line(s_wifi_pass, true);
+  lv_textarea_set_password_mode(s_wifi_pass, true);
+  lv_textarea_set_placeholder_text(s_wifi_pass, "WiFi password");
+  lv_obj_add_event_cb(s_wifi_pass, on_wifi_pass_focus, LV_EVENT_FOCUSED, nullptr);
+
+  lv_obj_t *admin_lbl = make_label(right, "Admin", &lv_font_montserrat_12,
+                                   C_MUTED);
+  lv_obj_set_pos(admin_lbl, 8, 88);
+  s_wifi_admin = lv_textarea_create(right);
+  lv_obj_set_pos(s_wifi_admin, 8, 104);
+  lv_obj_set_size(s_wifi_admin, 344, 34);
+  lv_textarea_set_one_line(s_wifi_admin, true);
+  lv_textarea_set_password_mode(s_wifi_admin, true);
+  lv_textarea_set_placeholder_text(s_wifi_admin, "Admin password");
+  lv_obj_add_event_cb(s_wifi_admin, on_wifi_admin_focus, LV_EVENT_FOCUSED,
+                      nullptr);
+
+  lv_obj_t *join = make_button(right, "JOIN", 92, 30, on_wifi_join, nullptr);
+  lv_obj_set_pos(join, 8, 142);
+  lv_obj_t *setadmin = make_button(right, "SET ADMIN", 112, 30, on_wifi_admin,
+                                   nullptr);
+  lv_obj_set_pos(setadmin, 108, 142);
+  lv_obj_t *forget = make_button(right, "FORGET", 84, 30, on_wifi_forget_btn,
+                                 nullptr);
+  lv_obj_set_pos(forget, 228, 142);
+
+  s_wifi_keyboard = lv_keyboard_create(s);
+  lv_obj_set_pos(s_wifi_keyboard, 12, 294);
+  lv_obj_set_size(s_wifi_keyboard, 688, 150);
+  lv_keyboard_set_mode(s_wifi_keyboard, LV_KEYBOARD_MODE_TEXT_LOWER);
+  lv_obj_add_event_cb(s_wifi_keyboard, on_wifi_kb_ready, LV_EVENT_READY,
+                      nullptr);
+  lv_obj_add_event_cb(s_wifi_keyboard, on_wifi_kb_ready, LV_EVENT_CANCEL,
+                      nullptr);
+  lv_obj_add_flag(s_wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
+  s_wifi_shown_hash = 0;
+}
+
 void build_settings(void) {
   lv_obj_t *s = s_screens[UI_SCREEN_SETTINGS];
   lv_obj_t *head = make_panel(s, 12, 8, 688, 48);
@@ -1363,6 +1502,7 @@ void ui_init(const ui_actions_t *actions) {
   build_can();
   build_upgrade();
   build_settings();
+  build_wifi();
 
   s_screen = UI_SCREEN_SHOW;
   ui_show_screen(UI_SCREEN_SHOW);
@@ -1380,6 +1520,8 @@ void ui_show_screen(int index) {
   for (int i = 0; i < UI_SCREEN_COUNT; ++i) {
     set_hidden(s_screens[i], i != index);
   }
+  if (s_wifi_keyboard != nullptr && index != UI_SCREEN_WIFI)
+    lv_obj_add_flag(s_wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
   if (s_nav != nullptr) lv_obj_delete(s_nav);
   s_nav = nullptr;
   build_nav(index);
@@ -1937,6 +2079,38 @@ void ui_update(const ui_snapshot_t *snapshot) {
   lv_obj_set_style_text_color(s_upgrade_status,
                               s_snap->upgrade_active ? C_WARN : C_MUTED, 0);
   lv_bar_set_value(s_upgrade_progress, s_snap->upgrade_progress, LV_ANIM_OFF);
+
+  /* WiFi screen */
+  uint32_t wifi_hash = 2166136261u;
+  for (const char *p = s_snap->wifi_state; *p != '\0'; ++p)
+    wifi_hash = (wifi_hash ^ (uint8_t)*p) * 16777619u;
+  wifi_hash = (wifi_hash ^ (uint32_t)s_snap->wifi_scan_count) * 16777619u;
+  wifi_hash = (wifi_hash ^ (uint32_t)s_wifi_selected_index) * 16777619u;
+  for (int i = 0; i < s_snap->wifi_scan_count; ++i)
+    for (const char *p = s_snap->wifi_scan_ssid[i]; *p != '\0'; ++p)
+      wifi_hash = (wifi_hash ^ (uint8_t)*p) * 16777619u;
+  if (s_wifi_selected_index >= s_snap->wifi_scan_count)
+    s_wifi_selected_index = -1;
+  if (wifi_hash != s_wifi_shown_hash) {
+    s_wifi_shown_hash = wifi_hash;
+    lv_obj_clean(s_wifi_list);
+    for (int i = 0; i < s_snap->wifi_scan_count && i < UI_MAX_WIFI_SCAN; ++i) {
+      const int col = i / 6;
+      const int row = i % 6;
+      lv_obj_t *b = make_button(s_wifi_list, s_snap->wifi_scan_ssid[i], 138,
+                                22, on_wifi_row, (void *)(intptr_t)i);
+      lv_obj_set_pos(b, col * 146, row * 24);
+    }
+  }
+  if (s_wifi_selected_index >= 0 &&
+      s_wifi_selected_index < s_snap->wifi_scan_count)
+    lv_label_set_text(s_wifi_selected,
+                      s_snap->wifi_scan_ssid[s_wifi_selected_index]);
+  else
+    lv_label_set_text(s_wifi_selected, "--");
+  lv_label_set_text_fmt(s_wifi_status, "%s  %s",
+                        s_snap->wifi_state[0] ? s_snap->wifi_state : "OFF",
+                        s_snap->wifi_ip[0] ? s_snap->wifi_ip : "");
 
   /* Settings */
   if (s_snap->wifi_present) {

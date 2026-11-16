@@ -17,8 +17,9 @@
 >
 > WiFi onboarding and browser upload are **in the firmware tree** (R9): the
 > setup AP, NVS credentials, HTTP server and upload endpoints are in
-> `esp32gui/src/net_manager.cpp`. The panel-side SSID list/password keyboard
-> and a second-client association test remain. The panel's GitHub pull is
+> `esp32gui/src/net_manager.cpp`; the panel WIFI screen has the SSID list and
+> password keyboard. A second-client association test remains. The panel's
+> GitHub pull is
 > is in the tree (R10) as `esp32gui/src/github_client.cpp`; a live GitHub
 > association/download test remains.
 > They change where an image comes from, not what an image is: the identity,

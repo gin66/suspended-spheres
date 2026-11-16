@@ -273,9 +273,9 @@
 /* Unused widgets: the panel builds every screen from obj, label, line,
  * canvas and slider only (S28.18). */
 #define LV_USE_ANIMIMG 0
-#define LV_USE_BUTTONMATRIX 0
+#define LV_USE_BUTTONMATRIX 1
 #define LV_USE_DROPDOWN 0
-#define LV_USE_KEYBOARD 0
+#define LV_USE_KEYBOARD 1
 #define LV_USE_LED 0
 #define LV_USE_ROLLER 0
 #define LV_USE_SPINBOX 0

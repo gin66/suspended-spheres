@@ -24,6 +24,7 @@ extern "C" {
 #define UI_LOG_BYTES      4096
 #define UI_MAX_CAN_IDS    256
 #define UI_MAX_ANIMATIONS 32
+#define UI_MAX_WIFI_SCAN  12
 #define UI_ANIM_NAME_LEN  40
 
 /* Mirrors MC_HEALTH_VALID_* in motion_core.h. The UI model stays free of
@@ -191,6 +192,8 @@ typedef struct {
   char wifi_reason[64];
   char wifi_ap_ssid[32];
   char wifi_ap_password[16];
+  int wifi_scan_count;
+  char wifi_scan_ssid[UI_MAX_WIFI_SCAN][33];
   bool service_on;
   char github_status[64];
 
@@ -231,6 +234,8 @@ typedef struct {
   void (*wifi_scan)(void);
   void (*service_toggle)(void);
   void (*github_check)(void);
+  void (*wifi_connect)(const char *ssid, const char *password);
+  void (*wifi_set_admin)(const char *password);
   void (*mock_inject)(void);  /* host harness only; may be NULL */
 } ui_actions_t;
 

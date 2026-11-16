@@ -18,6 +18,7 @@ typedef enum {
   UI_SCREEN_CAN,
   UI_SCREEN_UPGRADE,
   UI_SCREEN_SETTINGS,
+  UI_SCREEN_WIFI,
   UI_SCREEN_COUNT
 } ui_screen_t;
 

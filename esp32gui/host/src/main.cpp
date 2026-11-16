@@ -224,6 +224,12 @@ ui_snapshot_t make_snapshot() {
   std::snprintf(s.wifi_reason, sizeof(s.wifi_reason), "%s",
                 "scan: 6 networks");
   s.wifi_rssi = 0;
+  s.wifi_scan_count = 6;
+  const char *scan[] = {"Home-2.4G", "Workshop", "Guest",
+                        "Lab-AP", "Neighbour", "Cafe"};
+  for (int i = 0; i < 6; ++i)
+    std::snprintf(s.wifi_scan_ssid[i], sizeof(s.wifi_scan_ssid[i]), "%s",
+                  scan[i]);
   s.service_on = true;
   std::snprintf(s.github_status, sizeof(s.github_status), "%s",
                 "current (1.4.2)");
@@ -348,8 +354,8 @@ int main(int argc, char **argv) {
   ui_snapshot_t snap = make_snapshot();
 
   static const char *names[UI_SCREEN_COUNT] = {
-      "show", "animations", "grid",  "nodes", "motor",
-      "config", "log", "can", "upgrade", "settings"};
+      "show", "animations", "grid", "nodes", "motor", "config",
+      "log", "can", "upgrade", "settings", "wifi"};
   ui_snapshot_t upgrade_snap = make_upgrade_snapshot(snap);
   for (int i = 0; i < UI_SCREEN_COUNT; ++i) {
     ui_show_screen(i);
