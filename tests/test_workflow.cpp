@@ -81,13 +81,13 @@ static int test_w5_publish(void) {
     return 0;
 }
 
-/* W7 — annotated tag, non-empty notes, existing release and monotonic build
- * checks are in the file. */
+/* W7 — version tag, generated notes, existing release and monotonic build
+ * checks are in the file.  Annotated tags are not required. */
 static int test_w7_guards(void) {
     std::string w = read_workflow();
-    ASSERT(has(w, "git cat-file -t"));
-    ASSERT(has(w, "annotated"));
-    ASSERT(has(w, "RELEASE_NOTES.md"));
+    ASSERT(!has(w, "git cat-file -t"));
+    ASSERT(!has(w, "annotated"));
+    ASSERT(has(w, "--generate-notes"));
     ASSERT(has(w, "gh release view"));
     ASSERT(has(w, "previous-release.json"));
     ASSERT(has(w, "not greater"));

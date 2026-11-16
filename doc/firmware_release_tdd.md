@@ -33,7 +33,7 @@ workflow passes `SS_RELEASE` and does not pass `SS_CAN_MOCK`.
 These match `firmware_release_whitepaper.md` §7.1. Do not reopen them in a
 test.
 
-- One annotated tag `vMAJOR.MINOR.PATCH` is one release. Both images carry
+- One tag `vMAJOR.MINOR.PATCH` is one release. Both images carry
   that version and the tagged commit's `%ct` as the build id.
 - `release_pack` writes a directory. The workflow is the only publisher, and
   it is added in phase R8, after both images can be stamped.
@@ -303,9 +303,10 @@ not run Actions.
   both `pio run` invocations exit 0, `release_pack` writes a directory from
   that commit's `%ct`. Do not pass `--dirty`. Do not create a release from
   the workstation.
-- [ ] **W7** The workflow checks that the tag is annotated and that its
-  message is non-empty, and it stops when a release for that tag already
-  exists or the build id is not greater than the newest `release.json`.
+- [ ] **W7** The workflow accepts a lightweight or annotated tag, uses
+  GitHub-generated release notes, and stops when a release for that tag
+  already exists or the build id is not greater than the newest
+  `release.json`.
 
 Gate: W1–W5 pass in `motion_core_tests`. W6 has been run locally. The first
 real tag is pushed only when a maintainer asks for that release.

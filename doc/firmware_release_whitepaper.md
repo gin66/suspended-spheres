@@ -29,7 +29,7 @@
 > paths stay planned and the microSD card remains the field baseline.
 >
 > A GitHub Release is created only by `.github/workflows/release.yml` when an
-> annotated tag `vMAJOR.MINOR.PATCH` is pushed (§1.6). The workflow tests,
+> tag `vMAJOR.MINOR.PATCH` is pushed (§1.6). The workflow tests,
 > builds and publishes. It does not flash a board. The panel client that later
 > pulls that release is §3.9. The host test order is
 > `firmware_release_tdd.md`.
@@ -47,7 +47,7 @@
 | Panel image load | CH9102 UART at the bench; microSD in the field; planned authenticated browser upload and confirmed GitHub release pull. Same two OTA slots, SHA-256 and ESP-IDF rollback. |
 | WiFi onboarding | Planned: scan and select an SSID or type one on the panel or web UI. WPA2-PSK, 2.4 GHz only, credentials in NVS, never in the repository. |
 | Browser upload | Planned: local HTTP UI, off after every power cycle, enabled from Settings for this session. Admin password and CSRF. Same OTA writer. |
-| GitHub Release | The only publisher is `.github/workflows/release.yml` on an annotated tag `vMAJOR.MINOR.PATCH`. Both images share that tag's version and the commit's build id. |
+| GitHub Release | The only publisher is `.github/workflows/release.yml` on an tag `vMAJOR.MINOR.PATCH`. Both images share that tag's version and the commit's build id. |
 | GitHub pull | Planned panel client of that release: pinned repository, HTTPS, SNTP, SHA-256 and operator confirmation. The client never installs by itself. |
 | Network trust | SHA-256 is mandatory; a detached manifest signature or a pinned release hash authenticates the publisher. The choice is a decision in section 7. |
 | Board list key | The 6-byte Katapult/Klipper UUID, not the 8-byte raw flash id. Board ID stays the volatile runtime alias. |
@@ -116,7 +116,7 @@ Rules:
 - The timestamp is the tagged commit's commit time, UTC, exported as
   `SOURCE_DATE_EPOCH`. It is not the runner's wall clock.
 - The timestamp is fixed width, so a directory listing sorts chronologically.
-- One annotated tag produces one filename per artifact. Packing that commit
+- One tag produces one filename per artifact. Packing that commit
   again keeps the same name, version and build id.
 - A bench build from a dirty tree adds the suffix `_dirty` and is not a
   release. The workflow checks out the tag, so it never produces that suffix.
@@ -256,17 +256,17 @@ the same build with different SHA-256 values, the panel refuses both and
 reports the conflict. Keep the previous release on the card; it is the
 rollback image.
 
-### 1.6 GitHub Release, from an annotated tag
+### 1.6 GitHub Release, from a tag
 
-The GitHub Release is the published form of one commit. Pushing an annotated
-tag is the publish action. `release_pack` writes the directory and does not
-call the GitHub API. Nothing else creates or replaces a release.
+The GitHub Release is the published form of one commit. Pushing a tag is the
+publish action. `release_pack` writes the directory and does not call the
+GitHub API. Nothing else creates or replaces a release.
 
 | Rule | Contract |
 |------|----------|
-| Tag | Annotated. Name `vMAJOR.MINOR.PATCH`. Each component is a decimal integer in `0..255` with no leading zero. |
-| Rejected tags | Lightweight tags, `v01.2.3`, `v1.4`, `v1.4.2-rc.1`, and any name outside that pattern. The workflow does not run for them. |
-| Notes | The tag message is the release body. An empty message fails the workflow before a build. |
+| Tag | Lightweight or annotated. Name `vMAJOR.MINOR.PATCH`. Each component is a decimal integer in `0..255` with no leading zero. |
+| Rejected tags | `v01.2.3`, `v1.4`, `v1.4.2-rc.1`, and any name outside that pattern. The workflow does not run for them. |
+| Notes | GitHub generates the release notes from the tagged commit history (`gh release create --generate-notes`). |
 | Identity | Both images take version, build id, UTC and git8 from that tag and that commit. |
 | Build id | `%ct` of the tagged commit, exported as `SOURCE_DATE_EPOCH`. |
 | Order | Read `release.json` from the newest existing release. The new build id must be strictly greater, or the workflow publishes nothing. |
@@ -274,10 +274,10 @@ call the GitHub API. Nothing else creates or replaces a release.
 | Tests | `./build/motion_core_tests` exits 0 before any image is packed. A failing test publishes nothing. |
 | Images | `pio run -e fly_micro4_katapult` and `pio run -e esp32can` with `SS_RELEASE=1`, without `SS_CAN_MOCK`, and with the version and build flags. |
 | Factory | Merge the ESP32 image at `0x0` from the bootloader, partition table, otadata and the app. `kind` is `factory`. The OTA asset is the app `.bin`. |
-| Publish | The last step is `gh release create` with the tag, the tag message and the packed assets. |
+| Publish | The last step is `gh release create --generate-notes` with the tag and the packed assets. |
 | Katapult UF2 | Built from the Katapult tree at the bench. This workflow does not build it and does not attach it. |
 | Token | `GITHUB_TOKEN` with `contents: write`. No personal access token is stored in the repository. |
-| Trigger | `push` of a matching annotated tag. A branch push does not publish. `workflow_dispatch` does not publish. |
+| Trigger | `push` of a matching lightweight or annotated tag. A branch push does not publish. `workflow_dispatch` does not publish. |
 | Hardware | The workflow does not flash a board and does not open a serial port. |
 
 The first successful run of a tag is the release. Packing that commit again
@@ -923,7 +923,7 @@ across the page.
 
 | Step | Actor | Result |
 |------|-------|--------|
-| 1. Publish | maintainer | Push an annotated tag. The workflow runs the host tests, builds both images and creates the GitHub Release (§1.6). The Katapult UF2 stays a bench file |
+| 1. Publish | maintainer | Push a tag. The workflow runs the host tests, builds both images and creates the GitHub Release (§1.6). The Katapult UF2 stays a bench file |
 | 2. Copy | operator | Download the GitHub Release into `/firmware/{panel,fly}` on the microSD card. The Katapult UF2 is copied from the bench record into `/firmware/katapult` |
 | 3. Provision | bench | Katapult + first Fly release on each board; UUID recorded |
 | 4. Load panel | bench, SD, web or GitHub | esp32gui release image; Settings shows the manifest version/build and source; no `mock` |
@@ -984,7 +984,7 @@ workflow there is no GitHub Release to download.
 
 | Decision | Contract |
 |----------|----------|
-| Publisher | An annotated tag `vMAJOR.MINOR.PATCH` runs `.github/workflows/release.yml`. That workflow is the only creator of a GitHub Release. |
+| Publisher | An tag `vMAJOR.MINOR.PATCH` runs `.github/workflows/release.yml`. That workflow is the only creator of a GitHub Release. |
 | One release | The tag's version and the commit's build id stamp both images. There is no separate panel version. |
 | Build id | Commit timestamp `%ct`. A later release must be strictly greater. The same tag is not rebuilt into a new id. |
 | Packer | `release_pack` writes files. It does not call the GitHub API. |

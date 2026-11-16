@@ -155,7 +155,7 @@ All technical Markdown belongs in `doc/`. Only `README.md` and `AGENTS.md` sit a
   in `webapp/`, the viewer lists the files in `patterns/`, watches the selected
   one, and rebakes on save. The agent loop is: edit the JSON or generator, run
   `pattern_check`, read the report, repeat until `violations` is empty.
-- **Firmware release.** Pushing an annotated tag `vMAJOR.MINOR.PATCH` is the
+- **Firmware release.** Pushing an tag `vMAJOR.MINOR.PATCH` is the
   publish action. `.github/workflows/release.yml` creates the GitHub Release
   after the host tests pass. The contract is
   `doc/firmware_release_whitepaper.md` §1.6. The test order is
