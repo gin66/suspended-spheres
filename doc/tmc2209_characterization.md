@@ -62,6 +62,30 @@ it shrinks at 100 mA. This is a magnitude, not a calibrated torque. Bench moves
 were acceleration-limited (2000 µstep/s²), so the 10-turn moves peaked at
 8000 µstep/s (≈0.31 m/s), not the 1 m/s tier.
 
+## Measured results (2026-11-15, speed / acceleration / current, pancake + 40 mm spool)
+
+Up/down pairs of 7 turns inside the 14.4-turn travel, starting 4 turns above
+the bottom (top margin ≈3.4 turns), SpreadCycle, 1/16, free hang. The
+`accel` bench command sets the acceleration (default 2000 step/s²). At 0.25 g
+the 7-turn move is triangular and peaks at 1.47 m/s, so the 1.5 and 2.0 m/s
+setpoints are not reached; at 0.5 g the 2.0 m/s setpoint is reached.
+
+| current (IRUN) | accel | 0.5 | 1.0 | 1.5 | 2.0 m/s |
+|---|---:|---|---|---|---|
+| 300 mA (8) | 0.25 g | ok | ok | ok (1.47) | ok (1.47) |
+| 300 mA (8) | 0.5 g | ok | ok | ok | **ok (2.0)** |
+| 500 mA (15) | 0.25 g | ok | ok | ok (1.47) | ok (1.47) |
+| 500 mA (15) | 0.5 g | ok | ok | ok | **ok (3/3 repeat)** |
+| 800 mA (25) | 0.25 g | ok | ok | ok (1.47) | ok (1.47) |
+| 800 mA (25) | 0.5 g | ok | ok | ok | **ok (2.0)** |
+
+`ok` = `CS_ACTUAL = IRUN`, `stst = 1` at the status after the pair, no
+`otpw`/`ot`/short/open-load bit. One 500 mA / 0.5 g / 2.0 m/s status read was `cs = 30/15`, `stst = 0`,
+`drv = 0x1E0000`, with no fault bit. It did not repeat in three consecutive
+cycles at that point (`cs = 15/15`, `stst = 1` each time), so it is a
+status-read/transient artefact, not a torque limit. The ball was parked at
+the bottom (down 4 turns) and the driver disabled after the matrix.
+
 ---
 
 ## 1. Purpose

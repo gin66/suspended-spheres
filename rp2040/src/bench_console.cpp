@@ -15,6 +15,8 @@ namespace {
 constexpr uint8_t kMaxArgs = 8;
 constexpr size_t kLineLength = 96;
 constexpr int32_t kBenchAccel = 2000;
+int32_t s_move_accel[tmc2209::kDriverCount] = {kBenchAccel, kBenchAccel,
+                                               kBenchAccel, kBenchAccel};
 
 char s_line[kLineLength];
 size_t s_length = 0;
@@ -94,6 +96,7 @@ void print_help() {
     Serial.println("  sg <axis> <0..255|off>     SGTHRS; off closes TCOOLTHRS");
     Serial.println("  mode <axis> <stealth|spread>  chopper mode, axis stopped");
     Serial.println("  tcool <axis> <value>       TCOOLTHRS (20 bit)");
+    Serial.println("  accel <axis> <steps_s2>    acceleration for move/run (default 2000)");
     Serial.println("  micro <axis> <2..256> [intpol 0|1]");
     Serial.println("  chop <axis> <hex>          raw CHOPCONF, e.g. 0x14020054");
     Serial.println("  pwm <axis> <hex>           raw PWMCONF, e.g. 0xC10D0024");
@@ -491,6 +494,26 @@ void command_home(int argc, char** argv) {
     }
 }
 
+void command_accel(int argc, char** argv) {
+    if (argc < 3) {
+        Serial.println("usage: accel <axis> <steps_s2>");
+        return;
+    }
+    uint8_t axis = 0;
+    uint32_t value = 0;
+    if (!parse_axis(argv[1], &axis) || !parse_u32(argv[2], &value) ||
+        value == 0 || value > 1000000u) {
+        Serial.println("bad argument");
+        return;
+    }
+    s_move_accel[axis] = (int32_t)value;
+    stepper_axes::setAcceleration(axis, s_move_accel[axis]);
+    Serial.print("accel ");
+    Serial.print(axis);
+    Serial.print(" = ");
+    Serial.println(value);
+}
+
 void command_move(int argc, char** argv) {
     if (argc < 4) {
         Serial.println("usage: move <axis> <steps> <hz>");
@@ -517,7 +540,7 @@ void command_move(int argc, char** argv) {
         return;
     }
     stepper_axes::setSpeed(axis, hz);
-    stepper_axes::setAcceleration(axis, kBenchAccel);
+    stepper_axes::setAcceleration(axis, s_move_accel[axis]);
     const bool ok = stepper_axes::move(axis, steps);
     if (ok) {
         Serial.print("queued ");
@@ -559,7 +582,7 @@ void command_run(int argc, char** argv) {
         return;
     }
     stepper_axes::setSpeed(axis, hz);
-    stepper_axes::setAcceleration(axis, kBenchAccel);
+    stepper_axes::setAcceleration(axis, s_move_accel[axis]);
     print_result(stepper_axes::run(axis, forward != 0));
 }
 
@@ -699,6 +722,8 @@ void execute(char* line) {
         command_raw(argc, argv);
     } else if (strcmp(command, "home") == 0) {
         command_home(argc, argv);
+    } else if (strcmp(command, "accel") == 0) {
+        command_accel(argc, argv);
     } else if (strcmp(command, "move") == 0) {
         command_move(argc, argv);
     } else if (strcmp(command, "run") == 0) {

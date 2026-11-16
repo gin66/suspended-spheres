@@ -923,6 +923,7 @@ interface, and it can command motion.
 | `micro <axis> <2..256> [0\|1]` | Set microsteps and interpolation |
 | `chop <axis> <hex>` / `pwm <axis> <hex>` | Raw CHOPCONF / PWMCONF; VSENSE is preserved |
 | `raw <axis> <reg> [value]` | Register access in hex; OTP, `VACTUAL`, `IHOLD_IRUN` and unsafe GCONF bits are refused |
+| `accel <axis> <steps_s2>` | Acceleration used by `move` / `run`; default 2000 step/s² |
 | `move <axis> <steps> <hz>` | Finite move (axis must be enabled) |
 | `run <axis> <hz> [0\|1]` | Continuous move, 1 = forward (axis must be enabled) |
 | `home <axis> [ma] [hz] [sg]` / `home stop` | StallGuard homing to the upper stop; defaults 100 mA / 1000 step/s / `SGTHRS = 10`; `home stop` cancels and restores the normal current |
