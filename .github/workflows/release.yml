@@ -24,6 +24,10 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
+          # actions/checkout leaves the checked-out tag as a lightweight local
+          # ref, so fetch the real tag object from origin before inspecting it.
+          git tag -d "$TAG" >/dev/null 2>&1 || true
+          git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"
           if [ "$(git cat-file -t "$TAG")" != "tag" ]; then
             echo "release tags must be annotated" >&2
             exit 1
