@@ -447,3 +447,18 @@ app after the action-4 entry.
   panel write. The Settings screen control is still pending.
 - The no-card path was exercised on the bench; a card with the directory
   layout has not been inserted yet.
+
+### W6 dry run (2026-11-16)
+
+On clean commit `bc954a62`, build id `1794858657`:
+
+- `cmake -S tests -B build && cmake --build build && ./build/motion_core_tests`
+  — 187 tests pass.
+- `SS_FW_VERSION=1.4.2 SS_BUILD_ID=1794858657 SS_RELEASE=1 pio run -d
+  rp2040 -e fly_micro4_katapult` — success.
+- Same flags for `pio run -d esp32gui -e esp32can` — success; no
+  `SS_BENCH_CONSOLE`, no embedded Fly image.
+- `release_pack` wrote the Fly app, the panel app/factory pair, their
+  manifests and `release.json` to `/tmp/ss-dist`. The filenames carry the
+  tagged commit's UTC and `git8`.
+- No tag was pushed and no GitHub Release was created from the workstation.
