@@ -5,9 +5,12 @@ running LVGL 9.2. The panel is the CAN master and the operator UI. It does not
 author or bake patterns; that stays on the PC. Design decisions are in
 [`../doc/esp32gui_whitepaper.md`](../doc/esp32gui_whitepaper.md).
 
-**No WiFi, no OTA, no Telegram and no `.private` secrets.** This project does
-not include `template.h`, `tpl_wifi`, `wifi_secrets.*`, `private_bot.h` or
-`private_sha.h`. The service path is USB/UART flashing through the CH9102.
+**The current build has no WiFi, no network OTA, no Telegram and no `.private`
+secrets.** This project does not include `template.h`, `tpl_wifi`,
+`wifi_secrets.*`, `private_bot.h` or `private_sha.h`. The service path is
+USB/UART flashing through the CH9102. The planned WiFi onboarding and
+browser/GitHub update path is `../doc/firmware_release_whitepaper.md`
+§3.7–§3.9; credentials stay in NVS, never in the repository.
 
 ## Current stage
 
@@ -84,7 +87,9 @@ review artifacts for screen changes.
    each answer (`VERSION_RSP`, type 13) fills the board's software version.
    `UPGRADE SELECTED` is present but reports that the CAN transfer is not
    implemented in the Fly-Micro4 firmware yet. The procedure is
-   `../doc/katapult_whitepaper.md`: one board at a time.
+   `../doc/katapult_whitepaper.md`: one board at a time. The identified,
+   version-ordered `UPGRADE ALL OUTDATED` list is
+   `../doc/firmware_release_whitepaper.md` §4.
 9. **Settings** — read-only WiFi/SSID/IP/RSSI and CAN state, firmware, boot
    count, uptime, capacity and the CH9102 service path. This build has no
    WiFi stack, so the network fields report `not compiled`.

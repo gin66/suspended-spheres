@@ -1,9 +1,10 @@
-# Memory map — Waveshare 7" show controller
+# Memory map — panel and Fly-Micro4
 
-Measured from the `esp32usb` build on 2026-11-09, after the CAN scope,
-node-firmware screens and the type-14 health telemetry. The numbers are
-link-time figures; runtime heap and task stacks are lower because LVGL and the
-CAN consumer allocate from the remaining internal RAM.
+Sections 1–5 are the Waveshare 7" show controller, measured from the
+`esp32usb` build on 2026-11-09, after the CAN scope, node-firmware screens
+and the type-14 health telemetry. Those numbers are link-time figures;
+runtime heap and task stacks are lower because LVGL and the CAN consumer
+allocate from the remaining internal RAM. Section 6 is the Fly-Micro4 node.
 
 Regenerate after a build:
 
@@ -168,3 +169,48 @@ covered time; do not spend the saved PSRAM on a larger framebuffer.
   reliably cross into PSRAM.
 - The HBP2 cache is the first place to take PSRAM from. The framebuffer and
   log ring are fixed; the remaining ~2.99 MiB is the safety margin.
+
+---
+
+## 6. Fly-Micro4 SRAM
+
+Measured from `rp2040/.pio/build/fly_micro4/firmware.elf` on 2026-11-16
+with `arm-none-eabi-size -A`. Link-time only. The board was not asked for a
+live `mallinfo`. Regenerate with:
+
+```sh
+~/.platformio/packages/toolchain-rp2040-earlephilhower/bin/arm-none-eabi-size \
+  -A rp2040/.pio/build/fly_micro4/firmware.elf
+```
+
+The RP2040 has 264 KiB of SRAM. The linker gives the application 256 KiB at
+`0x20000000` and two 4 KiB scratch banks. There is no PSRAM.
+
+| Region | Bytes | Note |
+|--------|------:|------|
+| `.ram_vector_table` | 192 | |
+| `.data` | 9 264 | initialised variables |
+| `.bss` | 7 816 | zero-initialised variables |
+| **static main RAM** | **17 272** | **16.9 KiB of 256 KiB** |
+| **heap (the remainder)** | **244 872** | **239.1 KiB, free at link** |
+| scratch stacks | 4 096 | 2 KiB on core 0, 2 KiB on core 1 |
+
+The flash file `firmware.bin` is 101 576 bytes (99 KiB). That includes the
+BOOTSEL prefix, which a Katapult payload does not carry:
+
+| Piece | Bytes |
+|-------|------:|
+| `.boot2` | 256 |
+| `.ota` | 10 032 |
+| `.partition` | 2 000 |
+| `.text` | 71 136 |
+| `.rodata` | 8 888 |
+| `.data` initialisers | 9 264 |
+| **Katapult payload** (`.text` + `.rodata` + `.data`) | **89 288 (87.2 KiB)** |
+
+An 87.2 KiB image placed in the heap leaves 155 584 bytes (151.9 KiB) of
+that heap at link time. The largest static objects are `fas_queue` (1 408 B)
+and `fas_stepper` (864 B). Runtime `malloc` from the Arduino core and USB is
+not in this table. The fleet buffer in `firmware_release_whitepaper.md` §4.7
+uses this heap. Re-measure before the image crosses about 160 KiB, which
+still leaves roughly 70 KiB of heap beside the buffer.

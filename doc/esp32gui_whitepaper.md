@@ -99,8 +99,9 @@ esp32gui/                  PlatformIO project
 The first implemented stage is the board bring-up, the commissioning model
 and the UI. The CAN transport boundary selects a mock at build time because
 the bench has no bus wiring yet; the TWAI implementation is present and
-compile-guarded (`SS_CAN_MOCK`). No WiFi, OTA, Telegram or `.private` secret
-is compiled into this project.
+compile-guarded (`SS_CAN_MOCK`). No WiFi, network OTA, Telegram or `.private`
+secret is compiled into this project. The card-based field update is
+`firmware_release_whitepaper.md` §3.
 
 The local `app_log`, `app_watchdog` and `can_monitor` adapt the useful
 concepts from `../ESP32_projects/ESP32/prj_template` (`tpl_debug_log`,
@@ -160,11 +161,14 @@ Consequences, already paid for in the house panel:
 - `ARDUINO_USB_MODE=0`. GPIO 19/20 are the TWAI pins, not a USB-OTG CDC.
 - `setup()` drives `USB_SEL` low before anything else, then raises it only
   when the config says CAN is on and `twai_start()` runs.
-- **No WiFi and no secrets in `esp32gui/`.** `template.h`, `tpl_wifi`,
-  `wifi_secrets.*`, `private_bot.h` and `private_sha.h` are not used. The
-  service path is USB/UART flashing through the CH9102 (UART switch to ESP32,
-  hold BOOT, tap RESET). A future OTA path must keep credentials outside the
-  repository; none are present today.
+- **No WiFi and no secrets in the current `esp32gui/` build.** `template.h`,
+  `tpl_wifi`, `wifi_secrets.*`, `private_bot.h` and `private_sha.h` are not
+  used. The service path is USB/UART flashing through the CH9102 (UART switch
+  to ESP32, hold BOOT, tap RESET). A future network OTA path must keep
+  credentials outside the repository; none are present today. The field update
+  is the microSD path in `firmware_release_whitepaper.md` §3.3. The planned
+  WiFi onboarding and browser/GitHub image path are §3.7–§3.9 of that paper;
+  credentials go to NVS and are never compiled.
 - Diagnostics that must be read while the show runs are drawn on the panel.
   The UART0 log remains available; native USB does not, once CAN is on.
 - The pixel clock that stayed stable on this panel is 12 MHz
@@ -277,6 +281,10 @@ are counted.
 `katapult_whitepaper.md`: one board at a time, over Katapult. The CAN
 transfer is not implemented on the Fly-Micro4 yet, so `UPGRADE SELECTED`
 currently reports that the transfer is pending and makes no bus transaction.
+The release identity, the panel image load and the identified board list with
+`UPGRADE ALL OUTDATED` are `firmware_release_whitepaper.md`. The host test
+order is `firmware_release_tdd.md`. GitHub Releases of that image are created
+by the tag workflow in the release paper §1.6.
 
 This build has no WiFi stack. The Settings network fields are fed from the
 snapshot and report `not compiled` until a net-status source exists; the
@@ -328,8 +336,11 @@ The screen flows are in §9.
 - House-panel application code: heater curves, SML power, water model,
   Matter, Telegram.
 - A second copy of the CAN ID map or the cubic frame layout.
-- WiFi, OTA-over-WiFi, Telegram and every `.private` secret. This panel is
-  a wired CAN master; the CH9102 UART is the service path.
+- In the current build: WiFi, network OTA, Telegram and every `.private`
+  secret. This panel is a wired CAN master; the CH9102 UART and the microSD
+  card are the service paths. The planned WiFi onboarding and browser/GitHub
+  image path are `firmware_release_whitepaper.md` §3.7–§3.9; credentials stay
+  in NVS, never in the repository.
 
 ---
 

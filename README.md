@@ -45,6 +45,8 @@ All technical Markdown lives in [`doc/`](doc/). Only this file and [`AGENTS.md`]
 | [**Motion streaming host TDD**](doc/motion_streaming_tdd.md) | Test-first plan for the motion core and the designer loop, with no hardware |
 | [**Fly-Micro4 addressing**](doc/Fly_Micro4_addressing.md) | Node identity, commissioning and CAN-ID allocation for the selected board |
 | [**Katapult white paper**](doc/katapult_whitepaper.md) | CAN bootloader build, BOOTSEL recovery, and in-place update of the Fly-Micro4 |
+| [**Firmware release white paper**](doc/firmware_release_whitepaper.md) | Image identity, tag-triggered GitHub Release, panel image loading, and upgrade-all for up to 30 nodes |
+| [**Firmware release host TDD**](doc/firmware_release_tdd.md) | Test-first plan for the release packer, the fleet queue and the panel update |
 | [**Risk Register**](doc/RISK.md) | Dynamic loads, noise, architecture risks, and mitigations |
 | [**Fly-Micro4 GPIO Map**](boards/Fly-Micro4/Fly-Micro4.h) | RP2040 pin assignments for the motion controller board |
 | [**AGENTS.md**](AGENTS.md) | Mission and development-environment notes |
@@ -89,6 +91,8 @@ Suspended_Spheres/
     ├── motion_streaming_tdd.md    # Host tests that need no hardware
     ├── Fly_Micro4_addressing.md   # Node identity and CAN-ID allocation
     ├── katapult_whitepaper.md     # CAN bootloader and in-place firmware update
+    ├── firmware_release_whitepaper.md # Image identity, panel load, fleet upgrade
+    ├── firmware_release_tdd.md    # Host tests for the release contract
     ├── BOM_summary.md
     ├── BOM_priced.csv
     └── RISK.md

@@ -11,7 +11,9 @@
 > Katapult: <https://github.com/Arksine/katapult>. The protocol description
 > used below is Katapult `protocol.md` and the admin bytes in
 > `scripts/flashtool.py`. cangaroo is a CAN monitor and is not part of this
-> path.
+> path. The release artifact, the panel image load and the fleet upgrade queue
+> are `firmware_release_whitepaper.md`; this paper keeps the bootloader build
+> and the single-board write.
 
 ---
 
@@ -319,43 +321,100 @@ previous file.
 
 ---
 
-## 8. A row of 15 boards
+## 8. A row of boards
 
-Do them **one after another**. Do not put the row into the bootloader
-together.
+The fleet update runs §7 once per board, in ascending board ID. The next
+board is not started until this one has booted and answered `VERSION_RSP`.
+§8.1 is the accepted duration: about 3.5 minutes for 30 boards at typical
+NOR timings. The panel shows that wait as 30 tiles on one page
+(`firmware_release_whitepaper.md` §4.10).
 
-A single 1 Mbit/s bus is the only pipe. Interleaving two downloads shares
-that pipe, and each RP2040 still erases and programs its own pages between
-acknowledgements. Parallel sessions do not give fifteen times the throughput.
-They do make a CRC or address error ambiguous, and they reset several boards'
-drivers at once.
+Do not put a second board into Katapult while the first is still there.
 
 Katapult can in principle hold several node bytes at once. This installation
-reserves one data pair (`0x3E8` / `0x3E9`) and the procedure uses only that
-pair. `QUERY_UNASSIGNED` on a bus with more than one Katapult node collides
-the answers. The master already knows each UUID, so it never needs that query.
+reserves one data pair (`0x3E8` / `0x3E9`). `QUERY_UNASSIGNED` on a bus with
+more than one Katapult node collides the answers. The master already knows
+each UUID, so it never needs that query.
 
-The other boards stay in the application for the whole row. Pick the 15 from
-the panel's board list (a physical row, or any other set of 15). The
-addressing note still allows board IDs `0–29`; a row of 15 is an operator
-selection, not a smaller installation.
+For a board already in the bootloader:
 
-For each of the 15, in order:
-
-1. Confirm a fresh `VERSION_RSP` from that board ID. Skip a board that is
-   already silent and recover it with BOOTSEL instead of guessing.
+1. Confirm it does not answer `VERSION_REQ`. A board that answers is on the
+   fleet path, not this one.
 2. Run §7 to completion, including the new `VERSION_RSP`.
-3. Only then send opcode 4 to the next board.
+3. Only then start §7 on another silent board.
 
-Stop the row on the first board that fails step 9 or step 11. The boards
-already completed stay on the new image. The board that failed is either
-still in Katapult, with the previous image restored before `COMPLETE`, or it
-is the BOOTSEL case in §7 step 11. The boards not yet started are unchanged.
+### 8.1 How long one Katapult flash takes
 
-Expect the wall clock to be the sum of fifteen erase/write/read-back cycles
-plus the reboot and `ASSIGN` between them. The CAN time is a small part of
-each cycle. The page erase on the board being written is the long part, and
-it does not overlap the next board in this procedure.
+This is an estimate for the measured 87.2 KiB payload (`memory_map.md` §6),
+not a bench timing. The frame budget is the motion paper's full classic
+frame, about 130 µs at 1 Mbit/s. A shorter frame takes less.
+
+The payload is padded to 64-byte blocks: 1 396 blocks, 89 344 bytes. Each
+`SEND_BLOCK` is 76 bytes on the wire (header, command, address, 64 data
+bytes, CRC, trailer), which is 10 CAN frames, plus a 16-byte ACK, 2 frames.
+Each `REQUEST_BLOCK` is 12 bytes, 2 frames, and the answer is 80 bytes,
+10 frames. Both directions are 12 frames per block:
+
+| Direction | Frames | Bus time at 130 µs |
+|-----------|-------:|-------------------:|
+| Write, with ACK | 16 752 | 2.2 s |
+| Readback, with the request | 16 752 | 2.2 s |
+
+Bare image bytes with no address and no ACK would be 89 288 / 8 = 11 161
+frames, about 1.5 s. That figure is the payload alone. Katapult's write is
+the 2.2 s row above.
+
+`src/rp2040/flash.c` in Katapult buffers 256 bytes and, on a 4 KB boundary,
+erases that sector before programming the page. The ACK for the block that
+fills the page waits for that erase and program. `flashtool.py` waits for
+the ACK, so the stall adds to the bus time. The Fly-Micro4 NOR is not
+identified in this repo. The times below are the W25Q-class datasheet for a
+4 KB sector and a 256-byte page: 22 sector erases and 349 page programs.
+
+| Flash | Typical (45 ms, 0.4 ms) | Maximum (400 ms, 3 ms) |
+|-------|------------------------:|-----------------------:|
+| Erase + program | 1.1 s | 9.9 s |
+
+One board, with the procedure's 1 s pause after opcode 4 and a 0.5 s
+allowance for the reboot, `ASSIGN` and `VERSION_RSP`:
+
+| Part | Typical | Maximum |
+|------|--------:|--------:|
+| Enter-bootloader pause | 1.0 s | 1.0 s |
+| Write frames | 2.2 s | 2.2 s |
+| Flash stall | 1.1 s | 9.9 s |
+| Readback frames | 2.2 s | 2.2 s |
+| Reboot and version | 0.5 s | 0.5 s |
+| **One board** | **7.0 s** | **15.8 s** |
+| **30 boards, one after another** | **3.5 min** | **7.9 min** |
+
+A budget of 30 s per board is 15 minutes. That covers retries. It is not
+the bus time.
+
+The bytes cross the bus twice. Thirty writes and thirty readbacks are
+2.2 minutes even if the flash stall and the 1 s pause were both zero.
+That part does not parallelize: there is one bus, and each block is
+acknowledged by the one board in Katapult.
+
+The flash stall is the part that can overlap. It overlaps only when every
+board already holds the image and then erases together. Stock Katapult
+buffers 256 bytes, so it erases while the host is waiting, and the next
+board has not started. Overlapping the erase removes about half a minute
+at typical NOR timings (3.5 min becomes about 3.0 min) and about five
+minutes at the datasheet maximum (7.9 min becomes about 3.1 min). The
+2.2 minutes of frames remain.
+
+The accepted fleet path is this sequential session. About 3.5 minutes for
+30 boards is the duration the operator watches on one page. A second writer
+is not part of the plan.
+
+USB update stays the recovery path in §1. Hold BOOT, let the chip out of
+reset, and the ROM drive `RPI-RP2` appears. The operator does that once per
+board to install the CAN Katapult, and again for a board that answers
+neither the application nor Katapult. `pio run -t upload`, and any UF2
+linked at address 0, still replace the first 16 KiB. On a provisioned board,
+put `katapult.uf2` back before the next CAN update. The fleet path does not
+erase that first 16 KiB.
 
 ---
 
@@ -380,4 +439,5 @@ whole session, which this procedure already requires.
   P7, P8, and §9 follow. `esp32gui` discovers and stores the 6-byte UUID,
   and `UPGRADE SELECTED` runs the §7 writer. The image it sends is the
   `rp2040/` build linked at `0x10004000`, and that firmware handles
-  opcode 4 (§6.1, §6.2).
+  opcode 4 (§6.1, §6.2). The host-test order for that work, the release
+  image and the fleet queue is `firmware_release_tdd.md`.
