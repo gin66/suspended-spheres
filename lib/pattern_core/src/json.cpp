@@ -3,6 +3,7 @@
 #include "pattern_core/json.h"
 #include "json_internal.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <fstream>
 #include <iterator>
