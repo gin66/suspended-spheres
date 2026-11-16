@@ -953,7 +953,7 @@ verification and rollback; this procedure does that without removing a board.
 | `esp32gui/` | Store the 6-byte UUID; bump `ss_config_t` to version 2; add `current_build`, flags and last result. Migrate a version-1 file as "version unknown". |
 | `esp32gui/` | `VERSION_REQ` retry and unknown handling; show build and age. |
 | `esp32gui/` | Upgrade page: 30 tiles, 6 × 5, no scroll. Red waiting, one yellow while Katapult writes, green when the build matches. The writer is the §7 byte stream. **Done:** `upgrade_manager.cpp` uses `fl_build_set` and `katapult_flash_ex`. |
-| `esp32gui/` | SD image scanner, manifest checks and the panel OTA updater. Reject `kind: factory`. **Pending:** the embedded image is the current bench source. |
+| `esp32gui/` | SD image scanner, manifest checks and the panel OTA updater. Reject `kind: factory`. **Done:** `firmware_image.cpp` and `panel_ota.cpp`; the embedded image remains the no-card bench fallback. |
 | `esp32gui/` | WiFi onboarding: scan, select or type an SSID, setup AP, NVS credentials, SNTP and the link state machine. |
 | `esp32gui/` | Local web server: admin auth, CSRF, panel and Fly upload endpoints, streamed OTA. |
 | `esp32gui/` | GitHub release client of the §1.6 release: pinned repository, TLS bundle, ETag cache, `release.json`. |

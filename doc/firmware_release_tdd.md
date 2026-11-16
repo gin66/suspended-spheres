@@ -430,3 +430,20 @@ app after the action-4 entry.
   contains both. The host text check in W1–W5 still applies.
 - The Katapult byte pair is locked by a host assertion: node byte 116 gives
   `0x1E8/0x1E9` (`mc_katapult_data_id`).
+
+### SD source and panel OTA writer (2026-11-16)
+
+- `firmware_image.cpp` mounts the microSD card through the CH422G IO4
+  chip-select, scans `/firmware/fly` and `/firmware/panel`, parses each
+  manifest with `rc_manifest_parse`, hashes the file and uses
+  `pc_image_select_fly` / `pc_image_select_panel`. A card that is absent or
+  unreadable leaves the embedded bench image in place.
+- `panel_ota.cpp` checks the manifest, target, size, busy state and partition
+  table hash with `pc_ota_check`, writes the inactive slot with `esp_ota_*`,
+  sets the boot partition and restarts. The boot path calls
+  `panel_ota_boot_check`; a pending image is marked valid after the display
+  and CAN are up, otherwise `esp_ota_mark_app_invalid_rollback_and_reboot`.
+- Bench console: `image` reports the selected source, `panelota` starts the
+  panel write. The Settings screen control is still pending.
+- The no-card path was exercised on the bench; a card with the directory
+  layout has not been inserted yet.

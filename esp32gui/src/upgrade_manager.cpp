@@ -14,7 +14,7 @@
 #include "commission.h"
 #include "config_store.h"
 #include "fleet_core.h"
-#include "fly_image.h"
+#include "firmware_image.h"
 #include "katapult_client.h"
 #include "release_core.h"
 
@@ -127,28 +127,28 @@ void queue_persist_locked(const uint8_t uuid[FL_UUID_LEN], int board_id,
 
 bool make_image_locked(void) {
   std::memset(&s_image, 0, sizeof(s_image));
-  s_image.data = ss_fly_image_data();
-  s_image_size = ss_fly_image_size();
-  if (s_image.data == nullptr || s_image_size == 0 || SS_BUILD_ID == 0) {
+  const ss_fw_image_t *img = firmware_image_fly();
+  if (img == nullptr || img->data == nullptr || img->size == 0 ||
+      img->build == 0) {
     s_image_ready = false;
     return false;
   }
-  s_image.size = s_image_size;
-  s_image.build = (uint32_t)SS_BUILD_ID;
+  s_image.data = img->data;
+  s_image.size = img->size;
+  s_image.build = img->build;
   std::snprintf(s_image.target, sizeof(s_image.target), "%s", RC_TARGET_FLY);
   std::snprintf(s_image.kind, sizeof(s_image.kind), "app");
-  s_image.dirty = 0;
-
+  std::snprintf(s_image.sha256, sizeof(s_image.sha256), "%s", img->sha256);
   char tag[20];
-  std::snprintf(tag, sizeof(tag), "v%s", SS_FW_VERSION);
+  std::snprintf(tag, sizeof(tag), "v%s", img->version);
   rc_version_t v;
   if (rc_semver_parse(tag, &v) == 0) {
     s_image.version_major = v.major;
     s_image.version_minor = v.minor;
     s_image.version_patch = v.patch;
   }
-  rc_sha256_hex(s_image.data, s_image.size, s_image.sha256);
-  std::snprintf(s_image_version, sizeof(s_image_version), "%s", SS_FW_VERSION);
+  std::snprintf(s_image_version, sizeof(s_image_version), "%s", img->version);
+  std::snprintf(s_source, sizeof(s_source), "%s", img->source);
   s_image_ready = true;
   return true;
 }
@@ -400,8 +400,7 @@ void rebuild_view(void) {
 
 extern "C" void upgrade_manager_init(void) {
   if (s_mutex == nullptr) s_mutex = xSemaphoreCreateMutex();
-  s_image_size = ss_fly_image_size();
-  s_image_ready = s_image_size > 0 && SS_BUILD_ID != 0;
+  s_image_ready = firmware_image_fly() != nullptr;
   if (s_image_ready) {
     lock();
     make_image_locked();

@@ -538,6 +538,11 @@ void on_upgrade_stop(lv_event_t *e) {
   if (s_actions.upgrade_stop != nullptr) s_actions.upgrade_stop();
 }
 
+void on_panel_update(lv_event_t *e) {
+  (void)e;
+  if (s_actions.panel_update != nullptr) s_actions.panel_update();
+}
+
 void on_upgrade_row(lv_event_t *e) {
   const int index = (int)(intptr_t)lv_event_get_user_data(e);
   if (s_actions.node_select != nullptr) s_actions.node_select(index);
@@ -1240,8 +1245,8 @@ void build_settings(void) {
   lv_obj_t *s = s_screens[UI_SCREEN_SETTINGS];
   lv_obj_t *head = make_panel(s, 12, 8, 688, 48);
   make_label(head, "SETTINGS", &lv_font_montserrat_20, C_TEXT);
-  lv_obj_t *hint = make_label(head, "read-only status", &lv_font_montserrat_12,
-                              C_MUTED);
+  lv_obj_t *hint = make_label(head, "status / service",
+                              &lv_font_montserrat_12, C_MUTED);
   lv_obj_align(hint, LV_ALIGN_RIGHT_MID, -12, 0);
 
   lv_obj_t *net = make_panel(s, 12, 64, 332, 178);
@@ -1263,7 +1268,9 @@ void build_settings(void) {
   lv_obj_t *service = make_panel(s, 12, 252, 688, 110);
   make_label(service, "SERVICE", &lv_font_montserrat_14, C_MUTED);
   s_set_service = make_label(
-      service, "WiFi / OTA are not part of this build. Use the CH9102 UART.",
+      service,
+      "Panel image: /firmware/panel on SD. WiFi / network OTA are not in "
+      "this build.",
       &lv_font_montserrat_12, C_TEXT);
   lv_obj_set_pos(s_set_service, 12, 28);
   lv_label_set_long_mode(s_set_service, LV_LABEL_LONG_WRAP);
@@ -1274,6 +1281,9 @@ void build_settings(void) {
   lv_obj_t *cfg = make_button(service, "OPEN CONFIG", 150, 40,
                               on_tab, (void *)(intptr_t)UI_SCREEN_CONFIG);
   lv_obj_set_pos(cfg, 152, 56);
+  lv_obj_t *ota = make_button(service, "PANEL UPDATE", 170, 40,
+                              on_panel_update, nullptr);
+  lv_obj_set_pos(ota, 312, 56);
 }
 
 }  // namespace

@@ -104,6 +104,8 @@ The module is `ESP32-S3-WROOM-1-N16R8`. `CONFIG_SPIRAM_USE_MALLOC=y` and
 | User | Bytes | Note |
 |------|-------|------|
 | RGB panel framebuffer | 768 000 | `800 × 480 × 2 B`, allocated by `esp_lcd` in PSRAM |
+| SD Fly scan / selected image | ≤ 100 000 | one verified Fly app, PSRAM; freed when replaced |
+| SD panel image | ≤ 786 432 | read for the OTA write, PSRAM; freed after `esp_ota_end` |
 | Application log ring | 262 144 | 256 KiB, `APP_LOG_DEFAULT_BYTES` |
 | Rotation scratch | 32 000 | only when the panel is not in landscape |
 | **HBP2 chunk cache target** | **4 194 304** | 4 MiB, see §4 |

@@ -9,9 +9,10 @@
 #include "can_transport.h"
 #include "commission.h"
 #include "config_store.h"
-#include "fly_image.h"
+#include "firmware_image.h"
 #include "katapult_client.h"
 #include "motion_core.h"
+#include "panel_ota.h"
 #include "upgrade_manager.h"
 
 #ifdef SS_BENCH_CONSOLE
@@ -56,6 +57,7 @@ void print_help(void) {
   Serial.println("  flash <board> <uuidhex>     Katapult the embedded Fly image");
   Serial.println("  upgrade all|sel             Run the fleet queue from the embedded image");
   Serial.println("  upstatus                    Queue state and last result");
+  Serial.println("  panelota                    Write the SD panel image and reboot");
   Serial.println("  image                       embedded Fly image size");
   Serial.println("  can                         USB_SEL/CAN state and counters");
   Serial.println("  canon                       force USB_SEL to CAN and print state");
@@ -63,8 +65,9 @@ void print_help(void) {
 }
 
 void print_status(void) {
-  const unsigned img = ss_fly_image_size();
-  Serial.printf("nodes=%d image=%u bytes can=%s\n", commission_node_count(), img,
+  const ss_fw_image_t *img = firmware_image_fly();
+  Serial.printf("nodes=%d image=%u bytes can=%s\n", commission_node_count(),
+                img ? (unsigned)img->size : 0u,
                 can_transport_running() ? "on" : "off");
   ss_node_t n;
   for (int i = 0; i < commission_node_count(); ++i) {
@@ -143,14 +146,15 @@ void command_flash(char *args) {
       return;
     }
   }
-  const unsigned size = ss_fly_image_size();
-  if (size == 0) {
-    Serial.println("no embedded Fly image; rebuild with SS_FLY_IMAGE=...");
+  const ss_fw_image_t *img = firmware_image_fly();
+  if (img == nullptr || img->data == nullptr || img->size == 0) {
+    Serial.println("no Fly image; insert SD or rebuild with SS_FLY_IMAGE=...");
     return;
   }
   char status[80] = "idle";
-  Serial.printf("flashing board %d, %u bytes...\n", board, size);
-  const bool ok = katapult_flash(board, uuid, ss_fly_image_data(), size,
+  Serial.printf("flashing board %d, %u bytes from %s...\n", board,
+                (unsigned)img->size, img->path);
+  const bool ok = katapult_flash(board, uuid, img->data, img->size,
                                  status, sizeof(status));
   Serial.printf("flash %s: %s\n", ok ? "OK" : "FAILED", status);
 }
@@ -199,12 +203,21 @@ void execute(char *line) {
     } else {
       Serial.println("usage: upgrade all|sel");
     }
+  } else if (strcmp(cmd, "panelota") == 0) {
+    char text[80] = "idle";
+    if (!panel_ota_start(text, sizeof(text))) Serial.println(text);
   } else if (strcmp(cmd, "upstatus") == 0) {
     char text[96];
     upgrade_manager_status(text, sizeof(text));
     Serial.println(text);
   } else if (strcmp(cmd, "image") == 0) {
-    Serial.printf("embedded fly image: %u bytes\n", ss_fly_image_size());
+    const ss_fw_image_t *img = firmware_image_fly();
+    if (img != nullptr)
+      Serial.printf("fly image: %s %s build %lu, %u bytes\n", img->source,
+                    img->version, (unsigned long)img->build,
+                    (unsigned)img->size);
+    else
+      Serial.println("no fly image");
   } else if (strcmp(cmd, "flash") == 0) {
     char *args = strtok(nullptr, "");
     command_flash(args ? args : (char *)"");

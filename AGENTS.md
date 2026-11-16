@@ -106,7 +106,10 @@ All technical Markdown belongs in `doc/`. Only `README.md` and `AGENTS.md` sit a
     --upload-port /dev/cu.usbmodem5C930885641
   ```
   `esp32can` never defines `SS_CAN_MOCK` or `SS_BENCH_CONSOLE`; its image has
-  no serial loader and no embedded Fly image. `release_gate.h` rejects a
+  no serial loader and no embedded Fly image. The bench console's
+  `panelota` command and the Settings **PANEL UPDATE** button write the SD
+  panel image to the inactive OTA slot and reboot; the boot self-test marks
+  it valid or rolls it back. `release_gate.h` rejects a
   build that sets both `SS_RELEASE` and `SS_CAN_MOCK`. Never upload or flash
   without an explicit request.
 - **Screen preview (CMake, no hardware).** The host harness builds the same

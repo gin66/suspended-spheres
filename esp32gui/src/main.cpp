@@ -23,9 +23,11 @@
 #include "can_transport.h"
 #include "commission.h"
 #include "config_store.h"
+#include "firmware_image.h"
 #include "motion_core.h"
 #include "katapult_client.h"
 #include "panel_console.h"
+#include "panel_ota.h"
 #include "ui.h"
 #include "upgrade_manager.h"
 
@@ -215,6 +217,11 @@ void action_upgrade_all_outdated(void) {
 }
 
 void action_upgrade_stop(void) { upgrade_manager_stop(); }
+
+void action_panel_update(void) {
+  char text[80] = "idle";
+  if (!panel_ota_start(text, sizeof(text))) SS_LOGW("ota", "%s", text);
+}
 
 void action_can_start(void) {
   if (!can_transport_start(1000000u, can_rx_callback, nullptr)) {
@@ -418,6 +425,7 @@ void setup() {
   WATCH(1);
 
   config_store_init();
+  firmware_image_init();
   commission_init();
   upgrade_manager_init();
   can_monitor_start();
@@ -482,6 +490,7 @@ void setup() {
   actions.upgrade_selected = action_upgrade_selected;
   actions.upgrade_all_outdated = action_upgrade_all_outdated;
   actions.upgrade_stop = action_upgrade_stop;
+  actions.panel_update = action_panel_update;
 #ifdef SS_CAN_MOCK
   actions.mock_inject = action_mock_inject;
 #endif
@@ -492,6 +501,7 @@ void setup() {
     board_ws7_backlight(true);
   }
 
+  panel_ota_boot_check(s_display != nullptr && can_transport_running());
   panel_console_begin();
   WATCH(3);
   SS_LOGI("boot", "ready: %s transport, %d position capacity",

@@ -219,6 +219,7 @@ typedef struct {
   void (*upgrade_selected)(void);
   void (*upgrade_all_outdated)(void);
   void (*upgrade_stop)(void);
+  void (*panel_update)(void);
   void (*mock_inject)(void);  /* host harness only; may be NULL */
 } ui_actions_t;
 
