@@ -520,3 +520,17 @@ On clean commit `bc954a62`, build id `1794858657`:
 - Not exercised against GitHub in this session: the setup AP was started and
   the panel scanned 9 networks, but the Mac did not list the soft AP.  R10 is
   therefore compile- and policy-verified, not network-verified.
+
+### Final W6 dry run (2026-11-16, commit `19188357`)
+
+- Host tests: 187 pass.
+- `SS_FW_VERSION=1.4.2 SS_BUILD_ID=1794863612 SS_RELEASE=1` built
+  `fly_micro4_katapult` and `esp32can`.
+- The release `esp32can` image contains no `panel commands` string and no
+  embedded Fly image.
+- `release_pack` wrote `/tmp/ss-dist-final`: Fly app, panel app/factory pair,
+  manifests and `release.json` for both targets at build `1794863612`.
+- GitHub live check against `gin66/suspended-spheres` returned `HTTP 404`
+  because the repository has no GitHub Release yet.  WiFi, SNTP and the TLS
+  request path therefore work; the install path still needs a published
+  release.

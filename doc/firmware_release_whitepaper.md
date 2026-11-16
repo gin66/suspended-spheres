@@ -20,8 +20,9 @@
 > `esp32gui/src/net_manager.cpp`; the panel WIFI screen has the SSID list and
 > password keyboard. A second-client association test remains. The panel's
 > GitHub pull is
-> is in the tree (R10) as `esp32gui/src/github_client.cpp`; a live GitHub
-> association/download test remains.
+> is in the tree (R10) as `esp32gui/src/github_client.cpp`; a live TLS check
+> against the repository returned `HTTP 404` (no release yet), so the
+> download/install path still needs a published release.
 > They change where an image comes from, not what an image is: the identity,
 > SHA-256, OTA slot, self-test and rollback rules in sections 1 and 3 apply to
 > every source. Until the WiFi stack and web server are in the tree, those
