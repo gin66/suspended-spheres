@@ -16,3 +16,11 @@ webapp/dist/
 *.report.json
 
 esp32gui/src/fly_image_data.h
+
+# Never commit credentials or local secret overrides.
+*.private
+wifi_secrets.*
+private_bot.h
+private_sha.h
+.env
+.env.*
