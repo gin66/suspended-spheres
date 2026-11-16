@@ -489,7 +489,11 @@ On clean commit `bc954a62`, build id `1794858657`:
 - The panel now has a **WIFI** screen: SCAN fills a 12-entry SSID list,
   tapping a row selects it, the password textarea opens the LVGL keyboard,
   JOIN submits, SET ADMIN stores the salted admin hash, and FORGET clears the
-  credentials.  The web setup page remains the same alternative.
+  credentials.  The full content height is used: the network list runs down
+  the left side and the selected/password/admin/action block down the right.
+  SCAN disables while a scan runs and the header shows `SCANNING...`; the
+  keyboard's ready key submits the active field.  The web setup page remains
+  the same alternative.
 - R10 (GitHub pull) is in the tree; see the R10 note below.
 - LVGL object memory now uses PSRAM via `lv_mem_custom.cpp`; the internal
   heap after setting up the AP was about 120 KiB, versus 2 KiB before that

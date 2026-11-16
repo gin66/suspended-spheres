@@ -79,7 +79,7 @@ void print_help(void) {
   Serial.println("  upgrade all|sel             Run the fleet queue from the embedded image");
   Serial.println("  upstatus                    Queue state and last result");
   Serial.println("  panelota                    Write the SD panel image and reboot");
-  Serial.println("  wifi setup|forget|scan|status  WiFi state (no credentials printed)");
+  Serial.println("  wifi setup|forget|scan|retry|status  WiFi state (no credentials printed)");
   Serial.println("  wifi key                    setup AP key (bench only)");
   Serial.println("  wifi list                   last scan results");
   Serial.println("  webget <path>               loopback HTTP GET for the bench");
@@ -238,6 +238,9 @@ void execute(char *line) {
     } else if (arg != nullptr && strcmp(arg, "forget") == 0) {
       net_manager_forget();
       Serial.println("wifi forget requested");
+    } else if (arg != nullptr && strcmp(arg, "retry") == 0) {
+      net_manager_retry();
+      Serial.println("wifi retry requested");
     } else if (arg != nullptr && strcmp(arg, "scan") == 0) {
       net_manager_scan();
       Serial.println("wifi scan requested");

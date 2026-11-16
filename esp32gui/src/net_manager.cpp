@@ -56,7 +56,7 @@ bool s_sntp_started = false;
 uint32_t s_connect_deadline = 0;
 
 enum cmd_t { CMD_NONE, CMD_SETUP, CMD_FORGET, CMD_SCAN, CMD_SERVICE,
-             CMD_GITHUB_CHECK, CMD_CONNECT, CMD_SET_ADMIN };
+             CMD_GITHUB_CHECK, CMD_CONNECT, CMD_SET_ADMIN, CMD_RETRY };
 volatile cmd_t s_cmd = CMD_NONE;
 volatile bool s_cmd_service_on = false;
 
@@ -65,6 +65,7 @@ int s_scan_count = 0;
 char s_pending_ssid[33] = "";
 char s_pending_pass[65] = "";
 char s_pending_admin[65] = "";
+bool s_scanning = false;
 
 uint8_t *s_up_json = nullptr;
 size_t s_up_json_len = 0;
@@ -291,7 +292,7 @@ void do_forget(void) {
 
 void do_scan(void) {
   lock();
-  net_link_scan_start(&s_link);
+  s_scanning = true;
   unlock();
   const int n = WiFi.scanNetworks();
   lock();
@@ -303,7 +304,7 @@ void do_scan(void) {
   unlock();
   WiFi.scanDelete();
   lock();
-  net_link_scan_done(&s_link, s_scan_count);
+  s_scanning = false;
   std::snprintf(s_link.reason, sizeof(s_link.reason), "scan: %d networks",
                 s_scan_count);
   unlock();
@@ -821,6 +822,9 @@ void net_task(void *arg) {
         connect_sta();
         break;
       }
+      case CMD_RETRY:
+        if (s_have_cred && s_ssid[0] != '\0') connect_sta();
+        break;
       case CMD_SET_ADMIN: {
         char pass[65];
         lock();
@@ -883,6 +887,11 @@ extern "C" void net_manager_forget(void) {
 
 extern "C" void net_manager_scan(void) {
   lock();
+  if (s_scanning || s_link.state == NET_CONNECTING) {
+    unlock();
+    return;
+  }
+  std::snprintf(s_link.reason, sizeof(s_link.reason), "scanning...");
   s_cmd = CMD_SCAN;
   unlock();
 }
@@ -898,6 +907,12 @@ extern "C" void net_manager_service_toggle(void) {
   lock();
   s_cmd_service_on = !s_service_on;
   s_cmd = CMD_SERVICE;
+  unlock();
+}
+
+extern "C" void net_manager_retry(void) {
+  lock();
+  s_cmd = CMD_RETRY;
   unlock();
 }
 
@@ -969,6 +984,7 @@ extern "C" void net_manager_snapshot(ui_snapshot_t *snap) {
   std::snprintf(snap->wifi_reason, sizeof(snap->wifi_reason), "%s",
                 s_link.reason);
   snap->service_on = s_service_on;
+  snap->wifi_scanning = s_scanning;
   snap->wifi_scan_count = s_scan_count;
   for (int i = 0; i < s_scan_count && i < UI_MAX_WIFI_SCAN; ++i)
     std::snprintf(snap->wifi_scan_ssid[i], sizeof(snap->wifi_scan_ssid[i]),

@@ -192,6 +192,7 @@ typedef struct {
   char wifi_reason[64];
   char wifi_ap_ssid[32];
   char wifi_ap_password[16];
+  bool wifi_scanning;
   int wifi_scan_count;
   char wifi_scan_ssid[UI_MAX_WIFI_SCAN][33];
   bool service_on;

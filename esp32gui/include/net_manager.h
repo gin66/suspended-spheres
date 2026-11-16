@@ -15,6 +15,7 @@ void net_manager_scan(void);
 void net_manager_service(bool on);
 void net_manager_service_toggle(void);
 void net_manager_github_check(void);
+void net_manager_retry(void);
 bool net_manager_connect(const char *ssid, const char *password);
 bool net_manager_set_admin(const char *password);
 bool net_manager_service_on(void);
