@@ -67,6 +67,14 @@ jobs:
             exit 1
           fi
 
+      - name: Install PlatformIO
+        run: |
+          set -euo pipefail
+          python3 -m venv .platformio-venv
+          .platformio-venv/bin/pip install --upgrade pip
+          .platformio-venv/bin/pip install platformio
+          echo "$PWD/.platformio-venv/bin" >> "$GITHUB_PATH"
+
       - name: Host tests
         run: |
           set -euo pipefail
