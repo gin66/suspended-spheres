@@ -5,6 +5,7 @@
 #include "release_core.h"
 #include "test_list.h"
 
+#include <cstring>
 #include <fstream>
 #include <string>
 
