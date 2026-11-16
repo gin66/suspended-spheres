@@ -25,6 +25,8 @@
 #include "config_store.h"
 #include "firmware_image.h"
 #include "motion_core.h"
+#include "net_manager.h"
+#include <esp_heap_caps.h>
 #include "katapult_client.h"
 #include "panel_console.h"
 #include "panel_ota.h"
@@ -45,14 +47,14 @@ uint8_t s_draw_buf[BOARD_WS7_SCREEN_WIDTH * BOARD_WS7_DRAW_LINES * 2];
 
 /* ui_snapshot_t is ~17 KiB, far too large for a task stack. It lives in
  * .bss and is only touched by snapshot_task. */
-ui_snapshot_t s_snapshot;
+ui_snapshot_t *s_snapshot = nullptr;
 lv_display_t *s_display = nullptr;
 SemaphoreHandle_t s_lvgl_mux = nullptr;
 uint32_t s_test_run_started_ms = 0;
 int s_selected_animation = 0;
 bool s_animation_loading = false;
 char s_animation_status[64] = "SD file listing is not implemented";
-ss_can_id_entry_t s_can_scratch[SS_CAN_MONITOR_MAX_IDS];
+ss_can_id_entry_t *s_can_scratch = nullptr;
 
 static uint32_t lv_tick_cb(void) { return (uint32_t)millis(); }
 
@@ -218,6 +220,11 @@ void action_upgrade_all_outdated(void) {
 
 void action_upgrade_stop(void) { upgrade_manager_stop(); }
 
+void action_wifi_setup(void) { net_manager_setup(); }
+void action_wifi_forget(void) { net_manager_forget(); }
+void action_wifi_scan(void) { net_manager_scan(); }
+void action_service_toggle(void) { net_manager_service_toggle(); }
+
 void action_panel_update(void) {
   char text[80] = "idle";
   if (!panel_ota_start(text, sizeof(text))) SS_LOGW("ota", "%s", text);
@@ -283,7 +290,9 @@ void build_snapshot(ui_snapshot_t *snap) {
   snap->can_rate_1s = mon->rate_1s;
   snap->can_dropped = mon->dropped;
   snap->can_unique_ids = mon->unique_ids;
-  int can_n = can_monitor_copy(s_can_scratch, SS_CAN_MONITOR_MAX_IDS);
+  int can_n = s_can_scratch != nullptr
+                  ? can_monitor_copy(s_can_scratch, SS_CAN_MONITOR_MAX_IDS)
+                  : 0;
   if (can_n > UI_MAX_CAN_IDS) can_n = UI_MAX_CAN_IDS;
   snap->can_entry_count = can_n;
   for (int i = 0; i < can_n; ++i) {
@@ -356,6 +365,7 @@ void build_snapshot(ui_snapshot_t *snap) {
     u->assigned_positions = n.assigned_positions;
   }
   upgrade_manager_snapshot(snap);
+  net_manager_snapshot(snap);
   snap->selected_node = commission_selected_index();
   snap->animation_count = 0;
   snap->selected_animation = s_selected_animation;
@@ -405,9 +415,9 @@ static void snapshot_task(void *arg) {
   (void)arg;
   for (;;) {
     vTaskDelay(pdMS_TO_TICKS(500));
-    build_snapshot(&s_snapshot);
+    build_snapshot(s_snapshot);
     xSemaphoreTake(s_lvgl_mux, portMAX_DELAY);
-    ui_update(&s_snapshot);
+    ui_update(s_snapshot);
     xSemaphoreGive(s_lvgl_mux);
   }
 }
@@ -419,18 +429,34 @@ void setup() {
   delay(100);
 
   app_log_init(APP_LOG_DEFAULT_BYTES);
+  /* The 19 KiB snapshot does not need internal DMA RAM; PSRAM keeps the
+   * internal heap free for lwIP and the WiFi driver. */
+  s_snapshot = (ui_snapshot_t *)heap_caps_malloc(
+      sizeof(ui_snapshot_t), MALLOC_CAP_SPIRAM);
+  if (s_snapshot == nullptr) {
+    s_snapshot = (ui_snapshot_t *)heap_caps_malloc(
+        sizeof(ui_snapshot_t), MALLOC_CAP_INTERNAL);
+  }
+  if (s_snapshot == nullptr)
+    SS_LOGE("boot", "snapshot allocation failed");
+  s_can_scratch = (ss_can_id_entry_t *)heap_caps_malloc(
+      sizeof(ss_can_id_entry_t) * SS_CAN_MONITOR_MAX_IDS, MALLOC_CAP_SPIRAM);
+  if (s_can_scratch == nullptr) {
+    s_can_scratch = (ss_can_id_entry_t *)heap_caps_malloc(
+        sizeof(ss_can_id_entry_t) * SS_CAN_MONITOR_MAX_IDS,
+        MALLOC_CAP_INTERNAL);
+  }
+  if (s_can_scratch == nullptr)
+    SS_LOGE("boot", "CAN scratch allocation failed");
   SS_LOGI("boot", "esp32gui %s starting (no WiFi/secrets)", SS_FW_VERSION);
   app_watchdog_init();
   app_watchdog_set_hold_callback(on_safe_hold);
   WATCH(1);
 
   config_store_init();
-  firmware_image_init();
-  commission_init();
-  upgrade_manager_init();
-  can_monitor_start();
 
-  /* CH422G first: it owns touch reset, panel reset, backlight and USB_SEL. */
+  /* CH422G first: it owns touch reset, panel reset, backlight, USB_SEL and
+   * the SD chip-select used by the image scan. */
   if (board_ws7_expander_init() != ESP_OK) {
     SS_LOGE("boot", "CH422G expander init failed");
   }
@@ -438,6 +464,12 @@ void setup() {
    * raises it only when the transport actually starts. */
   board_ws7_set_usb_mode(true);
   board_ws7_backlight(false);
+
+  firmware_image_init();
+  commission_init();
+  upgrade_manager_init();
+  net_manager_init();
+  can_monitor_start();
 
   /* Start CAN before LVGL builds the widget tree. The persistent RX task
    * needs a 4 KiB stack, and internal heap is fragmented after ui_init(). */
@@ -491,6 +523,10 @@ void setup() {
   actions.upgrade_all_outdated = action_upgrade_all_outdated;
   actions.upgrade_stop = action_upgrade_stop;
   actions.panel_update = action_panel_update;
+  actions.wifi_setup = action_wifi_setup;
+  actions.wifi_forget = action_wifi_forget;
+  actions.wifi_scan = action_wifi_scan;
+  actions.service_toggle = action_service_toggle;
 #ifdef SS_CAN_MOCK
   actions.mock_inject = action_mock_inject;
 #endif
@@ -512,7 +548,7 @@ void setup() {
    * main loop / touch path so the GT911 I2C bus is never starved.  The
    * stack only holds build_snapshot()'s locals; the snapshot is static. */
   s_lvgl_mux = xSemaphoreCreateMutex();
-  if (s_lvgl_mux == nullptr ||
+  if (s_lvgl_mux == nullptr || s_snapshot == nullptr ||
       xTaskCreate(snapshot_task, "snapshot", 4096, nullptr, 1, nullptr) !=
           pdPASS) {
     SS_LOGE("boot", "snapshot task not started");

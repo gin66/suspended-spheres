@@ -54,11 +54,11 @@ int ota_mark(void *ctx) {
 
 }  // namespace
 
-extern "C" bool panel_ota_start(char *status, unsigned status_len) {
-  const rc_manifest_t *m = firmware_image_panel();
-  const char *path = firmware_image_panel_path();
-  if (m == nullptr || path == nullptr) {
-    set_status(status, status_len, "no panel image on SD");
+extern "C" bool panel_ota_apply(const rc_manifest_t *m, const uint8_t *data,
+                                size_t len, char *status,
+                                unsigned status_len) {
+  if (m == nullptr || data == nullptr || len == 0) {
+    set_status(status, status_len, "bad panel bundle");
     return false;
   }
   const esp_partition_t *part = esp_ota_get_next_update_partition(nullptr);
@@ -76,23 +76,8 @@ extern "C" bool panel_ota_start(char *status, unsigned status_len) {
   req.max_size = part->size;
   req.running_partition_sha256 = have_pt ? pt_sha : nullptr;
 
-  FILE *f = fopen(path, "rb");
-  if (f == nullptr) {
-    set_status(status, status_len, "cannot open panel image");
-    return false;
-  }
-  fseek(f, 0, SEEK_END);
-  const long len = ftell(f);
-  fseek(f, 0, SEEK_SET);
-  if (len <= 0 || (uint32_t)len != m->size) {
-    fclose(f);
-    set_status(status, status_len, "panel image size mismatch");
-    return false;
-  }
-  const pc_ota_result_t check =
-      pc_ota_check(&req, m, (uint32_t)len);
+  const pc_ota_result_t check = pc_ota_check(&req, m, (uint32_t)len);
   if (check != PC_OTA_OK) {
-    fclose(f);
     switch (check) {
       case PC_OTA_BUSY:
         set_status(status, status_len, "busy: stop the show/queue first");
@@ -113,37 +98,17 @@ extern "C" bool panel_ota_start(char *status, unsigned status_len) {
     return false;
   }
 
-  uint8_t *data = (uint8_t *)heap_caps_malloc((size_t)len, MALLOC_CAP_SPIRAM);
-  if (data == nullptr)
-    data = (uint8_t *)heap_caps_malloc((size_t)len, MALLOC_CAP_INTERNAL);
-  if (data == nullptr) {
-    fclose(f);
-    set_status(status, status_len, "no memory for panel image");
-    return false;
-  }
-  const size_t got = fread(data, 1, (size_t)len, f);
-  fclose(f);
-  if (got != (size_t)len) {
-    heap_caps_free(data);
-    set_status(status, status_len, "short read");
-    return false;
-  }
-
   esp_ota_handle_t handle = 0;
-  esp_err_t err = esp_ota_begin(part, (size_t)len, &handle);
+  esp_err_t err = esp_ota_begin(part, len, &handle);
   if (err != ESP_OK) {
-    heap_caps_free(data);
     set_status(status, status_len, "esp_ota_begin failed");
     return false;
   }
-
   pc_ota_callbacks_t cb = {};
   cb.write = ota_write;
   cb.mark_valid = ota_mark;
   cb.ctx = &handle;
-  const pc_ota_result_t r =
-      pc_ota_run(&req, m, data, (size_t)len, true, &cb);
-  heap_caps_free(data);
+  const pc_ota_result_t r = pc_ota_run(&req, m, data, len, true, &cb);
   if (r != PC_OTA_OK) {
     esp_ota_abort(handle);
     set_status(status, status_len,
@@ -162,6 +127,47 @@ extern "C" bool panel_ota_start(char *status, unsigned status_len) {
     return false;
   }
   set_status(status, status_len, "panel updated; rebooting");
+  return true;
+}
+
+extern "C" bool panel_ota_start(char *status, unsigned status_len) {
+  const rc_manifest_t *m = firmware_image_panel();
+  const char *path = firmware_image_panel_path();
+  if (m == nullptr || path == nullptr) {
+    set_status(status, status_len, "no panel image on SD");
+    return false;
+  }
+  FILE *f = fopen(path, "rb");
+  if (f == nullptr) {
+    set_status(status, status_len, "cannot open panel image");
+    return false;
+  }
+  fseek(f, 0, SEEK_END);
+  const long len = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  if (len <= 0 || (uint32_t)len != m->size) {
+    fclose(f);
+    set_status(status, status_len, "panel image size mismatch");
+    return false;
+  }
+  uint8_t *data = (uint8_t *)heap_caps_malloc((size_t)len, MALLOC_CAP_SPIRAM);
+  if (data == nullptr)
+    data = (uint8_t *)heap_caps_malloc((size_t)len, MALLOC_CAP_INTERNAL);
+  if (data == nullptr) {
+    fclose(f);
+    set_status(status, status_len, "no memory for panel image");
+    return false;
+  }
+  const size_t got = fread(data, 1, (size_t)len, f);
+  fclose(f);
+  if (got != (size_t)len) {
+    heap_caps_free(data);
+    set_status(status, status_len, "short read");
+    return false;
+  }
+  const bool ok = panel_ota_apply(m, data, (size_t)len, status, status_len);
+  heap_caps_free(data);
+  if (!ok) return false;
   vTaskDelay(pdMS_TO_TICKS(300));
   esp_restart();
   return true;

@@ -211,6 +211,21 @@ ui_snapshot_t make_snapshot() {
   s.test_run_remaining = 0;
   s.config_dirty = true;
 
+  s.wifi_present = true;
+  s.wifi_connected = false;
+  std::snprintf(s.wifi_state, sizeof(s.wifi_state), "%s", "AP_SETUP");
+  std::snprintf(s.wifi_ssid, sizeof(s.wifi_ssid), "%s",
+                "SuspendedSpheres-A1B2");
+  std::snprintf(s.wifi_ip, sizeof(s.wifi_ip), "%s", "192.168.4.1");
+  std::snprintf(s.wifi_ap_ssid, sizeof(s.wifi_ap_ssid), "%s",
+                "SuspendedSpheres-A1B2");
+  std::snprintf(s.wifi_ap_password, sizeof(s.wifi_ap_password), "%s",
+                "K7mQ2pX9aB");
+  std::snprintf(s.wifi_reason, sizeof(s.wifi_reason), "%s",
+                "scan: 6 networks");
+  s.wifi_rssi = 0;
+  s.service_on = true;
+
   s.upgrade_active = false;
   s.upgrade_progress = 0;
   std::snprintf(s.upgrade_status, sizeof(s.upgrade_status), "%s",

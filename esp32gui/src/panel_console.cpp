@@ -1,6 +1,7 @@
 #include "panel_console.h"
 
 #include <Arduino.h>
+#include <WiFi.h>
 #include <string.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -12,6 +13,7 @@
 #include "firmware_image.h"
 #include "katapult_client.h"
 #include "motion_core.h"
+#include "net_manager.h"
 #include "panel_ota.h"
 #include "upgrade_manager.h"
 
@@ -49,6 +51,24 @@ int node_index_for_board(int board_id) {
   return -1;
 }
 
+void web_get(const char *path) {
+  WiFiClient c;
+  if (!c.connect(IPAddress(127, 0, 0, 1), 80)) {
+    Serial.println("loopback connect failed (service off?)");
+    return;
+  }
+  c.printf("GET %s HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+           path);
+  const uint32_t start = millis();
+  while ((uint32_t)(millis() - start) < 3000u &&
+         (c.connected() || c.available())) {
+    while (c.available()) Serial.write(c.read());
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+  c.stop();
+  Serial.println();
+}
+
 void print_help(void) {
   Serial.println("panel commands:");
   Serial.println("  status                      nodes, build and image size");
@@ -58,6 +78,11 @@ void print_help(void) {
   Serial.println("  upgrade all|sel             Run the fleet queue from the embedded image");
   Serial.println("  upstatus                    Queue state and last result");
   Serial.println("  panelota                    Write the SD panel image and reboot");
+  Serial.println("  wifi setup|forget|scan|status  WiFi state (no credentials printed)");
+  Serial.println("  wifi key                    setup AP key (bench only)");
+  Serial.println("  wifi list                   last scan results");
+  Serial.println("  webget <path>               loopback HTTP GET for the bench");
+  Serial.println("  service on|off              HTTP service for this power cycle");
   Serial.println("  image                       embedded Fly image size");
   Serial.println("  can                         USB_SEL/CAN state and counters");
   Serial.println("  canon                       force USB_SEL to CAN and print state");
@@ -202,6 +227,40 @@ void execute(char *line) {
                                                       : "upgrade refused");
     } else {
       Serial.println("usage: upgrade all|sel");
+    }
+  } else if (strcmp(cmd, "wifi") == 0) {
+    char *arg = strtok(nullptr, " ");
+    if (arg != nullptr && strcmp(arg, "setup") == 0) {
+      net_manager_setup();
+      Serial.println("wifi setup requested");
+    } else if (arg != nullptr && strcmp(arg, "forget") == 0) {
+      net_manager_forget();
+      Serial.println("wifi forget requested");
+    } else if (arg != nullptr && strcmp(arg, "scan") == 0) {
+      net_manager_scan();
+      Serial.println("wifi scan requested");
+    } else if (arg != nullptr && strcmp(arg, "list") == 0) {
+      for (int i = 0; i < net_manager_scan_count(); ++i)
+        Serial.printf("  %d: %s\n", i, net_manager_scan_ssid(i));
+    } else if (arg != nullptr && strcmp(arg, "key") == 0) {
+      char key[24];
+      net_manager_ap_key(key, sizeof(key));
+      Serial.println(key[0] ? key : "no setup AP");
+    } else {
+      char text[128];
+      net_manager_status(text, sizeof(text));
+      Serial.println(text);
+    }
+  } else if (strcmp(cmd, "webget") == 0) {
+    char *arg = strtok(nullptr, " ");
+    web_get(arg != nullptr ? arg : "/api/status");
+  } else if (strcmp(cmd, "service") == 0) {
+    char *arg = strtok(nullptr, " ");
+    if (arg != nullptr) {
+      net_manager_service(strcmp(arg, "on") == 0);
+      Serial.printf("service %s requested\n", arg);
+    } else {
+      Serial.println("usage: service on|off");
     }
   } else if (strcmp(cmd, "panelota") == 0) {
     char text[80] = "idle";

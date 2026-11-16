@@ -109,7 +109,14 @@ All technical Markdown belongs in `doc/`. Only `README.md` and `AGENTS.md` sit a
   no serial loader and no embedded Fly image. The bench console's
   `panelota` command and the Settings **PANEL UPDATE** button write the SD
   panel image to the inactive OTA slot and reboot; the boot self-test marks
-  it valid or rolls it back. `release_gate.h` rejects a
+  it valid or rolls it back. Settings **SETUP** starts the per-device setup AP
+  (`SuspendedSpheres-XXXX`, key shown on the panel) and the HTTP service;
+  **SCAN**, **FORGET** and **SERVER** control the same state. Credentials and
+  the admin hash live in NVS. The setup page is `http://192.168.4.1` while the
+  AP is up; the panel-side SSID list/keyboard is still pending. The bench
+  console has `wifi setup|forget|scan|status|list|key`, `service on|off` and
+  `panelota`. LVGL objects, the UI snapshot and the CAN scratch copy are in
+  PSRAM so internal DRAM remains for lwIP and the WiFi driver. `release_gate.h` rejects a
   build that sets both `SS_RELEASE` and `SS_CAN_MOCK`. Never upload or flash
   without an explicit request.
 - **Screen preview (CMake, no hardware).** The host harness builds the same

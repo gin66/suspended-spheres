@@ -42,7 +42,7 @@ TaskHandle_t s_task = nullptr;
 /* Internal RAM after LVGL is fragmented; a static stack avoids a failed
  * 8 KiB heap allocation at the moment the operator presses UPGRADE. */
 StaticTask_t s_task_buf;
-StackType_t s_task_stack[8192];
+StackType_t s_task_stack[4096];
 
 bool s_active = false;
 bool s_stop = false;
@@ -496,7 +496,7 @@ bool start(bool all) {
   /* One board at a time; the test run and the show are stopped first. */
   commission_test_run_stop();
 
-  s_task = xTaskCreateStatic(worker, "upgrade", 8192, nullptr, 1,
+  s_task = xTaskCreateStatic(worker, "upgrade", 4096, nullptr, 1,
                              s_task_stack, &s_task_buf);
   if (s_task == nullptr) {
     lock();

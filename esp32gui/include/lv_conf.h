@@ -76,7 +76,9 @@
  * LVGL objects in internal SRAM (CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL = 4 KB)
  * and only large buffers in PSRAM. Moving the objects to PSRAM made every
  * screen rebuild and redraw several times slower on the IDF 5.5 driver. */
-#define LV_USE_STDLIB_MALLOC   LV_STDLIB_CLIB
+/* Object memory comes from the 8 MiB PSRAM; internal DRAM must stay free for
+ * lwIP, the WiFi driver and the TWAI DMA buffers. */
+#define LV_USE_STDLIB_MALLOC   LV_STDLIB_CUSTOM
 #define LV_USE_STDLIB_STRING   LV_STDLIB_CLIB
 #define LV_USE_STDLIB_SPRINTF  LV_STDLIB_CLIB
 

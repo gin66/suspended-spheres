@@ -7,6 +7,7 @@
 #include <esp_heap_caps.h>
 #include <esp_vfs_fat.h>
 #include <sdmmc_cmd.h>
+#include <sys/stat.h>
 
 #include <cstdio>
 #include <cstring>
@@ -39,6 +40,7 @@ struct candidate_t {
 };
 
 bool s_sd_mounted = false;
+bool s_fly_psram = false;
 ss_fw_image_t s_fly;
 rc_manifest_t s_panel;
 char s_panel_path[96];
@@ -184,6 +186,7 @@ void load_sd(void) {
     const int idx = find_candidate(fly, fly_n, sel);
     if (idx >= 0) {
       s_fly.present = true;
+      s_fly_psram = true;
       s_fly.data = fly[idx].data;
       s_fly.size = fly[idx].size;
       s_fly.build = fly[idx].manifest.build;
@@ -226,6 +229,7 @@ void load_embedded(void) {
   const unsigned size = ss_fly_image_size();
   if (data == nullptr || size == 0 || SS_BUILD_ID == 0) return;
   s_fly.present = true;
+  s_fly_psram = false;
   s_fly.data = data;
   s_fly.size = size;
   s_fly.build = (uint32_t)SS_BUILD_ID;
@@ -245,9 +249,87 @@ extern "C" void firmware_image_init(void) {
   s_panel_path[0] = '\0';
   s_panel_present = false;
   s_sd_mounted = false;
+  s_fly_psram = false;
 
   load_sd();
   if (!s_fly.present) load_embedded();
+}
+
+extern "C" void firmware_image_reload(void) {
+  if (s_fly_psram && s_fly.data != nullptr)
+    heap_caps_free((void *)s_fly.data);
+  std::memset(&s_fly, 0, sizeof(s_fly));
+  std::memset(&s_panel, 0, sizeof(s_panel));
+  s_panel_path[0] = '\0';
+  s_panel_present = false;
+  s_fly_psram = false;
+  load_sd();
+  if (!s_fly.present) load_embedded();
+}
+
+extern "C" bool firmware_image_store_fly(const rc_manifest_t *m,
+                                         const uint8_t *data, size_t len,
+                                         char *status, unsigned status_len) {
+  if (m == nullptr || data == nullptr || len == 0 || len != m->size) {
+    if (status && status_len) std::snprintf(status, status_len, "bad bundle");
+    return false;
+  }
+  if (!s_sd_mounted) {
+    if (status && status_len) std::snprintf(status, status_len, "no SD card");
+    return false;
+  }
+  if (std::strchr(m->file, '/') != nullptr ||
+      std::strstr(m->file, "..") != nullptr) {
+    if (status && status_len) std::snprintf(status, status_len, "bad filename");
+    return false;
+  }
+  mkdir("/sdcard/firmware", 0777);
+  mkdir("/sdcard/firmware/fly", 0777);
+
+  char bin_path[128];
+  char json_path[128];
+  std::snprintf(bin_path, sizeof(bin_path), "%s/%s", kFlyDir, m->file);
+  std::snprintf(json_path, sizeof(json_path), "%s", bin_path);
+  const size_t n = std::strlen(json_path);
+  if (n > 4 && std::strcmp(json_path + n - 4, ".bin") == 0)
+    std::strcpy(json_path + n - 4, ".json");
+  else
+    std::snprintf(json_path + n, sizeof(json_path) - n, ".json");
+
+  FILE *f = fopen(bin_path, "wb");
+  if (f == nullptr) {
+    if (status && status_len) std::snprintf(status, status_len, "open failed");
+    return false;
+  }
+  const bool bin_ok = fwrite(data, 1, len, f) == len;
+  fclose(f);
+  if (!bin_ok) {
+    if (status && status_len) std::snprintf(status, status_len, "short write");
+    return false;
+  }
+
+  char text[2048];
+  if (rc_manifest_emit(m, text, sizeof(text)) != 0) {
+    if (status && status_len) std::snprintf(status, status_len, "manifest failed");
+    return false;
+  }
+  f = fopen(json_path, "wb");
+  if (f == nullptr) {
+    if (status && status_len) std::snprintf(status, status_len, "json open failed");
+    return false;
+  }
+  const size_t tn = std::strlen(text);
+  const bool json_ok = fwrite(text, 1, tn, f) == tn;
+  fclose(f);
+  if (!json_ok) {
+    if (status && status_len) std::snprintf(status, status_len, "json write failed");
+    return false;
+  }
+  firmware_image_reload();
+  if (status && status_len)
+    std::snprintf(status, status_len, "stored %s", m->file);
+  SS_LOGI("image", "Fly bundle stored at %s", bin_path);
+  return true;
 }
 
 extern "C" bool firmware_image_sd_present(void) { return s_sd_mounted; }

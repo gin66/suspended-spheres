@@ -2,9 +2,14 @@
 #include "release_gate.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include <lvgl.h>
+
+#ifdef BOARD_HAS_PSRAM
+#include <esp_heap_caps.h>
+#endif
 
 namespace {
 
@@ -40,7 +45,7 @@ const lv_color_t C_ERR = lv_color_hex(0xE74C3C);
 const lv_color_t C_OFF = lv_color_hex(0x2A2F38);
 
 ui_actions_t s_actions;
-ui_snapshot_t s_snap;
+ui_snapshot_t *s_snap = nullptr;
 lv_obj_t *s_screens[UI_SCREEN_COUNT];
 lv_obj_t *s_nav;
 lv_obj_t *s_link_label;
@@ -131,6 +136,9 @@ lv_obj_t *s_set_wifi;
 lv_obj_t *s_set_ssid;
 lv_obj_t *s_set_ip;
 lv_obj_t *s_set_rssi;
+lv_obj_t *s_set_ap;
+lv_obj_t *s_set_key;
+lv_obj_t *s_set_server;
 lv_obj_t *s_set_can;
 lv_obj_t *s_set_firmware;
 lv_obj_t *s_set_boot;
@@ -229,7 +237,7 @@ void on_node_row(lv_event_t *e) {
 
 void on_axis(lv_event_t *e) {
   s_selected_axis = (int)(intptr_t)lv_event_get_user_data(e);
-  ui_update(&s_snap);
+  ui_update(s_snap);
 }
 
 void on_motor(lv_event_t *e) {
@@ -255,48 +263,48 @@ void on_unassign(lv_event_t *e) {
 
 void on_motor_pos(lv_event_t *e) {
   s_assign_position = (int)(intptr_t)lv_event_get_user_data(e);
-  ui_update(&s_snap);
+  ui_update(s_snap);
 }
 
 void on_node_prev(lv_event_t *e) {
   (void)e;
   if (s_actions.node_select != nullptr) {
-    s_actions.node_select(s_snap.selected_node - 1);
+    s_actions.node_select(s_snap->selected_node - 1);
   }
 }
 
 void on_node_next(lv_event_t *e) {
   (void)e;
   if (s_actions.node_select != nullptr) {
-    s_actions.node_select(s_snap.selected_node + 1);
+    s_actions.node_select(s_snap->selected_node + 1);
   }
 }
 
 void on_grid_minus(lv_event_t *e) {
   (void)e;
   if (s_actions.config_grid != nullptr) {
-    s_actions.config_grid(s_snap.grid_cols - 1, s_snap.grid_rows);
+    s_actions.config_grid(s_snap->grid_cols - 1, s_snap->grid_rows);
   }
 }
 
 void on_grid_plus(lv_event_t *e) {
   (void)e;
   if (s_actions.config_grid != nullptr) {
-    s_actions.config_grid(s_snap.grid_cols + 1, s_snap.grid_rows);
+    s_actions.config_grid(s_snap->grid_cols + 1, s_snap->grid_rows);
   }
 }
 
 void on_rows_minus(lv_event_t *e) {
   (void)e;
   if (s_actions.config_grid != nullptr) {
-    s_actions.config_grid(s_snap.grid_cols, s_snap.grid_rows - 1);
+    s_actions.config_grid(s_snap->grid_cols, s_snap->grid_rows - 1);
   }
 }
 
 void on_rows_plus(lv_event_t *e) {
   (void)e;
   if (s_actions.config_grid != nullptr) {
-    s_actions.config_grid(s_snap.grid_cols, s_snap.grid_rows + 1);
+    s_actions.config_grid(s_snap->grid_cols, s_snap->grid_rows + 1);
   }
 }
 
@@ -313,56 +321,56 @@ void on_preset_10x12(lv_event_t *e) {
 void on_drop_minus(lv_event_t *e) {
   (void)e;
   if (s_actions.config_test != nullptr) {
-    s_actions.config_test(s_snap.test_drop_mm - 10, s_snap.test_speed_mm_s,
-                          s_snap.test_step_delay_ms, s_snap.test_serpentine);
+    s_actions.config_test(s_snap->test_drop_mm - 10, s_snap->test_speed_mm_s,
+                          s_snap->test_step_delay_ms, s_snap->test_serpentine);
   }
 }
 
 void on_drop_plus(lv_event_t *e) {
   (void)e;
   if (s_actions.config_test != nullptr) {
-    s_actions.config_test(s_snap.test_drop_mm + 10, s_snap.test_speed_mm_s,
-                          s_snap.test_step_delay_ms, s_snap.test_serpentine);
+    s_actions.config_test(s_snap->test_drop_mm + 10, s_snap->test_speed_mm_s,
+                          s_snap->test_step_delay_ms, s_snap->test_serpentine);
   }
 }
 
 void on_speed_minus(lv_event_t *e) {
   (void)e;
   if (s_actions.config_test != nullptr) {
-    s_actions.config_test(s_snap.test_drop_mm, s_snap.test_speed_mm_s - 5,
-                          s_snap.test_step_delay_ms, s_snap.test_serpentine);
+    s_actions.config_test(s_snap->test_drop_mm, s_snap->test_speed_mm_s - 5,
+                          s_snap->test_step_delay_ms, s_snap->test_serpentine);
   }
 }
 
 void on_speed_plus(lv_event_t *e) {
   (void)e;
   if (s_actions.config_test != nullptr) {
-    s_actions.config_test(s_snap.test_drop_mm, s_snap.test_speed_mm_s + 5,
-                          s_snap.test_step_delay_ms, s_snap.test_serpentine);
+    s_actions.config_test(s_snap->test_drop_mm, s_snap->test_speed_mm_s + 5,
+                          s_snap->test_step_delay_ms, s_snap->test_serpentine);
   }
 }
 
 void on_delay_minus(lv_event_t *e) {
   (void)e;
   if (s_actions.config_test != nullptr) {
-    s_actions.config_test(s_snap.test_drop_mm, s_snap.test_speed_mm_s,
-                          s_snap.test_step_delay_ms - 50, s_snap.test_serpentine);
+    s_actions.config_test(s_snap->test_drop_mm, s_snap->test_speed_mm_s,
+                          s_snap->test_step_delay_ms - 50, s_snap->test_serpentine);
   }
 }
 
 void on_delay_plus(lv_event_t *e) {
   (void)e;
   if (s_actions.config_test != nullptr) {
-    s_actions.config_test(s_snap.test_drop_mm, s_snap.test_speed_mm_s,
-                          s_snap.test_step_delay_ms + 50, s_snap.test_serpentine);
+    s_actions.config_test(s_snap->test_drop_mm, s_snap->test_speed_mm_s,
+                          s_snap->test_step_delay_ms + 50, s_snap->test_serpentine);
   }
 }
 
 void on_serp(lv_event_t *e) {
   (void)e;
   if (s_actions.config_test != nullptr) {
-    s_actions.config_test(s_snap.test_drop_mm, s_snap.test_speed_mm_s,
-                          s_snap.test_step_delay_ms, !s_snap.test_serpentine);
+    s_actions.config_test(s_snap->test_drop_mm, s_snap->test_speed_mm_s,
+                          s_snap->test_step_delay_ms, !s_snap->test_serpentine);
   }
 }
 
@@ -421,7 +429,7 @@ void add_scroll_buttons(lv_obj_t *parent, lv_obj_t *target, int x, int y,
 }
 
 void can_refresh_rows(void) {
-  const int n = s_snap.can_entry_count;
+  const int n = s_snap->can_entry_count;
   const int max_first = n > kCanRows ? n - kCanRows : 0;
   if (s_can_first > max_first) s_can_first = max_first;
   if (s_can_first < 0) s_can_first = 0;
@@ -440,7 +448,7 @@ void can_refresh_rows(void) {
       continue;
     }
 
-    const ui_can_entry_t *e = &s_snap.can_entries[idx];
+    const ui_can_entry_t *e = &s_snap->can_entries[idx];
     char buf[32];
     std::snprintf(buf, sizeof(buf), "%03lx", (unsigned long)e->identifier);
     lv_label_set_text(id, buf);
@@ -483,7 +491,7 @@ void on_can_page_down(lv_event_t *e) {
 
 void on_can_toggle(lv_event_t *e) {
   (void)e;
-  if (s_snap.can_running) {
+  if (s_snap->can_running) {
     if (s_actions.can_stop != nullptr) s_actions.can_stop();
   } else {
     if (s_actions.can_start != nullptr) s_actions.can_start();
@@ -536,6 +544,26 @@ void on_upgrade_all(lv_event_t *e) {
 void on_upgrade_stop(lv_event_t *e) {
   (void)e;
   if (s_actions.upgrade_stop != nullptr) s_actions.upgrade_stop();
+}
+
+void on_wifi_setup(lv_event_t *e) {
+  (void)e;
+  if (s_actions.wifi_setup != nullptr) s_actions.wifi_setup();
+}
+
+void on_wifi_forget(lv_event_t *e) {
+  (void)e;
+  if (s_actions.wifi_forget != nullptr) s_actions.wifi_forget();
+}
+
+void on_wifi_scan(lv_event_t *e) {
+  (void)e;
+  if (s_actions.wifi_scan != nullptr) s_actions.wifi_scan();
+}
+
+void on_service_toggle(lv_event_t *e) {
+  (void)e;
+  if (s_actions.service_toggle != nullptr) s_actions.service_toggle();
 }
 
 void on_panel_update(lv_event_t *e) {
@@ -1244,15 +1272,25 @@ void build_settings(void) {
                               &lv_font_montserrat_12, C_MUTED);
   lv_obj_align(hint, LV_ALIGN_RIGHT_MID, -12, 0);
 
-  lv_obj_t *net = make_panel(s, 12, 64, 332, 178);
+  lv_obj_t *net = make_panel(s, 12, 64, 332, 234);
   make_label(net, "NETWORK", &lv_font_montserrat_14, C_MUTED);
-  s_set_wifi = make_kv(net, "WiFi", 34);
-  s_set_ssid = make_kv(net, "SSID", 58);
-  s_set_ip = make_kv(net, "IP", 82);
-  s_set_rssi = make_kv(net, "RSSI", 106);
-  s_set_can = make_kv(net, "CAN", 130);
+  s_set_wifi = make_kv(net, "WiFi", 30);
+  s_set_ssid = make_kv(net, "SSID", 52);
+  s_set_ip = make_kv(net, "IP", 74);
+  s_set_rssi = make_kv(net, "RSSI", 96);
+  s_set_ap = make_kv(net, "AP", 118);
+  s_set_key = make_kv(net, "Key", 140);
+  s_set_can = make_kv(net, "CAN", 162);
+  lv_obj_t *wifi_setup = make_button(net, "SETUP", 92, 32, on_wifi_setup,
+                                     nullptr);
+  lv_obj_set_pos(wifi_setup, 8, 192);
+  lv_obj_t *wifi_scan = make_button(net, "SCAN", 72, 32, on_wifi_scan, nullptr);
+  lv_obj_set_pos(wifi_scan, 108, 192);
+  lv_obj_t *wifi_forget = make_button(net, "FORGET", 92, 32, on_wifi_forget,
+                                      nullptr);
+  lv_obj_set_pos(wifi_forget, 188, 192);
 
-  lv_obj_t *sys = make_panel(s, 356, 64, 344, 178);
+  lv_obj_t *sys = make_panel(s, 356, 64, 344, 234);
   make_label(sys, "SYSTEM", &lv_font_montserrat_14, C_MUTED);
   s_set_firmware = make_kv(sys, "Firmware", 34);
   s_set_boot = make_kv(sys, "Boot", 58);
@@ -1260,7 +1298,7 @@ void build_settings(void) {
   s_set_capacity = make_kv(sys, "Capacity", 106);
   s_set_watch = make_kv(sys, "Watchpoint", 130);
 
-  lv_obj_t *service = make_panel(s, 12, 252, 688, 110);
+  lv_obj_t *service = make_panel(s, 12, 306, 688, 110);
   make_label(service, "SERVICE", &lv_font_montserrat_14, C_MUTED);
   s_set_service = make_label(
       service,
@@ -1270,22 +1308,33 @@ void build_settings(void) {
   lv_obj_set_pos(s_set_service, 12, 28);
   lv_label_set_long_mode(s_set_service, LV_LABEL_LONG_WRAP);
   lv_obj_set_width(s_set_service, 620);
-  lv_obj_t *log = make_button(service, "OPEN LOG", 130, 40,
+  lv_obj_t *log = make_button(service, "OPEN LOG", 120, 40,
                               on_tab, (void *)(intptr_t)UI_SCREEN_LOG);
-  lv_obj_set_pos(log, 12, 56);
-  lv_obj_t *cfg = make_button(service, "OPEN CONFIG", 150, 40,
+  lv_obj_set_pos(log, 8, 56);
+  lv_obj_t *cfg = make_button(service, "OPEN CONFIG", 140, 40,
                               on_tab, (void *)(intptr_t)UI_SCREEN_CONFIG);
-  lv_obj_set_pos(cfg, 152, 56);
-  lv_obj_t *ota = make_button(service, "PANEL UPDATE", 170, 40,
+  lv_obj_set_pos(cfg, 136, 56);
+  lv_obj_t *ota = make_button(service, "PANEL UPDATE", 150, 40,
                               on_panel_update, nullptr);
-  lv_obj_set_pos(ota, 312, 56);
+  lv_obj_set_pos(ota, 284, 56);
+  s_set_server = make_button(service, "SERVER ON", 110, 40,
+                             on_service_toggle, nullptr);
+  lv_obj_set_pos(s_set_server, 442, 56);
 }
 
 }  // namespace
 
 void ui_init(const ui_actions_t *actions) {
   if (actions != nullptr) s_actions = *actions;
-  std::memset(&s_snap, 0, sizeof(s_snap));
+  if (s_snap == nullptr) {
+#ifdef BOARD_HAS_PSRAM
+    s_snap = (ui_snapshot_t *)heap_caps_malloc(sizeof(ui_snapshot_t),
+                                               MALLOC_CAP_SPIRAM);
+#endif
+    if (s_snap == nullptr)
+      s_snap = (ui_snapshot_t *)std::malloc(sizeof(ui_snapshot_t));
+  }
+  std::memset(s_snap, 0, sizeof(*s_snap));
 
   lv_obj_t *scr = lv_screen_active();
   lv_obj_set_style_bg_color(scr, C_BG, 0);
@@ -1329,56 +1378,56 @@ void ui_show_screen(int index) {
 int ui_current_screen(void) { return s_screen; }
 
 void ui_update(const ui_snapshot_t *snapshot) {
-  if (snapshot == nullptr) return;
-  s_snap = *snapshot;
+  if (snapshot == nullptr || s_snap == nullptr) return;
+  *s_snap = *snapshot;
 
   if (s_selected_axis < 0) s_selected_axis = 0;
   if (s_selected_axis > 3) s_selected_axis = 3;
-  const int cap = (s_snap.capacity > 0) ? (int)s_snap.capacity : UI_MAX_POSITIONS;
+  const int cap = (s_snap->capacity > 0) ? (int)s_snap->capacity : UI_MAX_POSITIONS;
   if (s_assign_position < 0) s_assign_position = 0;
   if (s_assign_position >= cap) s_assign_position = cap - 1;
 
   /* Status strip link state. */
   lv_label_set_text_fmt(s_link_label, "%s  %s  boot %lu  uptime %lus",
-                        s_snap.can_running ? "CAN" : "CAN OFF",
-                        s_snap.can_mock ? "MOCK" : "HW",
-                        (unsigned long)s_snap.boot_count,
-                        (unsigned long)s_snap.uptime_s);
+                        s_snap->can_running ? "CAN" : "CAN OFF",
+                        s_snap->can_mock ? "MOCK" : "HW",
+                        (unsigned long)s_snap->boot_count,
+                        (unsigned long)s_snap->uptime_s);
 
   /* Show */
   lv_label_set_text(s_show_pattern,
-                    s_snap.pattern_name[0] ? s_snap.pattern_name : "NO PATTERN");
-  lv_label_set_text(s_show_state, s_snap.run_state);
+                    s_snap->pattern_name[0] ? s_snap->pattern_name : "NO PATTERN");
+  lv_label_set_text(s_show_state, s_snap->run_state);
   lv_label_set_text_fmt(s_show_elapsed, "%lu.%lus",
-                        (unsigned long)(s_snap.elapsed_ms / 1000),
-                        (unsigned long)((s_snap.elapsed_ms % 1000) / 100));
+                        (unsigned long)(s_snap->elapsed_ms / 1000),
+                        (unsigned long)((s_snap->elapsed_ms % 1000) / 100));
   lv_label_set_text(s_show_bus,
-                    s_snap.bus_ok ? (s_snap.can_mock ? "MOCK OK" : "1 Mbit/s OK")
+                    s_snap->bus_ok ? (s_snap->can_mock ? "MOCK OK" : "1 Mbit/s OK")
                                   : "FAULT / SILENT");
   lv_obj_set_style_text_color(s_show_bus,
-                              s_snap.bus_ok ? C_OK : C_ERR, 0);
+                              s_snap->bus_ok ? C_OK : C_ERR, 0);
   lv_label_set_text(s_show_hold,
-                    s_snap.safe_hold ? s_snap.hold_reason : "");
+                    s_snap->safe_hold ? s_snap->hold_reason : "");
   lv_label_set_text_fmt(s_show_discovered, "boards %lu",
-                        (unsigned long)s_snap.discovered_boards);
+                        (unsigned long)s_snap->discovered_boards);
   lv_label_set_text_fmt(s_show_assigned_boards, "assigned %lu",
-                        (unsigned long)s_snap.assigned_boards);
+                        (unsigned long)s_snap->assigned_boards);
   lv_label_set_text_fmt(s_show_online, "online %lu",
-                        (unsigned long)s_snap.online_boards);
+                        (unsigned long)s_snap->online_boards);
   lv_label_set_text_fmt(s_show_positions, "positions %lu / %lu",
-                        (unsigned long)s_snap.assigned_positions,
-                        (unsigned long)s_snap.capacity);
+                        (unsigned long)s_snap->assigned_positions,
+                        (unsigned long)s_snap->capacity);
   lv_label_set_text_fmt(s_show_unassigned,
                         "%lu steppers unassigned, %lu positions free",
-                        (unsigned long)s_snap.unassigned_steppers,
-                        (unsigned long)s_snap.unassigned_positions);
+                        (unsigned long)s_snap->unassigned_steppers,
+                        (unsigned long)s_snap->unassigned_positions);
 
   uint32_t ot_count = 0;
   uint32_t otpw_count = 0;
   int max_temp = -128;
   bool any_health = false;
-  for (int i = 0; i < s_snap.node_count; ++i) {
-    const ui_node_t *n = &s_snap.nodes[i];
+  for (int i = 0; i < s_snap->node_count; ++i) {
+    const ui_node_t *n = &s_snap->nodes[i];
     if (!n->health_seen || n->health_age_ms > 3000u) continue;
     any_health = true;
     if (n->mcu_temp_c > max_temp) max_temp = n->mcu_temp_c;
@@ -1407,19 +1456,19 @@ void ui_update(const ui_snapshot_t *snapshot) {
 
   lv_label_set_text_fmt(
       s_show_testrun, "test run: %s%s  |  rx %lu tx %lu err %lu",
-      s_snap.test_run_active ? "ACTIVE " : "idle",
-      s_snap.test_run_active ? "" : " ",
-      (unsigned long)s_snap.can_rx_frames, (unsigned long)s_snap.can_tx_frames,
-      (unsigned long)s_snap.can_errors);
+      s_snap->test_run_active ? "ACTIVE " : "idle",
+      s_snap->test_run_active ? "" : " ",
+      (unsigned long)s_snap->can_rx_frames, (unsigned long)s_snap->can_tx_frames,
+      (unsigned long)s_snap->can_errors);
   lv_obj_t *lbl = lv_obj_get_child(s_show_run_btn, 0);
-  lv_label_set_text(lbl, s_snap.test_run_active ? "TEST RUNNING" : "START TEST RUN");
+  lv_label_set_text(lbl, s_snap->test_run_active ? "TEST RUNNING" : "START TEST RUN");
   lv_obj_set_style_bg_color(s_show_run_btn,
-                            s_snap.test_run_active ? C_WARN : C_PANEL2, 0);
+                            s_snap->test_run_active ? C_WARN : C_PANEL2, 0);
 
   /* Animations */
   uint32_t anim_hash = 2166136261u;
-  for (int i = 0; i < s_snap.animation_count; ++i) {
-    const ui_animation_t *a = &s_snap.animations[i];
+  for (int i = 0; i < s_snap->animation_count; ++i) {
+    const ui_animation_t *a = &s_snap->animations[i];
     anim_hash = (anim_hash ^ (uint32_t)a->size_bytes) * 16777619u;
     anim_hash = (anim_hash ^ a->duration_ms) * 16777619u;
     anim_hash = (anim_hash ^ (a->valid ? 1u : 0u)) * 16777619u;
@@ -1427,28 +1476,28 @@ void ui_update(const ui_snapshot_t *snapshot) {
       anim_hash = (anim_hash ^ (uint8_t)*p) * 16777619u;
     }
   }
-  anim_hash = (anim_hash ^ (uint32_t)s_snap.selected_animation) * 16777619u;
+  anim_hash = (anim_hash ^ (uint32_t)s_snap->selected_animation) * 16777619u;
   if (anim_hash != s_anim_shown_hash) {
     s_anim_shown_hash = anim_hash;
     lv_obj_clean(s_anim_list);
-    if (s_snap.animation_count == 0) {
+    if (s_snap->animation_count == 0) {
       lv_obj_t *l = make_label(s_anim_list,
                                "No animations found. Insert an SD card with "
                                ".hbp files.",
                                &lv_font_montserrat_16, C_MUTED);
       lv_obj_set_style_pad_all(l, 12, 0);
     }
-    for (int i = 0; i < s_snap.animation_count; ++i) {
-      const ui_animation_t *a = &s_snap.animations[i];
+    for (int i = 0; i < s_snap->animation_count; ++i) {
+      const ui_animation_t *a = &s_snap->animations[i];
       lv_obj_t *row = lv_button_create(s_anim_list);
       lv_obj_set_size(row, 664, 48);
       lv_obj_set_style_radius(row, 6, 0);
       lv_obj_set_style_bg_color(
-          row, (i == s_snap.selected_animation) ? C_PANEL2 : C_PANEL, 0);
+          row, (i == s_snap->selected_animation) ? C_PANEL2 : C_PANEL, 0);
       lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
       lv_obj_set_style_border_width(row, 1, 0);
       lv_obj_set_style_border_color(
-          row, (i == s_snap.selected_animation) ? C_ACCENT : C_LINE, 0);
+          row, (i == s_snap->selected_animation) ? C_ACCENT : C_LINE, 0);
       lv_obj_set_style_shadow_width(row, 0, 0);
       lv_obj_set_style_pad_left(row, 10, 0);
       lv_obj_set_style_pad_right(row, 10, 0);
@@ -1479,28 +1528,28 @@ void ui_update(const ui_snapshot_t *snapshot) {
     }
   }
   lv_label_set_text_fmt(s_anim_summary, "%d files  %s",
-                        s_snap.animation_count, s_snap.animation_source);
+                        s_snap->animation_count, s_snap->animation_source);
   lv_label_set_text(s_anim_status,
-                    s_snap.animation_status[0] ? s_snap.animation_status
+                    s_snap->animation_status[0] ? s_snap->animation_status
                                                : "idle");
   lv_obj_set_style_text_color(s_anim_status,
-                              s_snap.animation_loading ? C_WARN : C_MUTED, 0);
+                              s_snap->animation_loading ? C_WARN : C_MUTED, 0);
 
   /* Grid */
-  rebuild_grid(s_snap.grid_cols, s_snap.grid_rows);
+  rebuild_grid(s_snap->grid_cols, s_snap->grid_rows);
   lv_label_set_text_fmt(s_grid_summary, "%d x %d, %lu assigned, %lu free",
-                        s_snap.grid_cols, s_snap.grid_rows,
-                        (unsigned long)s_snap.assigned_positions,
-                        (unsigned long)s_snap.unassigned_positions);
-  const int grid_cap = s_snap.grid_cols * s_snap.grid_rows;
+                        s_snap->grid_cols, s_snap->grid_rows,
+                        (unsigned long)s_snap->assigned_positions,
+                        (unsigned long)s_snap->unassigned_positions);
+  const int grid_cap = s_snap->grid_cols * s_snap->grid_rows;
   for (int i = 0; i < grid_cap && i < UI_MAX_POSITIONS; ++i) {
     lv_obj_t *cell = s_grid_cells[i];
     if (cell == nullptr) continue;
-    const ui_cell_t *c = &s_snap.cells[i];
+    const ui_cell_t *c = &s_snap->cells[i];
     lv_color_t bg = c->assigned ? C_OK : C_OFF;
     const ui_node_t *n = nullptr;
-    if (c->node_index >= 0 && c->node_index < s_snap.node_count) {
-      n = &s_snap.nodes[c->node_index];
+    if (c->node_index >= 0 && c->node_index < s_snap->node_count) {
+      n = &s_snap->nodes[c->node_index];
     }
     const bool has_fault =
         n != nullptr && n->status_seen && n->fault_flags != 0;
@@ -1524,8 +1573,8 @@ void ui_update(const ui_snapshot_t *snapshot) {
 
   /* Nodes list: rebuild only when the visible data or selection changes. */
   uint32_t hash = 2166136261u;
-  for (int i = 0; i < s_snap.node_count; ++i) {
-    const ui_node_t *n = &s_snap.nodes[i];
+  for (int i = 0; i < s_snap->node_count; ++i) {
+    const ui_node_t *n = &s_snap->nodes[i];
     hash = (hash ^ n->board_id) * 16777619u;
     hash = (hash ^ n->state) * 16777619u;
     hash = (hash ^ n->fault_flags) * 16777619u;
@@ -1539,26 +1588,26 @@ void ui_update(const ui_snapshot_t *snapshot) {
     hash = (hash ^ n->diag_mask) * 16777619u;
     hash = (hash ^ n->health_valid) * 16777619u;
   }
-  hash = (hash ^ (uint32_t)s_snap.selected_node) * 16777619u;
+  hash = (hash ^ (uint32_t)s_snap->selected_node) * 16777619u;
   if (hash != s_nodes_shown_hash) {
     s_nodes_shown_hash = hash;
     lv_obj_clean(s_nodes_list);
-    if (s_snap.node_count == 0) {
+    if (s_snap->node_count == 0) {
       lv_obj_t *l = make_label(s_nodes_list, "No boards discovered yet.",
                                &lv_font_montserrat_16, C_MUTED);
       lv_obj_set_style_pad_all(l, 12, 0);
     }
-    for (int i = 0; i < s_snap.node_count; ++i) {
-      const ui_node_t *n = &s_snap.nodes[i];
+    for (int i = 0; i < s_snap->node_count; ++i) {
+      const ui_node_t *n = &s_snap->nodes[i];
       lv_obj_t *row = lv_button_create(s_nodes_list);
       lv_obj_set_size(row, 664, 48);
       lv_obj_set_style_radius(row, 6, 0);
       lv_obj_set_style_bg_color(
-          row, (i == s_snap.selected_node) ? C_PANEL2 : C_PANEL, 0);
+          row, (i == s_snap->selected_node) ? C_PANEL2 : C_PANEL, 0);
       lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
       lv_obj_set_style_border_width(row, 1, 0);
       lv_obj_set_style_border_color(
-          row, (i == s_snap.selected_node) ? C_ACCENT : C_LINE, 0);
+          row, (i == s_snap->selected_node) ? C_ACCENT : C_LINE, 0);
       lv_obj_set_style_shadow_width(row, 0, 0);
       lv_obj_set_style_pad_left(row, 10, 0);
       lv_obj_set_style_pad_right(row, 10, 0);
@@ -1612,21 +1661,21 @@ void ui_update(const ui_snapshot_t *snapshot) {
     }
   }
   lv_label_set_text_fmt(s_nodes_summary, "%lu discovered, %lu online, %lu assigned",
-                        (unsigned long)s_snap.discovered_boards,
-                        (unsigned long)s_snap.online_boards,
-                        (unsigned long)s_snap.assigned_boards);
+                        (unsigned long)s_snap->discovered_boards,
+                        (unsigned long)s_snap->online_boards,
+                        (unsigned long)s_snap->assigned_boards);
 
   /* Motor */
   const ui_node_t *sel = nullptr;
-  if (s_snap.selected_node >= 0 && s_snap.selected_node < s_snap.node_count) {
-    sel = &s_snap.nodes[s_snap.selected_node];
+  if (s_snap->selected_node >= 0 && s_snap->selected_node < s_snap->node_count) {
+    sel = &s_snap->nodes[s_snap->selected_node];
   }
   if (sel != nullptr) {
     char flash[24];
     std::snprintf(flash, sizeof(flash), "%02x%02x%02x%02x%02x%02x",
                   sel->uuid[0], sel->uuid[1], sel->uuid[2],
                   sel->uuid[3], sel->uuid[4], sel->uuid[5]);
-    lv_label_set_text_fmt(s_motor_node, "#%d  %s", s_snap.selected_node,
+    lv_label_set_text_fmt(s_motor_node, "#%d  %s", s_snap->selected_node,
                           sel->online ? "online" : "offline");
     lv_label_set_text(s_motor_flash, flash);
     if (sel->board_id >= 0) {
@@ -1674,12 +1723,12 @@ void ui_update(const ui_snapshot_t *snapshot) {
     lv_label_set_text(s_motor_board, "");
     lv_label_set_text(s_motor_result, "Discover boards on the Nodes screen first.");
   }
-  rebuild_motor_grid(s_snap.grid_cols, s_snap.grid_rows);
+  rebuild_motor_grid(s_snap->grid_cols, s_snap->grid_rows);
   bool axis_assigned[4] = {false, false, false, false};
-  const int motor_cap = s_snap.grid_cols * s_snap.grid_rows;
+  const int motor_cap = s_snap->grid_cols * s_snap->grid_rows;
   for (int i = 0; i < motor_cap && i < UI_MAX_POSITIONS; ++i) {
-    const ui_cell_t *c = &s_snap.cells[i];
-    if (c->assigned && c->node_index == s_snap.selected_node && c->axis < 4) {
+    const ui_cell_t *c = &s_snap->cells[i];
+    if (c->assigned && c->node_index == s_snap->selected_node && c->axis < 4) {
       axis_assigned[c->axis] = true;
     }
   }
@@ -1700,7 +1749,7 @@ void ui_update(const ui_snapshot_t *snapshot) {
   for (int i = 0; i < motor_cap && i < UI_MAX_POSITIONS; ++i) {
     lv_obj_t *cell = s_motor_cells[i];
     if (cell == nullptr) continue;
-    const ui_cell_t *c = &s_snap.cells[i];
+    const ui_cell_t *c = &s_snap->cells[i];
     lv_obj_set_style_bg_color(cell, c->assigned ? C_OK : C_OFF, 0);
     lv_obj_set_style_border_width(cell, (i == s_assign_position) ? 2 : 1, 0);
     lv_obj_set_style_border_color(
@@ -1713,24 +1762,24 @@ void ui_update(const ui_snapshot_t *snapshot) {
   lv_label_set_text_fmt(s_motor_assign_pos, "%d", s_assign_position);
 
   /* Config */
-  lv_label_set_text_fmt(s_cfg_grid, "%d x %d", s_snap.grid_cols, s_snap.grid_rows);
-  lv_label_set_text_fmt(s_cfg_drop, "%u", (unsigned)s_snap.test_drop_mm);
-  lv_label_set_text_fmt(s_cfg_speed, "%u", (unsigned)s_snap.test_speed_mm_s);
-  lv_label_set_text_fmt(s_cfg_delay, "%u", (unsigned)s_snap.test_step_delay_ms);
+  lv_label_set_text_fmt(s_cfg_grid, "%d x %d", s_snap->grid_cols, s_snap->grid_rows);
+  lv_label_set_text_fmt(s_cfg_drop, "%u", (unsigned)s_snap->test_drop_mm);
+  lv_label_set_text_fmt(s_cfg_speed, "%u", (unsigned)s_snap->test_speed_mm_s);
+  lv_label_set_text_fmt(s_cfg_delay, "%u", (unsigned)s_snap->test_step_delay_ms);
   lv_obj_t *serp_lbl = lv_obj_get_child(s_cfg_serp, 0);
-  lv_label_set_text(serp_lbl, s_snap.test_serpentine ? "SERP ON" : "SERP OFF");
+  lv_label_set_text(serp_lbl, s_snap->test_serpentine ? "SERP ON" : "SERP OFF");
   lv_obj_set_style_bg_color(s_cfg_serp,
-                            s_snap.test_serpentine ? C_OK : C_PANEL2, 0);
+                            s_snap->test_serpentine ? C_OK : C_PANEL2, 0);
   lv_label_set_text(s_cfg_status,
-                    s_snap.config_dirty ? "UNSAVED CHANGES" : "saved");
+                    s_snap->config_dirty ? "UNSAVED CHANGES" : "saved");
   lv_obj_set_style_text_color(s_cfg_status,
-                              s_snap.config_dirty ? C_WARN : C_OK, 0);
+                              s_snap->config_dirty ? C_WARN : C_OK, 0);
 
   /* CAN scope */
-  if (!s_snap.can_running) {
+  if (!s_snap->can_running) {
     lv_label_set_text(s_can_bus, "STOPPED");
     lv_obj_set_style_text_color(s_can_bus, C_MUTED, 0);
-  } else if (s_snap.can_bus_off) {
+  } else if (s_snap->can_bus_off) {
     lv_label_set_text(s_can_bus, "BUS OFF");
     lv_obj_set_style_text_color(s_can_bus, C_ERR, 0);
   } else {
@@ -1739,14 +1788,14 @@ void ui_update(const ui_snapshot_t *snapshot) {
   }
   lv_label_set_text_fmt(s_can_summary,
                         "rx %lu/s  %lu ids  tx %lu sent  %lu rej  %lu drop",
-                        (unsigned long)s_snap.can_rate_1s,
-                        (unsigned long)s_snap.can_unique_ids,
-                        (unsigned long)s_snap.can_tx_frames,
-                        (unsigned long)s_snap.can_tx_failed,
-                        (unsigned long)s_snap.can_rx_dropped);
+                        (unsigned long)s_snap->can_rate_1s,
+                        (unsigned long)s_snap->can_unique_ids,
+                        (unsigned long)s_snap->can_tx_frames,
+                        (unsigned long)s_snap->can_tx_failed,
+                        (unsigned long)s_snap->can_rx_dropped);
   uint32_t can_hash = 2166136261u;
-  for (int i = 0; i < s_snap.can_entry_count; ++i) {
-    const ui_can_entry_t *e = &s_snap.can_entries[i];
+  for (int i = 0; i < s_snap->can_entry_count; ++i) {
+    const ui_can_entry_t *e = &s_snap->can_entries[i];
     can_hash = (can_hash ^ e->identifier) * 16777619u;
     can_hash = (can_hash ^ e->frame_count) * 16777619u;
     can_hash = (can_hash ^ e->interval_ms) * 16777619u;
@@ -1754,8 +1803,8 @@ void ui_update(const ui_snapshot_t *snapshot) {
       can_hash = (can_hash ^ e->data[b]) * 16777619u;
     }
   }
-  can_hash = (can_hash ^ s_snap.can_rate_1s) * 16777619u;
-  can_hash = (can_hash ^ s_snap.can_dropped) * 16777619u;
+  can_hash = (can_hash ^ s_snap->can_rate_1s) * 16777619u;
+  can_hash = (can_hash ^ s_snap->can_dropped) * 16777619u;
   if (s_screen == UI_SCREEN_CAN && can_hash != s_can_shown_hash) {
     const uint32_t can_now = lv_tick_get();
     if (s_can_last_ms == 0 || (uint32_t)(can_now - s_can_last_ms) >= 1000u) {
@@ -1769,13 +1818,13 @@ void ui_update(const ui_snapshot_t *snapshot) {
   int versioned = 0;
   int done = 0;
   uint32_t up_hash = 2166136261u;
-  up_hash = (up_hash ^ s_snap.upgrade_image_build) * 16777619u;
-  up_hash = (up_hash ^ (uint32_t)s_snap.upgrade_done) * 16777619u;
-  up_hash = (up_hash ^ (uint32_t)s_snap.upgrade_yellow_board) * 16777619u;
-  for (const char *p = s_snap.upgrade_image_version; *p != '\0'; ++p)
+  up_hash = (up_hash ^ s_snap->upgrade_image_build) * 16777619u;
+  up_hash = (up_hash ^ (uint32_t)s_snap->upgrade_done) * 16777619u;
+  up_hash = (up_hash ^ (uint32_t)s_snap->upgrade_yellow_board) * 16777619u;
+  for (const char *p = s_snap->upgrade_image_version; *p != '\0'; ++p)
     up_hash = (up_hash ^ (uint8_t)*p) * 16777619u;
-  for (int i = 0; i < s_snap.node_count; ++i) {
-    const ui_node_t *n = &s_snap.nodes[i];
+  for (int i = 0; i < s_snap->node_count; ++i) {
+    const ui_node_t *n = &s_snap->nodes[i];
     if (n->version_seen) versioned++;
     if (n->upgrade_state == UI_UPG_DONE) done++;
     up_hash = (up_hash ^ n->board_id) * 16777619u;
@@ -1790,7 +1839,7 @@ void ui_update(const ui_snapshot_t *snapshot) {
     const int tw = 104, th = 54, gap = 10;
     for (int slot = 0; slot < 30; ++slot) {
       const ui_node_t *n =
-          (slot < s_snap.node_count) ? &s_snap.nodes[slot] : nullptr;
+          (slot < s_snap->node_count) ? &s_snap->nodes[slot] : nullptr;
       const int col = slot % cols;
       const int row = slot / cols;
       lv_obj_t *tile = lv_obj_create(s_upgrade_tiles);
@@ -1858,57 +1907,79 @@ void ui_update(const ui_snapshot_t *snapshot) {
     }
   }
   char head[128];
-  if (s_snap.upgrade_image_build != 0) {
+  if (s_snap->upgrade_image_build != 0) {
     std::snprintf(head, sizeof(head), "fly_micro4 %s  build %lu  %s  %d/30  %s",
-                  s_snap.upgrade_image_version[0]
-                      ? s_snap.upgrade_image_version
+                  s_snap->upgrade_image_version[0]
+                      ? s_snap->upgrade_image_version
                       : "--",
-                  (unsigned long)s_snap.upgrade_image_build,
-                  s_snap.upgrade_source[0] ? s_snap.upgrade_source : "SD",
-                  s_snap.upgrade_done, s_snap.upgrade_status);
+                  (unsigned long)s_snap->upgrade_image_build,
+                  s_snap->upgrade_source[0] ? s_snap->upgrade_source : "SD",
+                  s_snap->upgrade_done, s_snap->upgrade_status);
   } else {
     std::snprintf(head, sizeof(head),
                   "no image selected   %d/30   %s",
-                  s_snap.upgrade_done,
-                  s_snap.upgrade_status[0] ? s_snap.upgrade_status : "idle");
+                  s_snap->upgrade_done,
+                  s_snap->upgrade_status[0] ? s_snap->upgrade_status : "idle");
   }
   lv_label_set_text(s_upgrade_summary, head);
   lv_label_set_text(s_upgrade_status,
-                    s_snap.upgrade_status[0] ? s_snap.upgrade_status : "idle");
+                    s_snap->upgrade_status[0] ? s_snap->upgrade_status : "idle");
   lv_obj_set_style_text_color(s_upgrade_status,
-                              s_snap.upgrade_active ? C_WARN : C_MUTED, 0);
-  lv_bar_set_value(s_upgrade_progress, s_snap.upgrade_progress, LV_ANIM_OFF);
+                              s_snap->upgrade_active ? C_WARN : C_MUTED, 0);
+  lv_bar_set_value(s_upgrade_progress, s_snap->upgrade_progress, LV_ANIM_OFF);
 
   /* Settings */
-  if (s_snap.wifi_present) {
-    lv_label_set_text(s_set_wifi,
-                      s_snap.wifi_connected ? "connected" : "offline");
-    lv_obj_set_style_text_color(s_set_wifi,
-                                s_snap.wifi_connected ? C_OK : C_WARN, 0);
+  if (s_snap->wifi_present) {
+    const char *state = s_snap->wifi_state[0] ? s_snap->wifi_state : "OFF";
+    lv_label_set_text(s_set_wifi, state);
+    lv_color_t state_color = C_MUTED;
+    if (std::strcmp(state, "CONNECTED") == 0) state_color = C_OK;
+    else if (std::strcmp(state, "FAILED") == 0) state_color = C_ERR;
+    else if (std::strcmp(state, "OFF") != 0) state_color = C_WARN;
+    lv_obj_set_style_text_color(s_set_wifi, state_color, 0);
     lv_label_set_text(s_set_ssid,
-                      s_snap.wifi_ssid[0] ? s_snap.wifi_ssid : "--");
-    lv_label_set_text(s_set_ip, s_snap.wifi_ip[0] ? s_snap.wifi_ip : "--");
-    lv_label_set_text_fmt(s_set_rssi, "%d dBm", (int)s_snap.wifi_rssi);
+                      s_snap->wifi_ssid[0] ? s_snap->wifi_ssid : "--");
+    lv_label_set_text(s_set_ip, s_snap->wifi_ip[0] ? s_snap->wifi_ip : "--");
+    if (s_snap->wifi_connected)
+      lv_label_set_text_fmt(s_set_rssi, "%d dBm", (int)s_snap->wifi_rssi);
+    else
+      lv_label_set_text(s_set_rssi, "--");
+    lv_label_set_text(s_set_ap,
+                      s_snap->wifi_ap_ssid[0] ? s_snap->wifi_ap_ssid : "--");
+    lv_label_set_text(s_set_key,
+                      s_snap->wifi_ap_password[0] ? s_snap->wifi_ap_password
+                                                 : "--");
+    lv_obj_t *server_label = lv_obj_get_child(s_set_server, 0);
+    if (server_label != nullptr)
+      lv_label_set_text(server_label,
+                        s_snap->service_on ? "SERVER OFF" : "SERVER ON");
+    if (s_snap->wifi_reason[0] != '\0')
+      lv_label_set_text(s_set_service, s_snap->wifi_reason);
+    else
+      lv_label_set_text(s_set_service,
+                        "Panel image: /firmware/panel on SD.");
   } else {
     lv_label_set_text(s_set_wifi, "not compiled");
     lv_obj_set_style_text_color(s_set_wifi, C_MUTED, 0);
     lv_label_set_text(s_set_ssid, "--");
     lv_label_set_text(s_set_ip, "--");
     lv_label_set_text(s_set_rssi, "--");
+    lv_label_set_text(s_set_ap, "--");
+    lv_label_set_text(s_set_key, "--");
   }
   lv_label_set_text_fmt(s_set_can, "%s %s",
-                        s_snap.can_running ? "running" : "stopped",
-                        s_snap.can_mock ? "MOCK" : "HW");
-  lv_label_set_text(s_set_firmware, s_snap.firmware_version);
-  lv_label_set_text_fmt(s_set_boot, "%lu", (unsigned long)s_snap.boot_count);
-  lv_label_set_text_fmt(s_set_uptime, "%lu s", (unsigned long)s_snap.uptime_s);
+                        s_snap->can_running ? "running" : "stopped",
+                        s_snap->can_mock ? "MOCK" : "HW");
+  lv_label_set_text(s_set_firmware, s_snap->firmware_version);
+  lv_label_set_text_fmt(s_set_boot, "%lu", (unsigned long)s_snap->boot_count);
+  lv_label_set_text_fmt(s_set_uptime, "%lu s", (unsigned long)s_snap->uptime_s);
   lv_label_set_text_fmt(s_set_capacity, "%lu positions",
-                        (unsigned long)s_snap.capacity);
-  lv_label_set_text_fmt(s_set_watch, "%u", (unsigned)s_snap.last_watchpoint);
+                        (unsigned long)s_snap->capacity);
+  lv_label_set_text_fmt(s_set_watch, "%u", (unsigned)s_snap->last_watchpoint);
 
   /* Log */
   uint32_t log_hash = 2166136261u;
-  for (const char *p = s_snap.log_text; *p != '\0'; ++p) {
+  for (const char *p = s_snap->log_text; *p != '\0'; ++p) {
     log_hash = (log_hash ^ (uint8_t)*p) * 16777619u;
   }
   const uint32_t now = lv_tick_get();
@@ -1916,10 +1987,10 @@ void ui_update(const ui_snapshot_t *snapshot) {
       (s_log_last_ms == 0 || (uint32_t)(now - s_log_last_ms) >= 500u)) {
     s_log_hash = log_hash;
     s_log_last_ms = now;
-    lv_textarea_set_text(s_log_text, s_snap.log_text);
+    lv_textarea_set_text(s_log_text, s_snap->log_text);
   }
   lv_label_set_text_fmt(s_log_status, "boot #%lu  last watchpoint %u  %s",
-                        (unsigned long)s_snap.boot_count,
-                        (unsigned)s_snap.last_watchpoint,
-                        s_snap.firmware_version);
+                        (unsigned long)s_snap->boot_count,
+                        (unsigned)s_snap->last_watchpoint,
+                        s_snap->firmware_version);
 }

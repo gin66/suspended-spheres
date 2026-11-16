@@ -35,6 +35,13 @@ const ss_fw_image_t *firmware_image_fly(void);
 const rc_manifest_t *firmware_image_panel(void);
 const char *firmware_image_panel_path(void);
 
+/* Store a Fly bundle in /firmware/fly, then reload the selection.  The
+ * manifest filename is the .bin name with .json. */
+bool firmware_image_store_fly(const rc_manifest_t *m, const uint8_t *data,
+                              size_t len, char *status, unsigned status_len);
+
+void firmware_image_reload(void);
+
 #ifdef __cplusplus
 }
 #endif

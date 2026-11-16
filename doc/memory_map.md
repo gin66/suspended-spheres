@@ -75,9 +75,9 @@ The largest internal-RAM objects in this build:
 | Object | Bytes | Owner |
 |--------|-------|-------|
 | `s_draw_buf` | 32 000 | LVGL partial RGB565 draw buffer, 20 lines |
-| Upgrade worker stack | 32 768 | static 8 192-word stack, created on UPGRADE |
+| Upgrade worker stack | 16 384 | static 4 096-word stack, created on UPGRADE |
 | `s_can_buf` | 24 576 | CAN scope text snapshot, 256 × 96 B |
-| `s_snapshot` | 18 952 | UI snapshot, including 256 CAN rows and node health |
+| UI snapshot | 18 952 | PSRAM (`s_snapshot`) and LVGL copy (`s_snap`) |
 | CAN monitor table | 14 336 | 256 × 56 B identifier rows |
 | CAN snapshot scratch | 14 336 | 256 × 56 B copy before the UI snapshot |
 | Commission node registry | 2 640 | 30 nodes, including health |
@@ -104,6 +104,9 @@ The module is `ESP32-S3-WROOM-1-N16R8`. `CONFIG_SPIRAM_USE_MALLOC=y` and
 | User | Bytes | Note |
 |------|-------|------|
 | RGB panel framebuffer | 768 000 | `800 × 480 × 2 B`, allocated by `esp_lcd` in PSRAM |
+| LVGL object pool | — | `lv_mem_custom.cpp`; fallback to internal on failure |
+| UI snapshot | 18 952 | `s_snapshot` and `s_snap` |
+| CAN scope scratch | 14 336 | `s_can_scratch` copy before the UI snapshot |
 | SD Fly scan / selected image | ≤ 100 000 | one verified Fly app, PSRAM; freed when replaced |
 | SD panel image | ≤ 786 432 | read for the OTA write, PSRAM; freed after `esp_ota_end` |
 | Application log ring | 262 144 | 256 KiB, `APP_LOG_DEFAULT_BYTES` |

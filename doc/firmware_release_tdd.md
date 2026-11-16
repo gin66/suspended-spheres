@@ -462,3 +462,33 @@ On clean commit `bc954a62`, build id `1794858657`:
   manifests and `release.json` to `/tmp/ss-dist`. The filenames carry the
   tagged commit's UTC and `git8`.
 - No tag was pushed and no GitHub Release was created from the workstation.
+
+### R9 firmware on the bench (2026-11-16)
+
+- `esp32gui/src/net_manager.cpp` owns WiFi in a separate core-0 task.  It
+  loads credentials and the admin salt/hash from NVS, raises the setup AP,
+  scans, connects, starts SNTP and runs the HTTP server in that task.
+- Settings gained SETUP, SCAN, FORGET and SERVER controls plus the AP
+  SSID/key rows.  The `wifi` console command mirrors the same actions for
+  the bench.
+- HTTP endpoints: `GET /`, `GET /api/status`, `POST /api/scan`,
+  `/api/wifi`, `/api/service`, `/api/upgrade/all`,
+  `/api/update/panel` and `/api/images/fly`.  Uploads are multipart
+  `json` + `bin`; admin Basic auth and a per-session CSRF token gate the
+  write paths.  Panel uploads call `panel_ota_apply`; Fly uploads call
+  `firmware_image_store_fly`.
+- Bench result: no credentials -> `OFF`; SETUP raised
+  `SuspendedSpheres-5A30` at `192.168.4.1`, service on, and a station scan
+  found 9 nearby networks.  The Mac in this session did not list the soft AP
+  in its scan, so association and the HTTP body were not exercised from a
+  second client.  That is an environment/hardware check, not a host test.
+- The HTTP server was exercised over loopback (`webget /api/status` and
+  `webget /`): `200 OK`, the status JSON and the 676-byte setup page with its
+  CSRF token.  Every upload re-checks SHA-256 before `panel_ota_apply` or
+  `firmware_image_store_fly`.
+- The panel-side SSID list and password keyboard are still pending; the web
+  setup page accepts the SSID and password.  R10 (GitHub pull) is still
+  planned.
+- LVGL object memory now uses PSRAM via `lv_mem_custom.cpp`; the internal
+  heap after setting up the AP was about 120 KiB, versus 2 KiB before that
+  change.

@@ -187,6 +187,11 @@ typedef struct {
   char wifi_ssid[33];
   char wifi_ip[16];
   int16_t wifi_rssi;
+  char wifi_state[16];
+  char wifi_reason[64];
+  char wifi_ap_ssid[32];
+  char wifi_ap_password[16];
+  bool service_on;
 
   /* Diagnostics */
   uint32_t boot_count;
@@ -220,6 +225,10 @@ typedef struct {
   void (*upgrade_all_outdated)(void);
   void (*upgrade_stop)(void);
   void (*panel_update)(void);
+  void (*wifi_setup)(void);
+  void (*wifi_forget)(void);
+  void (*wifi_scan)(void);
+  void (*service_toggle)(void);
   void (*mock_inject)(void);  /* host harness only; may be NULL */
 } ui_actions_t;
 
