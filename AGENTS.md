@@ -95,13 +95,20 @@ All technical Markdown belongs in `doc/`. Only `README.md` and `AGENTS.md` sit a
   the old first word at `0x10004000` if no valid app is present, otherwise
   Katapult jumps into the stale image and does not stay on CAN.
 - **Show-controller firmware (PlatformIO).** `esp32gui/` is the Waveshare 7"
-  panel. It builds with the mock CAN transport because the bus is not wired:
+  panel. `esp32usb` is the bench build, `esp32can` is the release build, and
+  `esp32can_bench` adds the serial loader and an embedded Fly image for the
+  bench:
   ```sh
-  cd esp32gui && pio run -e esp32usb
+  pio run -d esp32gui -e esp32usb
+  SS_FW_VERSION=1.4.2 SS_BUILD_ID=1794848904 SS_BENCH_CONSOLE=1 \
+    SS_FLY_IMAGE="$PWD/rp2040/.pio/build/fly_micro4_katapult/firmware.bin" \
+    pio run -d esp32gui -e esp32can_bench -t upload \
+    --upload-port /dev/cu.usbmodem5C930885641
   ```
-  Remove `-D SS_CAN_MOCK=1` from `platformio.ini` only when the TJA1051 and
-  the 1 Mbit/s bus are connected. Never upload or flash without an explicit
-  request.
+  `esp32can` never defines `SS_CAN_MOCK` or `SS_BENCH_CONSOLE`; its image has
+  no serial loader and no embedded Fly image. `release_gate.h` rejects a
+  build that sets both `SS_RELEASE` and `SS_CAN_MOCK`. Never upload or flash
+  without an explicit request.
 - **Screen preview (CMake, no hardware).** The host harness builds the same
   `ui/ui.cpp` and writes one PNG per screen:
   ```sh

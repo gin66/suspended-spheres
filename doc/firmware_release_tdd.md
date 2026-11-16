@@ -410,3 +410,23 @@ node traffic stopped), then the panel wrote 1470 blocks with `SEND_BLOCK`,
 read them back, sent `COMPLETE`, and the restarted app answered
 `VERSION_RSP` with `1.4.2` build `1794848847`. A second CAN pass restored the
 app after the action-4 entry.
+
+### Queue integration and env gate (2026-11-16)
+
+- `esp32gui/src/upgrade_manager.cpp` builds the set with `fl_build_set`,
+  starts from `UPGRADE ALL OUTDATED` or `UPGRADE SELECTED`, and drives
+  `katapult_flash_ex` one board at a time. The worker owns only the Katapult
+  byte stream; the main loop waits for `ASSIGN`, sends `VERSION_REQ`, checks
+  the build and writes the green/failed tile.
+- Bench run: board 0 went from build `1794848903` to `1794848904` through
+  the queue. The tile reached `done`, `UPGRADE` reported `complete: 1/1`, and
+  the config record held `build 1794848904 / done`.
+- The post-upgrade result is held in RAM and marks `config_dirty`; the
+  operator's Save persists it. Calling `SPIFFS.open` from the upgrade path
+  after LVGL can abort on a fragmented internal heap, so the queue does not
+  force a save at completion. This is a follow-up, not a release gate.
+- Bench console and embedded image are gated by `SS_BENCH_CONSOLE` and
+  `SS_FLY_IMAGE`. `esp32can` (release) contains neither; `esp32can_bench`
+  contains both. The host text check in W1–W5 still applies.
+- The Katapult byte pair is locked by a host assertion: node byte 116 gives
+  `0x1E8/0x1E9` (`mc_katapult_data_id`).

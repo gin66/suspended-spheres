@@ -129,6 +129,13 @@ static int test_r3_c3_katapult_request(void) {
     ASSERT(MC_CANBOOT_SIG_OFFSET == 9u);
     ASSERT(mc_katapult_signature_address(0x10000169u) == 0x10000160u);
     ASSERT((mc_katapult_signature_address(0x10000169u) & 7u) == 0);
+    /* The 8-bit node byte 116 produces the real Katapult data pair.  The
+     * old 0x3E8/0x3E9 pair (node 372) is not encodable. */
+    ASSERT(MC_KATAPULT_NODE_BYTE == 116u);
+    ASSERT(mc_katapult_data_id(MC_KATAPULT_NODE_BYTE) == 0x1E8u);
+    ASSERT(mc_katapult_data_id(MC_KATAPULT_NODE_BYTE) + 1u == 0x1E9u);
+    ASSERT(mc_id_make(30, 8) == -1);
+    ASSERT(mc_id_make(30, 9) == -1);
     return 0;
 }
 

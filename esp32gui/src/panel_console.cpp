@@ -12,6 +12,9 @@
 #include "fly_image.h"
 #include "katapult_client.h"
 #include "motion_core.h"
+#include "upgrade_manager.h"
+
+#ifdef SS_BENCH_CONSOLE
 
 namespace {
 
@@ -51,6 +54,8 @@ void print_help(void) {
   Serial.println("  query                       VERSION_REQ to every board");
   Serial.println("  jump <board>                COMMAND action 4 only");
   Serial.println("  flash <board> <uuidhex>     Katapult the embedded Fly image");
+  Serial.println("  upgrade all|sel             Run the fleet queue from the embedded image");
+  Serial.println("  upstatus                    Queue state and last result");
   Serial.println("  image                       embedded Fly image size");
   Serial.println("  can                         USB_SEL/CAN state and counters");
   Serial.println("  canon                       force USB_SEL to CAN and print state");
@@ -105,6 +110,10 @@ bool send_enter(int board) {
 }
 
 void command_flash(char *args) {
+  if (upgrade_manager_active()) {
+    Serial.println("upgrade queue is running; wait or stop it");
+    return;
+  }
   char *board_s = strtok(args, " ");
   char *uuid_s = strtok(nullptr, " ");
   if (board_s == nullptr) {
@@ -178,6 +187,22 @@ void execute(char *line) {
   } else if (strcmp(cmd, "canstop") == 0) {
     can_transport_stop();
     Serial.println("CAN stopped");
+  } else if (strcmp(cmd, "upgrade") == 0) {
+    char *args = strtok(nullptr, " ");
+    if (args != nullptr && strcmp(args, "all") == 0) {
+      Serial.println(upgrade_manager_start_all() ? "upgrade started"
+                                                 : "upgrade refused");
+    } else if (args != nullptr && (strcmp(args, "sel") == 0 ||
+                                   strcmp(args, "selected") == 0)) {
+      Serial.println(upgrade_manager_start_selected() ? "upgrade started"
+                                                      : "upgrade refused");
+    } else {
+      Serial.println("usage: upgrade all|sel");
+    }
+  } else if (strcmp(cmd, "upstatus") == 0) {
+    char text[96];
+    upgrade_manager_status(text, sizeof(text));
+    Serial.println(text);
   } else if (strcmp(cmd, "image") == 0) {
     Serial.printf("embedded fly image: %u bytes\n", ss_fly_image_size());
   } else if (strcmp(cmd, "flash") == 0) {
@@ -214,3 +239,10 @@ extern "C" void panel_console_poll(void) {
     if (s_len + 1 < sizeof(s_line)) s_line[s_len++] = (char)c;
   }
 }
+
+#else
+
+extern "C" void panel_console_begin(void) {}
+extern "C" void panel_console_poll(void) {}
+
+#endif /* SS_BENCH_CONSOLE */

@@ -27,6 +27,7 @@
 #include "katapult_client.h"
 #include "panel_console.h"
 #include "ui.h"
+#include "upgrade_manager.h"
 
 #ifndef SS_FW_VERSION
 #define SS_FW_VERSION "dev"
@@ -46,9 +47,6 @@ ui_snapshot_t s_snapshot;
 lv_display_t *s_display = nullptr;
 SemaphoreHandle_t s_lvgl_mux = nullptr;
 uint32_t s_test_run_started_ms = 0;
-bool s_upgrade_active = false;
-uint8_t s_upgrade_progress = 0;
-char s_upgrade_status[64] = "idle";
 int s_selected_animation = 0;
 bool s_animation_loading = false;
 char s_animation_status[64] = "SD file listing is not implemented";
@@ -199,44 +197,24 @@ void action_animation_load(void) {
 
 void action_version_query_all(void) {
   if (commission_query_versions()) {
-    std::snprintf(s_upgrade_status, sizeof(s_upgrade_status),
-                  "version query sent, waiting for responses");
+    SS_LOGI("upgrade", "VERSION query sent");
   } else {
-    std::snprintf(s_upgrade_status, sizeof(s_upgrade_status),
-                  "CAN is not running");
+    SS_LOGW("upgrade", "VERSION query refused: CAN is not running");
   }
+  upgrade_manager_refresh();
 }
 
 void action_upgrade_selected(void) {
-  ss_node_t node;
-  if (selected_node(&node) == nullptr || node.board_id < 0) {
-    std::snprintf(s_upgrade_status, sizeof(s_upgrade_status),
-                  "select an assigned board first");
-    return;
-  }
-  if (!node.version_seen) {
-    std::snprintf(s_upgrade_status, sizeof(s_upgrade_status),
-                  "no version reported by board %d", node.board_id);
-    return;
-  }
-  std::snprintf(s_upgrade_status, sizeof(s_upgrade_status),
-                "board %d: CAN upgrade transfer is not implemented in the "
-                "node firmware",
-                node.board_id);
-  SS_LOGW("upgrade", "upgrade requested for board %d, transfer not implemented",
-          node.board_id);
+  if (!upgrade_manager_start_selected())
+    SS_LOGW("upgrade", "UPGRADE SELECTED refused");
 }
 
 void action_upgrade_all_outdated(void) {
-  std::snprintf(s_upgrade_status, sizeof(s_upgrade_status),
-                "no Fly image selected (copy /firmware/fly to SD)");
-  SS_LOGW("upgrade", "UPGRADE ALL OUTDATED refused: no image selected");
+  if (!upgrade_manager_start_all())
+    SS_LOGW("upgrade", "UPGRADE ALL OUTDATED refused");
 }
 
-void action_upgrade_stop(void) {
-  s_upgrade_active = false;
-  std::snprintf(s_upgrade_status, sizeof(s_upgrade_status), "stop requested");
-}
+void action_upgrade_stop(void) { upgrade_manager_stop(); }
 
 void action_can_start(void) {
   if (!can_transport_start(1000000u, can_rx_callback, nullptr)) {
@@ -370,6 +348,7 @@ void build_snapshot(ui_snapshot_t *snap) {
                             : 0u;
     u->assigned_positions = n.assigned_positions;
   }
+  upgrade_manager_snapshot(snap);
   snap->selected_node = commission_selected_index();
   snap->animation_count = 0;
   snap->selected_animation = s_selected_animation;
@@ -377,11 +356,6 @@ void build_snapshot(ui_snapshot_t *snap) {
   std::snprintf(snap->animation_source, sizeof(snap->animation_source), "SD");
   std::snprintf(snap->animation_status, sizeof(snap->animation_status), "%s",
                 s_animation_status);
-  snap->upgrade_active = s_upgrade_active;
-  snap->upgrade_progress = s_upgrade_progress;
-  std::snprintf(snap->upgrade_status, sizeof(snap->upgrade_status), "%s",
-                s_upgrade_status);
-
   snap->grid_cols = cfg->grid_cols;
   snap->grid_rows = cfg->grid_rows;
   for (int pos = 0; pos < UI_MAX_POSITIONS; ++pos) {
@@ -445,6 +419,7 @@ void setup() {
 
   config_store_init();
   commission_init();
+  upgrade_manager_init();
   can_monitor_start();
 
   /* CH422G first: it owns touch reset, panel reset, backlight and USB_SEL. */
@@ -540,6 +515,7 @@ void loop() {
   lv_task_handler();
   if (s_lvgl_mux != nullptr) xSemaphoreGive(s_lvgl_mux);
   commission_poll();
+  upgrade_manager_poll();
   app_watchdog_poll();
   app_watchdog_kick(SS_WATCH_ALL);
 

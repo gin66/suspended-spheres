@@ -569,6 +569,10 @@ int mc_assign_board(int *board_id, int field, const uint8_t payload[8],
     return 0;
 }
 
+uint32_t mc_katapult_data_id(uint8_t node) {
+    return ((uint32_t)node << 1) + 0x100u;
+}
+
 uintptr_t mc_katapult_signature_address(uint32_t reset_vector) {
     return (uintptr_t)reset_vector - MC_CANBOOT_SIG_OFFSET;
 }

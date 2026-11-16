@@ -312,6 +312,13 @@ int mc_assign_board(int *board_id, int field, const uint8_t payload[8],
  * request word.  Returns 1 when the write and reset are safe, 0 otherwise. */
 #define MC_CANBOOT_SIG_OFFSET 9u
 #define MC_CANBOOT_SIGNATURE 0x21746f6f426e6143ULL  /* "CanBoot!" */
+
+/* Katapult's admin SET_NODEID carries one byte.  The data pair is
+ * (node << 1) + 0x100, so node 372 cannot be encoded.  Node 116 gives
+ * 0x1E8/0x1E9; both are invalid show identifiers
+ * (Fly_Micro4_addressing.md §2, katapult_whitepaper.md §6.3). */
+#define MC_KATAPULT_NODE_BYTE 116u
+uint32_t mc_katapult_data_id(uint8_t node);
 #define MC_CANBOOT_REQUEST   0x5984E3FA6CA1589BULL
 
 int mc_katapult_request_ok(uint64_t signature, int signature_aligned,

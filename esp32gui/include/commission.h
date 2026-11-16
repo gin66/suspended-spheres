@@ -120,6 +120,9 @@ bool commission_test_motor(const uint8_t uuid[SS_UUID_LEN], uint8_t axis,
  * arrive as type-13 responses and are kept in ss_node_t.sw_version. */
 bool commission_query_versions(void);
 
+/* Clear one board's version and send VERSION_REQ to that board ID only. */
+bool commission_query_version(int board_id);
+
 bool commission_stop_all(void);
 
 /* Commissioning cascade: requires every grid position to be assigned. Rows

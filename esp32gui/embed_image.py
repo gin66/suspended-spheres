@@ -2,8 +2,14 @@ Import("env")
 import os
 
 src = os.environ.get("SS_FLY_IMAGE", "")
+release = os.environ.get("SS_RELEASE", "")
+bench = os.environ.get("SS_BENCH_CONSOLE", "")
 out = os.path.join(env.subst("$PROJECT_DIR"), "src", "fly_image_data.h")
 data = b""
+if release and release != "0" and not (bench and bench != "0"):
+    if src:
+        print("embed_image: release build; embedded Fly image disabled")
+    src = ""
 if src:
     try:
         with open(src, "rb") as f:

@@ -556,6 +556,17 @@ int commission_find_node(const uint8_t uuid[8]) {
   return idx;
 }
 
+bool commission_query_version(int board_id) {
+  if (!can_transport_running()) return false;
+  if (board_id < 0 || board_id >= MC_BOARD_COUNT) return false;
+  portENTER_CRITICAL(&s_lock);
+  const int idx = find_board_locked(board_id);
+  if (idx >= 0) s_nodes[idx].version_seen = false;
+  portEXIT_CRITICAL(&s_lock);
+  send_version_req_to(board_id);
+  return true;
+}
+
 bool commission_query_versions(void) {
   if (!can_transport_running()) return false;
   int ids[SS_MAX_BOARDS];

@@ -17,9 +17,9 @@ constexpr uint32_t kAdminId = 0x3F0;
  * the data pair as (node << 1) + 0x100, so 0x3E8/0x3E9 (node 372) cannot be
  * expressed.  Node 116 gives 0x1E8/0x1E9; both are invalid show IDs
  * (type 8 with field 30 and reserved type 9), so no show node accepts them. */
-constexpr uint8_t kNodeByte = 116;
-constexpr uint32_t kDataTxId = (kNodeByte << 1) + 0x100;
-constexpr uint32_t kDataRxId = kDataTxId + 1;
+constexpr uint8_t kNodeByte = MC_KATAPULT_NODE_BYTE;
+const uint32_t kDataTxId = mc_katapult_data_id(kNodeByte);
+const uint32_t kDataRxId = kDataTxId + 1;
 constexpr uint32_t kAppStart = 0x10004000u;
 constexpr uint32_t kAppEnd = 0x10200000u;
 constexpr unsigned kBlock = 64;
@@ -40,6 +40,9 @@ constexpr uint8_t kAckBusy = 0xF3;
 portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 uint8_t s_rx[kRxCap];
 unsigned s_rx_len = 0;
+katapult_progress_fn s_progress = nullptr;
+void *s_progress_ctx = nullptr;
+int s_progress_board = -1;
 
 uint16_t crc16(const uint8_t *buf, unsigned len) {
   uint16_t crc = 0xFFFF;
@@ -197,6 +200,12 @@ void set_status(char *status, unsigned len, const char *text) {
   SS_LOGI("katapult", "%s", text);
 }
 
+void report(char *status, unsigned len, const char *text, uint8_t progress) {
+  set_status(status, len, text);
+  if (s_progress != nullptr)
+    s_progress(s_progress_board, text, progress, s_progress_ctx);
+}
+
 }  // namespace
 
 void katapult_on_frame(const ss_can_frame_t *frame) {
@@ -209,9 +218,9 @@ void katapult_on_frame(const ss_can_frame_t *frame) {
   portEXIT_CRITICAL(&s_lock);
 }
 
-bool katapult_flash(int board_id, const uint8_t uuid[6],
-                    const uint8_t *image, uint32_t size,
-                    char *status, unsigned status_len) {
+static bool katapult_flash_impl(int board_id, const uint8_t uuid[6],
+                                const uint8_t *image, uint32_t size,
+                                char *status, unsigned status_len) {
   if (board_id < 0 || board_id >= MC_BOARD_COUNT || uuid == nullptr) {
     set_status(status, status_len, "bad board or UUID");
     return false;
@@ -226,7 +235,7 @@ bool katapult_flash(int board_id, const uint8_t uuid[6],
   board_ws7_set_usb_mode(false);
   vTaskDelay(pdMS_TO_TICKS(5));
 
-  set_status(status, status_len, "enter bootloader");
+  report(status, status_len, "enter bootloader", 0);
   mc_command_t enter = {};
   enter.action = MC_CMD_ENTER_BOOTLOADER;
   uint8_t payload[8];
@@ -239,7 +248,7 @@ bool katapult_flash(int board_id, const uint8_t uuid[6],
   send_frame_retry(f, 50);
   vTaskDelay(pdMS_TO_TICKS(1000));
 
-  set_status(status, status_len, "SET_NODEID");
+  report(status, status_len, "SET_NODEID", 0);
   uint8_t admin[8] = {0};
   admin[0] = 0x11;
   memcpy(admin + 1, uuid, 6);
@@ -254,7 +263,7 @@ bool katapult_flash(int board_id, const uint8_t uuid[6],
     vTaskDelay(pdMS_TO_TICKS(30));
   }
 
-  set_status(status, status_len, "CONNECT");
+  report(status, status_len, "CONNECT", 0);
   uint8_t ret[128];
   unsigned ret_len = 0;
   if (!send_command(kCmdConnect, nullptr, 0, ret, sizeof(ret), &ret_len,
@@ -279,7 +288,7 @@ bool katapult_flash(int board_id, const uint8_t uuid[6],
     return false;
   }
 
-  set_status(status, status_len, "GET_CANBUS_ID");
+  report(status, status_len, "GET_CANBUS_ID", 0);
   if (!send_command(kCmdGetCanbusId, nullptr, 0, ret, sizeof(ret), &ret_len,
                     2000) ||
       ret_len < 6 || memcmp(ret, uuid, 6) != 0) {
@@ -288,7 +297,7 @@ bool katapult_flash(int board_id, const uint8_t uuid[6],
   }
 
   const uint32_t blocks = (size + kBlock - 1) / kBlock;
-  set_status(status, status_len, "WRITING");
+  report(status, status_len, "WRITING", 0);
   for (uint32_t i = 0; i < blocks; ++i) {
     uint8_t sb[4 + kBlock];
     uint32_t addr = kAppStart + i * kBlock;
@@ -315,17 +324,19 @@ bool katapult_flash(int board_id, const uint8_t uuid[6],
     if ((i & 0x1F) == 0) {
       SS_LOGI("katapult", "write %lu/%lu", (unsigned long)(i + 1),
               (unsigned long)blocks);
+      report(status, status_len, "write",
+             (uint8_t)(((uint64_t)(i + 1) * 100u) / blocks));
       app_watchdog_kick(SS_WATCH_UI | SS_WATCH_CAN);
     }
   }
 
-  set_status(status, status_len, "SEND_EOF");
+  report(status, status_len, "SEND_EOF", 100);
   if (!send_command(kCmdEof, nullptr, 0, ret, sizeof(ret), &ret_len, 4000)) {
     set_status(status, status_len, "EOF failed");
     return false;
   }
 
-  set_status(status, status_len, "VERIFYING");
+  report(status, status_len, "VERIFYING", 0);
   for (uint32_t i = 0; i < blocks; ++i) {
     uint8_t rb[4];
     uint32_t addr = kAppStart + i * kBlock;
@@ -357,13 +368,38 @@ bool katapult_flash(int board_id, const uint8_t uuid[6],
         return false;
       }
     }
-    if ((i & 0x1F) == 0)
+    if ((i & 0x1F) == 0) {
+      report(status, status_len, "verify",
+             (uint8_t)(((uint64_t)(i + 1) * 100u) / blocks));
       app_watchdog_kick(SS_WATCH_UI | SS_WATCH_CAN);
+    }
   }
 
-  set_status(status, status_len, "COMPLETE");
+  report(status, status_len, "COMPLETE", 100);
   send_command(kCmdComplete, nullptr, 0, ret, sizeof(ret), &ret_len, 3000);
   vTaskDelay(pdMS_TO_TICKS(1500));
-  set_status(status, status_len, "flash complete");
+  report(status, status_len, "flash complete", 100);
   return true;
+}
+
+bool katapult_flash(int board_id, const uint8_t uuid[6],
+                    const uint8_t *image, uint32_t size,
+                    char *status, unsigned status_len) {
+  return katapult_flash_ex(board_id, uuid, image, size, status, status_len,
+                          nullptr, nullptr);
+}
+
+bool katapult_flash_ex(int board_id, const uint8_t uuid[6],
+                       const uint8_t *image, uint32_t size,
+                       char *status, unsigned status_len,
+                       katapult_progress_fn progress, void *ctx) {
+  s_progress = progress;
+  s_progress_ctx = ctx;
+  s_progress_board = board_id;
+  const bool ok = katapult_flash_impl(board_id, uuid, image, size, status,
+                                      status_len);
+  s_progress = nullptr;
+  s_progress_ctx = nullptr;
+  s_progress_board = -1;
+  return ok;
 }
