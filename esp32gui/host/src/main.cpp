@@ -5,9 +5,12 @@
  * to output_<screen>.png at 800x480. There is no harness-local UI code.
  */
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
+#include <vector>
 
 #include <lvgl.h>
 /* LVGL's bundled lodepng.h wraps its C++ API in extern "C". Use the C API. */
@@ -21,6 +24,7 @@ namespace {
 constexpr int kWidth = 800;
 constexpr int kHeight = 480;
 constexpr int kBufSize = kWidth * kHeight * 4;
+constexpr int kRailX = kWidth - 88;
 
 uint8_t *s_raw;
 lv_display_t *s_disp;
@@ -216,6 +220,8 @@ ui_snapshot_t make_snapshot() {
   std::snprintf(s.wifi_state, sizeof(s.wifi_state), "%s", "AP_SETUP");
   std::snprintf(s.wifi_ssid, sizeof(s.wifi_ssid), "%s",
                 "SuspendedSpheres-A1B2");
+  std::snprintf(s.wifi_password, sizeof(s.wifi_password), "%s",
+                "fixture-password");
   std::snprintf(s.wifi_ip, sizeof(s.wifi_ip), "%s", "192.168.4.1");
   std::snprintf(s.wifi_ap_ssid, sizeof(s.wifi_ap_ssid), "%s",
                 "SuspendedSpheres-A1B2");
@@ -235,6 +241,10 @@ ui_snapshot_t make_snapshot() {
   std::snprintf(s.github_status, sizeof(s.github_status), "%s",
                 "same 0.1.0");
 
+  std::snprintf(s.upgrade_image_version, sizeof(s.upgrade_image_version),
+                "%s", "1.4.2");
+  s.upgrade_image_build = 1794839525u;
+  std::snprintf(s.upgrade_source, sizeof(s.upgrade_source), "%s", "SD");
   s.upgrade_active = false;
   s.upgrade_progress = 0;
   std::snprintf(s.upgrade_status, sizeof(s.upgrade_status), "%s",
@@ -263,7 +273,7 @@ ui_snapshot_t make_snapshot() {
   s.selected_animation = 0;
   std::snprintf(s.animation_source, sizeof(s.animation_source), "%s", "SD");
   std::snprintf(s.animation_status, sizeof(s.animation_status), "%s",
-                "ready; LOAD is not wired to playback");
+                "SD library ready");
 
   s.can_tx_failed = 2;
   s.can_rx_dropped = 0;
@@ -325,6 +335,117 @@ ui_snapshot_t make_snapshot() {
   return s;
 }
 
+
+/* ── layout audit ────────────────────────────────────────────────────────
+ * The panel has no CSS overflow pass: a control that is 4 px too far right
+ * simply draws over its neighbour or the rail.  After every render, walk the
+ * live LVGL tree and fail on any two unrelated visible widgets whose boxes
+ * intersect, and on any content that crosses the rail or the panel edge. */
+struct AuditItem {
+  lv_obj_t *obj;
+  lv_area_t area;
+  bool overlay;
+};
+
+bool hidden_in_chain(lv_obj_t *obj) {
+  for (lv_obj_t *p = obj; p != nullptr; p = lv_obj_get_parent(p)) {
+    if (lv_obj_has_flag(p, LV_OBJ_FLAG_HIDDEN)) return true;
+  }
+  return false;
+}
+
+/* Rows below a scroll viewport are still children with coordinates outside
+ * the parent.  LVGL clips them, so they are not layout violations. */
+bool clipped_by_scroller(lv_obj_t *obj) {
+  lv_area_t oa;
+  lv_obj_get_coords(obj, &oa);
+  for (lv_obj_t *p = lv_obj_get_parent(obj); p != nullptr;
+       p = lv_obj_get_parent(p)) {
+    if (lv_obj_get_scroll_dir(p) == LV_DIR_NONE) continue;
+    lv_area_t pa;
+    lv_obj_get_coords(p, &pa);
+    if (oa.x1 < pa.x1 || oa.y1 < pa.y1 || oa.x2 > pa.x2 || oa.y2 > pa.y2)
+      return true;
+  }
+  return false;
+}
+
+bool is_ancestor(lv_obj_t *maybe_parent, lv_obj_t *child) {
+  for (lv_obj_t *p = lv_obj_get_parent(child); p != nullptr;
+       p = lv_obj_get_parent(p)) {
+    if (p == maybe_parent) return true;
+  }
+  return false;
+}
+
+void collect_visible(lv_obj_t *obj, bool overlay, std::vector<AuditItem> &out) {
+  if (obj == nullptr || hidden_in_chain(obj) || clipped_by_scroller(obj)) return;
+  lv_area_t area;
+  lv_obj_get_coords(obj, &area);
+  const int w = lv_area_get_width(&area);
+  const int h = lv_area_get_height(&area);
+  const bool is_root = (obj == lv_screen_active());
+  const bool full_screen =
+      lv_obj_get_parent(obj) == lv_screen_active() && area.x1 == 0 &&
+      area.y1 == 0 && w == kWidth && h == kHeight;
+  const bool in_overlay = overlay || full_screen;
+  if (!is_root && w > 0 && h > 0)
+    out.push_back({obj, area, in_overlay});
+  const uint32_t n = lv_obj_get_child_count(obj);
+  for (uint32_t i = 0; i < n; ++i)
+    collect_visible(lv_obj_get_child(obj, i), in_overlay, out);
+}
+
+const char *obj_kind(lv_obj_t *obj) {
+  if (lv_obj_check_type(obj, &lv_label_class)) return "label";
+  if (lv_obj_check_type(obj, &lv_button_class)) return "button";
+  if (lv_obj_check_type(obj, &lv_textarea_class)) return "textarea";
+  if (lv_obj_check_type(obj, &lv_bar_class)) return "bar";
+  if (lv_obj_check_type(obj, &lv_obj_class)) return "object";
+  return "container";
+}
+
+int audit_layout(const char *screen) {
+  std::vector<AuditItem> items;
+  collect_visible(lv_screen_active(), false, items);
+  int violations = 0;
+  for (size_t i = 0; i < items.size(); ++i) {
+    const AuditItem &a = items[i];
+    const int aw = lv_area_get_width(&a.area);
+    const int ah = lv_area_get_height(&a.area);
+    if (a.area.x1 < 0 || a.area.y1 < 0 || a.area.x2 >= kWidth ||
+        a.area.y2 >= kHeight) {
+      std::printf("LAYOUT %s: %s outside display (%d,%d %dx%d)\n", screen,
+                  obj_kind(a.obj), (int)a.area.x1, (int)a.area.y1, aw, ah);
+      ++violations;
+    }
+    if (!a.overlay && a.area.x1 < kRailX && a.area.x2 >= kRailX) {
+      std::printf("LAYOUT %s: %s crosses into rail (%d..%d)\n", screen,
+                  obj_kind(a.obj), (int)a.area.x1, (int)a.area.x2);
+      ++violations;
+    }
+    for (size_t j = i + 1; j < items.size(); ++j) {
+      const AuditItem &b = items[j];
+      if (a.overlay != b.overlay) continue;
+      if (is_ancestor(a.obj, b.obj) || is_ancestor(b.obj, a.obj)) continue;
+      const int ox = std::min(a.area.x2, b.area.x2) - std::max(a.area.x1, b.area.x1);
+      const int oy = std::min(a.area.y2, b.area.y2) - std::max(a.area.y1, b.area.y1);
+      if (ox > 1 && oy > 1) {
+        std::printf(
+            "LAYOUT %s: %s (%d,%d %dx%d) overlaps %s (%d,%d %dx%d)\n", screen,
+            obj_kind(a.obj), (int)a.area.x1, (int)a.area.y1,
+            lv_area_get_width(&a.area), lv_area_get_height(&a.area),
+            obj_kind(b.obj), (int)b.area.x1, (int)b.area.y1,
+            lv_area_get_width(&b.area), lv_area_get_height(&b.area));
+        ++violations;
+      }
+    }
+  }
+  if (violations == 0) std::printf("layout %s: ok (%zu widgets)\n", screen,
+                                   items.size());
+  return violations;
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
@@ -355,13 +476,14 @@ int main(int argc, char **argv) {
   ui_init(&actions);
 
   ui_snapshot_t snap = make_snapshot();
+  int audit_failures = 0;
 
   static const char *names[UI_SCREEN_COUNT] = {
       "show", "animations", "grid", "nodes", "motor", "config",
-      "log", "can", "upgrade", "settings", "wifi", "setup", "diagnostics"};
+      "log", "can", "upgrade", "settings", "wifi", "setup", "service"};
   ui_snapshot_t upgrade_snap = make_upgrade_snapshot(snap);
   for (int i = 0; i < UI_SCREEN_COUNT; ++i) {
-    if (i == UI_SCREEN_ANIMATIONS) continue;  /* Library is part of SHOW. */
+    if (i == UI_SCREEN_ANIMATIONS) continue;  /* folded into SHOW */
     ui_show_screen(i);
     ui_update(i == UI_SCREEN_UPGRADE ? &upgrade_snap : &snap);
     clear_background();
@@ -372,6 +494,7 @@ int main(int argc, char **argv) {
     std::snprintf(filename, sizeof(filename), "%s/output_%s.png", output_dir,
                   names[i]);
     render_to_png(filename);
+    if (audit_layout(names[i]) != 0) audit_failures++;
   }
 
   ui_snapshot_t wifi_snap = snap;
@@ -396,6 +519,7 @@ int main(int argc, char **argv) {
   std::snprintf(wifi_connected_png, sizeof(wifi_connected_png),
                 "%s/output_wifi_connected.png", output_dir);
   render_to_png(wifi_connected_png);
+  if (audit_layout("wifi_connected") != 0) audit_failures++;
 
   ui_snapshot_t wifi_off = snap;
   std::snprintf(wifi_off.wifi_state, sizeof(wifi_off.wifi_state), "%s", "OFF");
@@ -414,6 +538,7 @@ int main(int argc, char **argv) {
   std::snprintf(wifi_off_png, sizeof(wifi_off_png),
                 "%s/output_wifi_off.png", output_dir);
   render_to_png(wifi_off_png);
+  if (audit_layout("wifi_off") != 0) audit_failures++;
 
   ui_show_screen(UI_SCREEN_WIFI);
   ui_update(&wifi_snap);
@@ -425,6 +550,7 @@ int main(int argc, char **argv) {
   std::snprintf(keyboard_png, sizeof(keyboard_png),
                 "%s/output_wifi_keyboard.png", output_dir);
   render_to_png(keyboard_png);
+  if (audit_layout("wifi_keyboard") != 0) audit_failures++;
 
   ui_show_screen(UI_SCREEN_SHOW);
   ui_update(&snap);
@@ -436,6 +562,7 @@ int main(int argc, char **argv) {
   std::snprintf(playing_png, sizeof(playing_png),
                 "%s/output_show_playing.png", output_dir);
   render_to_png(playing_png);
+  if (audit_layout("show_playing") != 0) audit_failures++;
   ui_debug_set_playing(0);
 
   ui_show_screen(UI_SCREEN_WIFI);
@@ -448,6 +575,12 @@ int main(int argc, char **argv) {
   std::snprintf(ap_key_png, sizeof(ap_key_png),
                 "%s/output_wifi_ap_key.png", output_dir);
   render_to_png(ap_key_png);
+  if (audit_layout("wifi_ap_key") != 0) audit_failures++;
 
+  if (audit_failures != 0) {
+    std::printf("layout audit: %d violation(s)\n", audit_failures);
+    return 1;
+  }
+  std::printf("layout audit: clean\n");
   return 0;
 }

@@ -883,27 +883,28 @@ yellow tile. That is the view for the 3.5 minutes.
 
 | Tile | Colour | When |
 |------|--------|------|
-| Waiting | Red | Outdated, not started |
+| Waiting | Neutral with `queued` | Outdated, not started. `lib/fleet_core` still classifies it `FL_COLOR_RED`, but the panel reserves red for faults and maps queued to a neutral tile |
 | Flashing | Yellow | The one board in Katapult now. Only one tile is yellow |
 | Done | Green | `VERSION_RSP` build matches the image |
-| Excluded | Dim | Unknown, offline, unassigned, or already current |
-| Failed | Red with a cross | This board stopped the queue |
+| Excluded | Dim with `skipped` | Unknown, offline, unassigned, or already current |
+| Failed | Red with `failed` | This board stopped the queue |
 
 ```
-NODE FIRMWARE     fly_micro4 1.4.2   build 1794839525   SD    12/30  write
-[ QUERY ALL ] [ UPGRADE ALL OUTDATED ] [ STOP ]
+NODE FIRMWARE    1.4.2  1794839525  SD  2/30  write 46%
+[ QUERY ALL ] [ UPGRADE ALL OUTDATED ] [ UPGRADE SELECTED ] [ STOP ]
 
-  00 green   01 green   02 yellow   03 red   04 red   05 red
-  06 red     07 red     08 red      09 red   10 red   11 red
-  12 red     13 red     14 red      15 red   16 red   17 red
-  18 red     19 red     20 red      21 red   22 red   23 red
-  24 red     25 dim     26 red      27 red   28 red   29 red
+  00 done    01 done    02 write   03 queued   04 queued   05 queued
+  06 queued  07 queued  08 queued  09 queued   10 queued   11 queued
+  12 queued  13 queued  14 queued  15 queued   16 queued   17 queued
+  18 queued  19 queued  20 queued  21 queued   22 queued   23 queued
+  24 queued  25 skipped 26 queued  27 queued   28 queued   29 queued
 ```
 
 Board 02 is yellow because it is the one being written. Boards 00 and 01
 have already verified and are green. Board 25 is dim because it had no
-version. The rest wait in red. The operator watches the yellow tile move
-across the page.
+version. The rest wait in neutral `queued` tiles, so a pending board never
+reads as a failure. The operator watches the yellow tile move across the
+page.
 
 ### 4.11 Bus and safety rules
 

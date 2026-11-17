@@ -187,6 +187,7 @@ typedef struct {
   bool wifi_present;
   bool wifi_connected;
   char wifi_ssid[33];
+  char wifi_password[65];
   char wifi_ip[16];
   int16_t wifi_rssi;
   char wifi_state[16];
@@ -207,6 +208,8 @@ typedef struct {
   uint32_t boot_count;
   uint16_t last_watchpoint;
   char firmware_version[24];
+  char panel_status[64];
+  bool panel_image_ready;
   char log_text[UI_LOG_BYTES];
 } ui_snapshot_t;
 
@@ -254,6 +257,7 @@ typedef struct {
   void (*wifi_connect)(const char *ssid, const char *password);
   void (*wifi_set_admin)(const char *password);
   void (*display_timeout_cycle)(void);
+  void (*display_timeout_set)(uint16_t seconds);
   void (*mock_inject)(void);  /* host harness only; may be NULL */
 } ui_actions_t;
 

@@ -111,9 +111,9 @@ All technical Markdown belongs in `doc/`. Only `README.md` and `AGENTS.md` sit a
   panel image to the inactive OTA slot and reboot; the boot self-test marks
   it valid or rolls it back. Settings **SETUP** starts the per-device setup AP
   (`SuspendedSpheres-XXXX`, key shown on the panel) and the HTTP service;
-  **SCAN**, **FORGET** and **SERVER** control the same state. Credentials and
+  **SCAN**, **FORGET** and **SRV** control the same state. Credentials and
   the admin hash live in NVS. The setup page is `http://192.168.4.1` while the
-  AP is up. Settings **SETUP/SCAN/FORGET/SERVER** and the **WIFI** screen
+  AP is up. NETWORK **AP/SCAN/FORGET/SRV** and the **NETWORK** screen
   (SSID list, full-screen password/admin keypad with DONE/CANCEL, SET ADMIN)
   are the panel path. The bench
   console has `wifi ap|off|forget|scan|retry|status|list|key`, `service on|off`,
@@ -132,8 +132,11 @@ All technical Markdown belongs in `doc/`. Only `README.md` and `AGENTS.md` sit a
   ./esp32gui/host/build/esp32gui_host esp32gui/host/png
   ```
   Review `esp32gui/host/png/output_*.png` before treating a screen change as
-  done. The harness defaults to the LVGL tree already downloaded for the
-  house panel; override with `-DLVGL_ROOT_DIR=/path/to/lvgl`.
+  done. The harness walks the live LVGL tree after every render and exits
+  non-zero on overlapping widgets or content crossing the rail; a clean run
+  prints `layout audit: clean`. The harness defaults to the LVGL tree already
+  downloaded for the house panel; override with
+  `-DLVGL_ROOT_DIR=/path/to/lvgl`.
 - **Native/WASM parity (optional).** Build the same driver natively and with
   Emscripten, then compare the transcripts:
   ```sh

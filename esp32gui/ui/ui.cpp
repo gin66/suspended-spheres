@@ -120,7 +120,8 @@ int s_motor_cols = 0;
 int s_motor_rows = 0;
 
 /* Config screen */
-lv_obj_t *s_cfg_grid;
+lv_obj_t *s_cfg_cols;
+lv_obj_t *s_cfg_rows;
 lv_obj_t *s_cfg_drop;
 lv_obj_t *s_cfg_speed;
 lv_obj_t *s_cfg_delay;
@@ -156,9 +157,7 @@ uint32_t s_upgrade_shown_hash = 0;
 
 /* Settings screen */
 lv_obj_t *s_set_wifi;
-lv_obj_t *s_set_ssid;
 lv_obj_t *s_set_ip;
-lv_obj_t *s_set_rssi;
 lv_obj_t *s_set_can;
 lv_obj_t *s_set_firmware;
 lv_obj_t *s_set_boot;
@@ -166,7 +165,15 @@ lv_obj_t *s_set_uptime;
 lv_obj_t *s_set_capacity;
 lv_obj_t *s_set_watch;
 lv_obj_t *s_set_display;
+lv_obj_t *s_set_panel_status;
+lv_obj_t *s_set_panel_update;
+lv_obj_t *s_set_panel_image;
+lv_obj_t *s_set_boards;
+lv_obj_t *s_set_positions;
+lv_obj_t *s_set_node_image;
+lv_obj_t *s_disp_btn[4];
 lv_obj_t *s_wifi_list;
+lv_obj_t *s_wifi_list_panel;
 lv_obj_t *s_wifi_list_title;
 lv_obj_t *s_wifi_qr_card;
 lv_obj_t *s_wifi_qr;
@@ -175,6 +182,7 @@ uint32_t s_wifi_qr_hash = 0;
 uint32_t s_wifi_url_qr_hash = 0;
 lv_obj_t *s_wifi_status;
 lv_obj_t *s_wifi_selected;
+lv_obj_t *s_wifi_connect_hint;
 lv_obj_t *s_wifi_pass;
 lv_obj_t *s_wifi_modal;
 lv_obj_t *s_wifi_modal_ta;
@@ -183,6 +191,7 @@ lv_obj_t *s_wifi_modal_kb;
 int s_wifi_modal_target = 0;
 bool s_wifi_upper = false;
 bool s_wifi_symbols = false;
+bool s_wifi_sta_seeded = false;
 lv_obj_t *s_wifi_scan_btn;
 lv_obj_t *s_wifi_reason;
 lv_obj_t *s_wifi_mode_off;
@@ -212,6 +221,9 @@ uint32_t s_wifi_shown_hash = 0;
 /* Hubs */
 lv_obj_t *s_maint_net;
 lv_obj_t *s_maint_fw;
+lv_obj_t *s_diag_can;
+lv_obj_t *s_diag_fly;
+lv_obj_t *s_diag_radio;
 
 /* ── helpers ───────────────────────────────────────────────────────────── */
 
@@ -254,7 +266,7 @@ lv_obj_t *make_button(lv_obj_t *parent, const char *text, int w, int h,
   lv_obj_set_style_pad_all(b, 0, 0);
   lv_obj_set_style_bg_color(b, C_OFF, LV_STATE_DISABLED);
   lv_obj_set_style_border_color(b, C_LINE, LV_STATE_DISABLED);
-  lv_obj_set_style_opa(b, LV_OPA_40, LV_STATE_DISABLED);
+  lv_obj_set_style_opa(b, LV_OPA_70, LV_STATE_DISABLED);
   lv_obj_t *l = lv_label_create(b);
   lv_label_set_text(l, text);
   lv_obj_set_style_text_font(l, &lv_font_montserrat_14, 0);
@@ -289,6 +301,15 @@ void nav_job(void *arg) {
 void on_tab(lv_event_t *e) {
   const int index = (int)(intptr_t)lv_event_get_user_data(e);
   lv_async_call(nav_job, (void *)(intptr_t)index);
+}
+
+/* Every detail screen carries the same back target as its section rail icon.
+ * The chevron is the second way home, so a sub-screen is never a dead end. */
+void make_back_button(lv_obj_t *head, int target) {
+  lv_obj_t *b = make_button(head, LV_SYMBOL_LEFT, 32, 32, on_tab,
+                            (void *)(intptr_t)target);
+  lv_obj_set_pos(b, 0, 0);
+  lv_obj_set_style_text_font(lv_obj_get_child(b, 0), &lv_font_montserrat_14, 0);
 }
 
 void on_grid_cell(lv_event_t *e) {
@@ -744,6 +765,14 @@ void on_wifi_forget_btn(lv_event_t *e) {
 
 void on_wifi_row(lv_event_t *e) {
   s_wifi_selected_index = (int)(intptr_t)lv_event_get_user_data(e);
+  if (s_snap != nullptr &&
+      s_wifi_selected_index >= 0 &&
+      s_wifi_selected_index < s_snap->wifi_scan_count &&
+      std::strcmp(s_snap->wifi_scan_ssid[s_wifi_selected_index],
+                  s_snap->wifi_ssid) != 0) {
+    lv_textarea_set_text(s_wifi_pass, "");
+    s_wifi_sta_seeded = true;
+  }
   if (s_snap != nullptr) ui_update(s_snap);
 }
 
@@ -826,8 +855,7 @@ void wifi_build_keypad(void) {
   add_key(s_wifi_modal_kb, "DEL", 650, 198, 96, 58, kWifiBack);
   add_key(s_wifi_modal_kb, s_wifi_symbols ? "ABC" : "SYM", 0, 264, 96, 58,
           kWifiSym);
-  add_key(s_wifi_modal_kb, "SPACE", 104, 264, 560, 58, kWifiSpace);
-  add_key(s_wifi_modal_kb, "DONE", 672, 264, 96, 58, kWifiDone);
+  add_key(s_wifi_modal_kb, "SPACE", 104, 264, 672, 58, kWifiSpace);
 }
 
 void wifi_open_modal(int target) {
@@ -876,9 +904,12 @@ void on_wifi_modal_cancel(lv_event_t *e) {
 }
 
 
-void on_display_timeout(lv_event_t *e) {
-  (void)e;
-  if (s_actions.display_timeout_cycle != nullptr)
+void on_display_preset(lv_event_t *e) {
+  const uint16_t seconds =
+      (uint16_t)(intptr_t)lv_event_get_user_data(e);
+  if (s_actions.display_timeout_set != nullptr)
+    s_actions.display_timeout_set(seconds);
+  else if (s_actions.display_timeout_cycle != nullptr)
     s_actions.display_timeout_cycle();
 }
 
@@ -967,6 +998,23 @@ void nav_icon_pulse(lv_obj_t *parent, int cx, int cy, lv_color_t color) {
   nav_line(parent, pts, 6, cx - 14, cy - 9, color);
 }
 
+void nav_icon_chip(lv_obj_t *parent, int cx, int cy, lv_color_t color) {
+  static const lv_point_precise_t top[] = {{0, 0}, {16, 0}};
+  static const lv_point_precise_t bottom[] = {{0, 0}, {16, 0}};
+  static const lv_point_precise_t left[] = {{0, 0}, {0, 16}};
+  static const lv_point_precise_t right[] = {{0, 0}, {0, 16}};
+  nav_line(parent, top, 2, cx - 8, cy - 8, color);
+  nav_line(parent, bottom, 2, cx - 8, cy + 8, color);
+  nav_line(parent, left, 2, cx - 8, cy - 8, color);
+  nav_line(parent, right, 2, cx + 8, cy - 8, color);
+  static const lv_point_precise_t pin[] = {{0, 0}, {4, 0}};
+  for (int i = -1; i <= 1; ++i) {
+    nav_line(parent, pin, 2, cx - 13, cy + i * 5, color);
+    nav_line(parent, pin, 2, cx + 9, cy + i * 5, color);
+  }
+  nav_dot(parent, cx - 3, cy - 3, 6, color);
+}
+
 void nav_icon_sliders(lv_obj_t *parent, int cx, int cy, lv_color_t color) {
   static const lv_point_precise_t line[] = {{0, 0}, {20, 0}};
   const int knob_x[3] = {2, 13, 8};
@@ -984,6 +1032,9 @@ void nav_icon_symbol(lv_obj_t *parent, const char *symbol, lv_color_t color) {
   lv_obj_set_pos(l, 0, 2);
 }
 
+/* Ordered by how often an operator needs it: SHOW every session, BUILD while
+ * commissioning, CONNECT sometimes, SERVICE rarely (firmware, diagnostics,
+ * system).  Four places, no action hiding behind an unrelated screen. */
 int section_for_screen(int screen) {
   switch (screen) {
     case UI_SCREEN_SHOW:
@@ -995,12 +1046,10 @@ int section_for_screen(int screen) {
     case UI_SCREEN_MOTOR:
     case UI_SCREEN_CONFIG:
       return 1;
-    case UI_SCREEN_UPGRADE:
-      return 2;
     case UI_SCREEN_WIFI:
-      return 3;
+      return 2;
     default:
-      return 4;
+      return 3;
   }
 }
 
@@ -1008,9 +1057,8 @@ int section_home(int section) {
   switch (section) {
     case 0: return UI_SCREEN_SHOW;
     case 1: return UI_SCREEN_SETUP;
-    case 2: return UI_SCREEN_UPGRADE;
-    case 3: return UI_SCREEN_WIFI;
-    default: return UI_SCREEN_DIAGNOSTICS;
+    case 2: return UI_SCREEN_WIFI;
+    default: return UI_SCREEN_SERVICE;
   }
 }
 
@@ -1027,16 +1075,17 @@ void build_nav(int active_screen) {
 
   const int active = section_for_screen(active_screen);
   const int size = 72;
-  const int first_y = 20;
-  const int step = 92;
+  const int count = 4;
+  const int top = 20;
+  const int span = kHeight - 2 * top - size;
 
-  for (int i = 0; i < 5; ++i) {
+  for (int i = 0; i < count; ++i) {
     const bool is_active = (i == active);
     const lv_color_t color = is_active ? C_ACCENT : C_MUTED;
 
     lv_obj_t *tab = lv_obj_create(s_nav);
     lv_obj_remove_style_all(tab);
-    lv_obj_set_pos(tab, 8, first_y + i * step);
+    lv_obj_set_pos(tab, 8, top + (i * span) / (count - 1));
     lv_obj_set_size(tab, size, size);
     lv_obj_set_style_radius(tab, 18, 0);
     lv_obj_set_style_bg_color(tab, is_active ? C_PANEL2 : C_RAIL, 0);
@@ -1056,19 +1105,13 @@ void build_nav(int active_screen) {
     } else if (i == 1) {
       nav_icon_sliders(tab, size / 2, size / 2, color);
     } else if (i == 2) {
-      lv_obj_t *sym = make_label(tab, LV_SYMBOL_DOWNLOAD,
-                                 &lv_font_montserrat_24, color);
-      lv_obj_set_width(sym, size);
-      lv_obj_set_style_text_align(sym, LV_TEXT_ALIGN_CENTER, 0);
-      lv_obj_set_pos(sym, 0, 22);
-    } else if (i == 3) {
       lv_obj_t *sym = make_label(tab, LV_SYMBOL_WIFI, &lv_font_montserrat_24,
                                  color);
       lv_obj_set_width(sym, size);
       lv_obj_set_style_text_align(sym, LV_TEXT_ALIGN_CENTER, 0);
       lv_obj_set_pos(sym, 0, 22);
     } else {
-      nav_icon_pulse(tab, size / 2, size / 2, color);
+      nav_icon_chip(tab, size / 2, size / 2, color);
     }
   }
 }
@@ -1102,9 +1145,7 @@ void build_status_strip(void) {
   lv_obj_set_pos(title, 12, 7);
 
   s_link_label = make_label(strip, "", &lv_font_montserrat_12, C_MUTED);
-  lv_obj_set_width(s_link_label, kScreenW - 24);
-  lv_obj_set_style_text_align(s_link_label, LV_TEXT_ALIGN_RIGHT, 0);
-  lv_obj_set_pos(s_link_label, 12, 7);
+  lv_obj_align(s_link_label, LV_ALIGN_TOP_RIGHT, -12, 7);
 }
 
 void build_show(void) {
@@ -1133,6 +1174,8 @@ void build_show(void) {
 
   lv_obj_t *transport = make_panel(s, 12, 112, 688, 64);
   s_show_play = make_button(transport, "PLAY", 92, 40, on_anim_load, nullptr);
+  lv_obj_set_style_bg_color(s_show_play, C_ACCENT, 0);
+  lv_obj_set_style_border_color(s_show_play, C_ACCENT, 0);
   lv_obj_set_pos(s_show_play, 8, 0);
   s_show_pause = make_button(transport, "PAUSE", 96, 40, on_anim_pause,
                              nullptr);
@@ -1184,25 +1227,29 @@ void build_show(void) {
   s_show_playlist_panel = playlist;
   s_show_library_panel = library;
 
+  /* While the show runs, the safety stop takes the library slot.  The
+   * playlist on the left never moves, so the selected animation stays
+   * visible and the target is still large and square. */
   s_show_big_stop = lv_button_create(s);
-  lv_obj_set_pos(s_show_big_stop, 12, 184);
-  lv_obj_set_size(s_show_big_stop, 688, 220);
+  lv_obj_set_pos(s_show_big_stop, 356, 184);
+  lv_obj_set_size(s_show_big_stop, 344, 220);
   lv_obj_set_style_bg_color(s_show_big_stop, C_ERR, 0);
   lv_obj_set_style_bg_opa(s_show_big_stop, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(s_show_big_stop, 0, 0);
   lv_obj_set_style_radius(s_show_big_stop, 12, 0);
   lv_obj_set_style_shadow_width(s_show_big_stop, 0, 0);
   lv_obj_add_event_cb(s_show_big_stop, on_anim_stop_now, LV_EVENT_CLICKED,
                       nullptr);
   lv_obj_t *stop_lbl = make_label(s_show_big_stop, "STOP",
                                   &lv_font_montserrat_48, lv_color_white());
-  lv_obj_set_width(stop_lbl, 688);
+  lv_obj_set_width(stop_lbl, 320);
   lv_obj_set_style_text_align(stop_lbl, LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_set_pos(stop_lbl, 0, 42);
+  lv_obj_align(stop_lbl, LV_ALIGN_CENTER, 0, -12);
   lv_obj_t *stop_sub = make_label(s_show_big_stop, "IMMEDIATE STOP",
                                   &lv_font_montserrat_14, lv_color_white());
-  lv_obj_set_width(stop_sub, 688);
+  lv_obj_set_width(stop_sub, 320);
   lv_obj_set_style_text_align(stop_sub, LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_set_pos(stop_sub, 0, 112);
+  lv_obj_align(stop_sub, LV_ALIGN_CENTER, 0, 40);
   lv_obj_add_flag(s_show_big_stop, LV_OBJ_FLAG_HIDDEN);
 
   lv_obj_t *status = make_panel(s, 12, 412, 688, 32);
@@ -1258,9 +1305,11 @@ void build_animations(void) {
 void build_grid(void) {
   lv_obj_t *s = s_screens[UI_SCREEN_GRID];
   lv_obj_t *head = make_panel(s, 12, 8, 688, 58);
-  make_label(head, "GRID", &lv_font_montserrat_20, C_TEXT);
+  make_back_button(head, UI_SCREEN_SETUP);
+  lv_obj_t *title = make_label(head, "GRID", &lv_font_montserrat_20, C_TEXT);
+  lv_obj_set_pos(title, 44, 0);
   s_grid_summary = make_label(head, "", &lv_font_montserrat_14, C_MUTED);
-  lv_obj_set_pos(s_grid_summary, 120, 8);
+  lv_obj_set_pos(s_grid_summary, 150, 8);
   lv_obj_t *hint = make_label(head, "row 0 = back, column 0 = left",
                               &lv_font_montserrat_12, C_MUTED);
   lv_obj_align(hint, LV_ALIGN_RIGHT_MID, -12, 0);
@@ -1314,7 +1363,9 @@ void rebuild_grid(int cols, int rows) {
 void build_nodes(void) {
   lv_obj_t *s = s_screens[UI_SCREEN_NODES];
   lv_obj_t *head = make_panel(s, 12, 8, 688, 58);
-  make_label(head, "DISCOVERED BOARDS", &lv_font_montserrat_20, C_TEXT);
+  make_back_button(head, UI_SCREEN_SETUP);
+  lv_obj_t *title = make_label(head, "BOARDS", &lv_font_montserrat_20, C_TEXT);
+  lv_obj_set_pos(title, 44, 0);
   s_nodes_summary = make_label(head, "", &lv_font_montserrat_12, C_MUTED);
   lv_obj_align(s_nodes_summary, LV_ALIGN_RIGHT_MID, -120, 0);
 
@@ -1340,7 +1391,10 @@ void build_nodes(void) {
 void build_motor(void) {
   lv_obj_t *s = s_screens[UI_SCREEN_MOTOR];
   lv_obj_t *head = make_panel(s, 12, 8, 688, 64);
-  make_label(head, "MOTOR TEST", &lv_font_montserrat_20, C_TEXT);
+  make_back_button(head, UI_SCREEN_SETUP);
+  lv_obj_t *title = make_label(head, "ALIGN MOTORS", &lv_font_montserrat_20,
+                               C_TEXT);
+  lv_obj_set_pos(title, 44, 0);
   s_motor_node = make_label(head, "no board", &lv_font_montserrat_14, C_TEXT);
   lv_obj_set_pos(s_motor_node, 12, 34);
   s_motor_flash = make_label(head, "", &lv_font_montserrat_12, C_MUTED);
@@ -1348,12 +1402,13 @@ void build_motor(void) {
   s_motor_board = make_label(head, "", &lv_font_montserrat_12, C_MUTED);
   lv_obj_set_pos(s_motor_board, 440, 36);
   lv_obj_t *prev = make_button(head, "<", 36, 36, on_node_prev, nullptr);
-  lv_obj_set_pos(prev, 596, 8);
+  lv_obj_set_pos(prev, 580, 8);
   lv_obj_t *next = make_button(head, ">", 36, 36, on_node_next, nullptr);
-  lv_obj_set_pos(next, 638, 8);
+  lv_obj_set_pos(next, 622, 8);
 
   lv_obj_t *axis = make_panel(s, 12, 80, 332, 112);
-  make_label(axis, "AXIS (green = assigned)", &lv_font_montserrat_12, C_MUTED);
+  make_label(axis, "green = assigned; ring = selected",
+             &lv_font_montserrat_12, C_MUTED);
   for (int i = 0; i < 4; ++i) {
     char buf[8];
     std::snprintf(buf, sizeof(buf), "AX %d", i);
@@ -1378,8 +1433,8 @@ void build_motor(void) {
 
   lv_obj_t *grid = lv_obj_create(assign);
   lv_obj_remove_style_all(grid);
-  lv_obj_set_pos(grid, 8, 28);
-  lv_obj_set_size(grid, 430, 160);
+  lv_obj_set_pos(grid, 0, 26);
+  lv_obj_set_size(grid, 404, 166);
   lv_obj_set_style_bg_color(grid, C_BG, 0);
   lv_obj_set_style_bg_opa(grid, LV_OPA_COVER, 0);
   lv_obj_set_style_radius(grid, 6, 0);
@@ -1390,22 +1445,22 @@ void build_motor(void) {
   s_motor_grid = grid;
   s_motor_cols = 0;
   s_motor_rows = 0;
-  add_scroll_buttons(assign, grid, 8, 194, 52, 30, 8, false);
+  add_scroll_buttons(assign, grid, 0, 196, 52, 24, 8, false);
 
   lv_obj_t *pos_lbl = make_label(assign, "POSITION", &lv_font_montserrat_12,
                                  C_MUTED);
-  lv_obj_set_pos(pos_lbl, 456, 10);
+  lv_obj_set_pos(pos_lbl, 420, 12);
   s_motor_assign_pos = make_label(assign, "0", &lv_font_montserrat_28, C_TEXT);
-  lv_obj_set_pos(s_motor_assign_pos, 456, 28);
-  lv_obj_t *set = make_button(assign, "ASSIGN", 180, 42, on_assign, nullptr);
-  lv_obj_set_pos(set, 456, 76);
-  lv_obj_t *unset = make_button(assign, "UNASSIGN", 180, 42, on_unassign,
-                                nullptr);
-  lv_obj_set_pos(unset, 456, 126);
+  lv_obj_set_pos(s_motor_assign_pos, 420, 26);
   s_motor_result = make_label(assign, "", &lv_font_montserrat_12, C_MUTED);
-  lv_obj_set_pos(s_motor_result, 456, 176);
+  lv_obj_set_pos(s_motor_result, 420, 72);
   lv_label_set_long_mode(s_motor_result, LV_LABEL_LONG_WRAP);
-  lv_obj_set_width(s_motor_result, 200);
+  lv_obj_set_width(s_motor_result, 236);
+  lv_obj_t *set = make_button(assign, "ASSIGN", 236, 40, on_assign, nullptr);
+  lv_obj_set_pos(set, 420, 128);
+  lv_obj_t *unset = make_button(assign, "UNASSIGN", 236, 40, on_unassign,
+                                nullptr);
+  lv_obj_set_pos(unset, 420, 176);
 }
 
 void rebuild_motor_grid(int cols, int rows) {
@@ -1418,10 +1473,10 @@ void rebuild_motor_grid(int cols, int rows) {
   if (cols < 1 || rows < 1) return;
 
   const int gap = 3;
-  const int cw = 40;
-  const int ch = 28;
+  const int cw = 36;
+  const int ch = 26;
   const int gw = cols * cw + (cols - 1) * gap;
-  const int x0 = (430 - gw) / 2;
+  const int x0 = (404 - gw) / 2;
   const int cap = cols * rows;
   for (int r = 0; r < rows; ++r) {
     for (int c = 0; c < cols; ++c) {
@@ -1442,65 +1497,97 @@ void rebuild_motor_grid(int cols, int rows) {
 void build_config(void) {
   lv_obj_t *s = s_screens[UI_SCREEN_CONFIG];
   lv_obj_t *head = make_panel(s, 12, 8, 688, 48);
-  make_label(head, "CONFIGURATION", &lv_font_montserrat_20, C_TEXT);
+  make_back_button(head, UI_SCREEN_SETUP);
+  lv_obj_t *title = make_label(head, "TEST & CONFIG", &lv_font_montserrat_20,
+                               C_TEXT);
+  lv_obj_set_pos(title, 44, 0);
   lv_obj_t *hint = make_label(head, "saved to SPIFFS", &lv_font_montserrat_12,
                               C_MUTED);
   lv_obj_align(hint, LV_ALIGN_RIGHT_MID, -12, 0);
 
   lv_obj_t *grid = make_panel(s, 12, 64, 332, 178);
   make_label(grid, "GRID SIZE", &lv_font_montserrat_14, C_MUTED);
+
   lv_obj_t *cols_lbl = make_label(grid, "columns", &lv_font_montserrat_12,
                                   C_MUTED);
-  lv_obj_set_pos(cols_lbl, 12, 38);
-  lv_obj_t *cm = make_button(grid, "-", 42, 38, on_grid_minus, nullptr);
-  lv_obj_set_pos(cm, 84, 30);
-  s_cfg_grid = make_label(grid, "10 x 12", &lv_font_montserrat_20, C_TEXT);
-  lv_obj_set_pos(s_cfg_grid, 138, 34);
-  lv_obj_t *cp = make_button(grid, "+", 42, 38, on_grid_plus, nullptr);
-  lv_obj_set_pos(cp, 278, 30);
-  lv_obj_t *rows_lbl = make_label(grid, "rows", &lv_font_montserrat_12, C_MUTED);
-  lv_obj_set_pos(rows_lbl, 12, 82);
-  lv_obj_t *rm = make_button(grid, "-", 42, 38, on_rows_minus, nullptr);
-  lv_obj_set_pos(rm, 84, 74);
-  lv_obj_t *rp = make_button(grid, "+", 42, 38, on_rows_plus, nullptr);
-  lv_obj_set_pos(rp, 278, 74);
+  lv_obj_set_pos(cols_lbl, 0, 38);
+  lv_obj_t *cm = make_button(grid, "-", 42, 36, on_grid_minus, nullptr);
+  lv_obj_set_pos(cm, 96, 30);
+  s_cfg_cols = make_label(grid, "10", &lv_font_montserrat_20, C_TEXT);
+  lv_obj_set_width(s_cfg_cols, 88);
+  lv_obj_set_style_text_align(s_cfg_cols, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(s_cfg_cols, 150, 32);
+  lv_obj_t *cp = make_button(grid, "+", 42, 36, on_grid_plus, nullptr);
+  lv_obj_set_pos(cp, 250, 30);
+
+  lv_obj_t *rows_lbl = make_label(grid, "rows", &lv_font_montserrat_12,
+                                  C_MUTED);
+  lv_obj_set_pos(rows_lbl, 0, 76);
+  lv_obj_t *rm = make_button(grid, "-", 42, 36, on_rows_minus, nullptr);
+  lv_obj_set_pos(rm, 96, 68);
+  s_cfg_rows = make_label(grid, "12", &lv_font_montserrat_20, C_TEXT);
+  lv_obj_set_width(s_cfg_rows, 88);
+  lv_obj_set_style_text_align(s_cfg_rows, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(s_cfg_rows, 150, 70);
+  lv_obj_t *rp = make_button(grid, "+", 42, 36, on_rows_plus, nullptr);
+  lv_obj_set_pos(rp, 250, 68);
+
+  lv_obj_t *presets = make_label(grid, "PRESETS", &lv_font_montserrat_12,
+                                 C_MUTED);
+  lv_obj_set_pos(presets, 0, 112);
   lv_obj_t *p10 = make_button(grid, "10 x 10", 100, 30, on_preset_10x10,
                               nullptr);
-  lv_obj_set_pos(p10, 12, 122);
+  lv_obj_set_pos(p10, 0, 128);
   lv_obj_t *p12 = make_button(grid, "10 x 12", 100, 30, on_preset_10x12,
                               nullptr);
-  lv_obj_set_pos(p12, 122, 122);
+  lv_obj_set_pos(p12, 108, 128);
 
   lv_obj_t *test = make_panel(s, 356, 64, 344, 178);
   make_label(test, "COMMISSIONING TEST RUN", &lv_font_montserrat_14, C_MUTED);
-  lv_obj_t *drop_lbl = make_label(test, "drop mm", &lv_font_montserrat_12,
-                                  C_MUTED);
-  lv_obj_set_pos(drop_lbl, 12, 36);
-  lv_obj_t *dm = make_button(test, "-", 40, 32, on_drop_minus, nullptr);
-  lv_obj_set_pos(dm, 88, 30);
+  static const struct {
+    const char *label;
+    int y;
+  } rows_ui[3] = {{"drop mm", 26}, {"speed mm/s", 58}, {"gap ms", 90}};
+  lv_obj_t *drop_lbl = make_label(test, rows_ui[0].label,
+                                  &lv_font_montserrat_12, C_MUTED);
+  lv_obj_set_pos(drop_lbl, 0, rows_ui[0].y + 4);
+  lv_obj_t *dm = make_button(test, "-", 40, 30, on_drop_minus, nullptr);
+  lv_obj_set_pos(dm, 96, rows_ui[0].y);
   s_cfg_drop = make_label(test, "100", &lv_font_montserrat_16, C_TEXT);
-  lv_obj_set_pos(s_cfg_drop, 138, 34);
-  lv_obj_t *dp = make_button(test, "+", 40, 32, on_drop_plus, nullptr);
-  lv_obj_set_pos(dp, 184, 30);
-  lv_obj_t *speed_lbl = make_label(test, "speed mm/s", &lv_font_montserrat_12,
-                                   C_MUTED);
-  lv_obj_set_pos(speed_lbl, 12, 76);
-  lv_obj_t *sm = make_button(test, "-", 40, 32, on_speed_minus, nullptr);
-  lv_obj_set_pos(sm, 88, 70);
+  lv_obj_set_width(s_cfg_drop, 88);
+  lv_obj_set_style_text_align(s_cfg_drop, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(s_cfg_drop, 144, rows_ui[0].y + 2);
+  lv_obj_t *dp = make_button(test, "+", 40, 30, on_drop_plus, nullptr);
+  lv_obj_set_pos(dp, 240, rows_ui[0].y);
+
+  lv_obj_t *speed_lbl = make_label(test, rows_ui[1].label,
+                                   &lv_font_montserrat_12, C_MUTED);
+  lv_obj_set_pos(speed_lbl, 0, rows_ui[1].y + 4);
+  lv_obj_t *sm = make_button(test, "-", 40, 30, on_speed_minus, nullptr);
+  lv_obj_set_pos(sm, 96, rows_ui[1].y);
   s_cfg_speed = make_label(test, "20", &lv_font_montserrat_16, C_TEXT);
-  lv_obj_set_pos(s_cfg_speed, 138, 74);
-  lv_obj_t *sp = make_button(test, "+", 40, 32, on_speed_plus, nullptr);
-  lv_obj_set_pos(sp, 184, 70);
-  lv_obj_t *gap_lbl = make_label(test, "gap ms", &lv_font_montserrat_12, C_MUTED);
-  lv_obj_set_pos(gap_lbl, 12, 116);
-  lv_obj_t *gm = make_button(test, "-", 40, 32, on_delay_minus, nullptr);
-  lv_obj_set_pos(gm, 88, 110);
+  lv_obj_set_width(s_cfg_speed, 88);
+  lv_obj_set_style_text_align(s_cfg_speed, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(s_cfg_speed, 144, rows_ui[1].y + 2);
+  lv_obj_t *sp = make_button(test, "+", 40, 30, on_speed_plus, nullptr);
+  lv_obj_set_pos(sp, 240, rows_ui[1].y);
+
+  lv_obj_t *gap_lbl = make_label(test, rows_ui[2].label,
+                                 &lv_font_montserrat_12, C_MUTED);
+  lv_obj_set_pos(gap_lbl, 0, rows_ui[2].y + 4);
+  lv_obj_t *gm = make_button(test, "-", 40, 30, on_delay_minus, nullptr);
+  lv_obj_set_pos(gm, 96, rows_ui[2].y);
   s_cfg_delay = make_label(test, "300", &lv_font_montserrat_16, C_TEXT);
-  lv_obj_set_pos(s_cfg_delay, 138, 114);
-  lv_obj_t *gp = make_button(test, "+", 40, 32, on_delay_plus, nullptr);
-  lv_obj_set_pos(gp, 184, 110);
-  s_cfg_serp = make_button(test, "SERP ON", 96, 72, on_serp, nullptr);
-  lv_obj_set_pos(s_cfg_serp, 232, 30);
+  lv_obj_set_width(s_cfg_delay, 88);
+  lv_obj_set_style_text_align(s_cfg_delay, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(s_cfg_delay, 144, rows_ui[2].y + 2);
+  lv_obj_t *gp = make_button(test, "+", 40, 30, on_delay_plus, nullptr);
+  lv_obj_set_pos(gp, 240, rows_ui[2].y);
+
+  s_cfg_serp = make_button(test, "SERPENTINE ON", 190, 30, on_serp, nullptr);
+  lv_obj_set_pos(s_cfg_serp, 0, 124);
+  lv_obj_set_style_text_font(lv_obj_get_child(s_cfg_serp, 0),
+                             &lv_font_montserrat_12, 0);
 
   lv_obj_t *actions = make_panel(s, 12, 250, 688, 180);
   lv_obj_t *save = make_button(actions, "SAVE TO SPIFFS", 180, 42, on_save,
@@ -1528,7 +1615,9 @@ void build_config(void) {
 void build_log(void) {
   lv_obj_t *s = s_screens[UI_SCREEN_LOG];
   lv_obj_t *head = make_panel(s, 12, 8, 688, 48);
-  make_label(head, "LOG", &lv_font_montserrat_20, C_TEXT);
+  make_back_button(head, UI_SCREEN_SERVICE);
+  lv_obj_t *title = make_label(head, "LOG", &lv_font_montserrat_20, C_TEXT);
+  lv_obj_set_pos(title, 44, 0);
   lv_obj_t *clear = make_button(head, "CLEAR", 100, 36, on_log_clear, nullptr);
   lv_obj_align(clear, LV_ALIGN_RIGHT_MID, -12, 0);
   s_log_status = make_label(head, "", &lv_font_montserrat_12, C_MUTED);
@@ -1553,11 +1642,14 @@ void build_log(void) {
 void build_can(void) {
   lv_obj_t *s = s_screens[UI_SCREEN_CAN];
   lv_obj_t *head = make_panel(s, 12, 8, 688, 48);
-  make_label(head, "CAN SCOPE", &lv_font_montserrat_20, C_TEXT);
+  make_back_button(head, UI_SCREEN_SERVICE);
+  lv_obj_t *title = make_label(head, "CAN SCOPE", &lv_font_montserrat_20,
+                               C_TEXT);
+  lv_obj_set_pos(title, 44, 0);
   s_can_bus = make_label(head, "BUS --", &lv_font_montserrat_12, C_MUTED);
-  lv_obj_align(s_can_bus, LV_ALIGN_LEFT_MID, 160, 0);
+  lv_obj_align(s_can_bus, LV_ALIGN_LEFT_MID, 196, 0);
   s_can_summary = make_label(head, "", &lv_font_montserrat_12, C_MUTED);
-  lv_obj_align(s_can_summary, LV_ALIGN_LEFT_MID, 236, 0);
+  lv_obj_align(s_can_summary, LV_ALIGN_LEFT_MID, 272, 0);
   lv_obj_t *clear = make_button(head, "CLEAR", 100, 36, on_can_clear, nullptr);
   lv_obj_align(clear, LV_ALIGN_RIGHT_MID, -12, 0);
 
@@ -1623,7 +1715,10 @@ void build_can(void) {
 void build_upgrade(void) {
   lv_obj_t *s = s_screens[UI_SCREEN_UPGRADE];
   lv_obj_t *head = make_panel(s, 12, 8, 688, 48);
-  make_label(head, "NODE FIRMWARE", &lv_font_montserrat_20, C_TEXT);
+  make_back_button(head, UI_SCREEN_SERVICE);
+  lv_obj_t *title = make_label(head, "NODE FIRMWARE", &lv_font_montserrat_20,
+                               C_TEXT);
+  lv_obj_set_pos(title, 44, 0);
   s_upgrade_summary = make_label(head, "", &lv_font_montserrat_12, C_MUTED);
   lv_obj_align(s_upgrade_summary, LV_ALIGN_RIGHT_MID, -12, 0);
 
@@ -1636,6 +1731,8 @@ void build_upgrade(void) {
   lv_obj_set_pos(all, 132, 8);
   lv_obj_t *sel = make_button(controls, "UPGRADE SELECTED", 180, 40,
                               on_upgrade_start, nullptr);
+  lv_obj_set_style_bg_color(sel, C_ACCENT, 0);
+  lv_obj_set_style_border_color(sel, C_ACCENT, 0);
   lv_obj_set_pos(sel, 340, 8);
   s_upgrade_stop = make_button(controls, "STOP", 80, 40, on_upgrade_stop,
                                nullptr);
@@ -1643,10 +1740,10 @@ void build_upgrade(void) {
   s_upgrade_status = make_label(controls, "idle", &lv_font_montserrat_12, C_MUTED);
   lv_obj_set_pos(s_upgrade_status, 8, 54);
   lv_label_set_long_mode(s_upgrade_status, LV_LABEL_LONG_CLIP);
-  lv_obj_set_width(s_upgrade_status, 420);
+  lv_obj_set_width(s_upgrade_status, 400);
   s_upgrade_progress = lv_bar_create(controls);
-  lv_obj_set_pos(s_upgrade_progress, 436, 58);
-  lv_obj_set_size(s_upgrade_progress, 244, 8);
+  lv_obj_set_pos(s_upgrade_progress, 416, 58);
+  lv_obj_set_size(s_upgrade_progress, 240, 8);
   lv_bar_set_range(s_upgrade_progress, 0, 100);
   lv_bar_set_value(s_upgrade_progress, 0, LV_ANIM_OFF);
   lv_obj_set_style_bg_color(s_upgrade_progress, C_OFF, 0);
@@ -1710,6 +1807,7 @@ void build_wifi(void) {
   lv_obj_set_width(mode_hint, 292);
 
   lv_obj_t *list = make_panel(s, 12, 132, 300, 312);
+  s_wifi_list_panel = list;
   s_wifi_list_title = make_label(list, "NETWORKS", &lv_font_montserrat_14,
                                  C_MUTED);
   s_wifi_scan_btn = make_button(list, "SCAN", 92, 30, on_wifi_scan, nullptr);
@@ -1719,7 +1817,14 @@ void build_wifi(void) {
   lv_obj_set_pos(s_wifi_list, 0, 32);
   lv_obj_set_size(s_wifi_list, 276, 244);
   lv_obj_set_style_bg_opa(s_wifi_list, LV_OPA_TRANSP, 0);
-  lv_obj_clear_flag(s_wifi_list, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_pad_row(s_wifi_list, 4, 0);
+  lv_obj_set_flex_flow(s_wifi_list, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_scroll_dir(s_wifi_list, LV_DIR_VER);
+  lv_obj_set_scrollbar_mode(s_wifi_list, LV_SCROLLBAR_MODE_ON);
+  lv_obj_set_style_bg_color(s_wifi_list, C_LINE, LV_PART_SCROLLBAR);
+  lv_obj_set_style_bg_opa(s_wifi_list, LV_OPA_COVER, LV_PART_SCROLLBAR);
+  lv_obj_set_style_width(s_wifi_list, 4, LV_PART_SCROLLBAR);
+  lv_obj_set_style_radius(s_wifi_list, 2, LV_PART_SCROLLBAR);
 
   lv_obj_t *right = make_panel(s, 324, 132, 364, 184);
   s_wifi_connect_panel = right;
@@ -1746,10 +1851,10 @@ void build_wifi(void) {
   lv_obj_set_style_text_font(kbd, &lv_font_montserrat_12, 0);
   s_wifi_connect = make_button(right, "CONNECT", 170, 40, on_wifi_join, nullptr);
   lv_obj_set_pos(s_wifi_connect, 0, 102);
-  lv_obj_t *stored = make_label(
+  s_wifi_connect_hint = make_label(
       right, "No selection uses the stored pair.", &lv_font_montserrat_12,
       C_MUTED);
-  lv_obj_set_pos(stored, 0, 150);
+  lv_obj_set_pos(s_wifi_connect_hint, 0, 150);
 
   lv_obj_t *service = make_panel(s, 324, 322, 364, 122);
   s_wifi_service_panel = service;
@@ -1894,6 +1999,8 @@ void build_wifi(void) {
 
   lv_obj_t *done = make_button(s_wifi_modal, "DONE", 92, 40, on_wifi_modal_done,
                                nullptr);
+  lv_obj_set_style_bg_color(done, C_ACCENT, 0);
+  lv_obj_set_style_border_color(done, C_ACCENT, 0);
   lv_obj_set_pos(done, 576, 8);
   lv_obj_t *cancel = make_button(s_wifi_modal, "CANCEL", 100, 40,
                                  on_wifi_modal_cancel, nullptr);
@@ -1921,8 +2028,11 @@ void build_wifi(void) {
 void build_settings(void) {
   lv_obj_t *s = s_screens[UI_SCREEN_SETTINGS];
   lv_obj_t *head = make_panel(s, 12, 8, 688, 48);
-  make_label(head, "SYSTEM", &lv_font_montserrat_20, C_TEXT);
-  lv_obj_t *hint = make_label(head, "build, runtime and display",
+  make_back_button(head, UI_SCREEN_SERVICE);
+  lv_obj_t *title = make_label(head, "SYSTEM", &lv_font_montserrat_20,
+                               C_TEXT);
+  lv_obj_set_pos(title, 44, 0);
+  lv_obj_t *hint = make_label(head, "build, display and panel",
                               &lv_font_montserrat_12, C_MUTED);
   lv_obj_align(hint, LV_ALIGN_RIGHT_MID, -12, 0);
 
@@ -1935,42 +2045,52 @@ void build_settings(void) {
   s_set_watch = make_kv(sys, "Watchpoint", 118);
   s_set_can = make_kv(sys, "CAN", 140);
 
-  lv_obj_t *net = make_panel(s, 356, 64, 344, 180);
-  make_label(net, "NETWORK SUMMARY", &lv_font_montserrat_14, C_MUTED);
-  s_set_wifi = make_kv(net, "WiFi", 30);
-  s_set_ssid = make_kv(net, "SSID", 52);
-  s_set_ip = make_kv(net, "IP", 74);
-  s_set_rssi = make_kv(net, "RSSI", 96);
+  lv_obj_t *state = make_panel(s, 356, 64, 344, 180);
+  make_label(state, "RUNTIME", &lv_font_montserrat_14, C_MUTED);
+  s_set_wifi = make_kv(state, "WiFi", 30);
+  s_set_ip = make_kv(state, "IP", 52);
+  s_set_boards = make_kv(state, "Boards", 74);
+  s_set_positions = make_kv(state, "Positions", 96);
+  s_set_node_image = make_kv(state, "Node image", 118);
 
-  lv_obj_t *service = make_panel(s, 12, 256, 688, 188);
-  make_label(service, "SERVICE", &lv_font_montserrat_14, C_MUTED);
-  lv_obj_t *text = make_label(
-      service,
-      "Network is off after reset.  Open NETWORK to join a public network "
-      "for GitHub and downloads, or to start the upload AP explicitly.",
-      &lv_font_montserrat_12, C_TEXT);
-  lv_obj_set_pos(text, 12, 28);
-  lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
-  lv_obj_set_width(text, 640);
-  lv_obj_t *network = make_button(service, "OPEN NETWORK", 140, 42,
-                                  on_tab, (void *)(intptr_t)UI_SCREEN_WIFI);
-  lv_obj_set_pos(network, 8, 92);
-  lv_obj_t *can = make_button(service, "CAN SCOPE", 104, 42, on_tab,
-                              (void *)(intptr_t)UI_SCREEN_CAN);
-  lv_obj_set_pos(can, 154, 92);
-  lv_obj_t *log = make_button(service, "OPEN LOG", 104, 42, on_tab,
-                              (void *)(intptr_t)UI_SCREEN_LOG);
-  lv_obj_set_pos(log, 264, 92);
-  lv_obj_t *firmware = make_button(service, "FIRMWARE", 110, 42, on_tab,
-                                   (void *)(intptr_t)UI_SCREEN_UPGRADE);
-  lv_obj_set_pos(firmware, 374, 92);
-  lv_obj_t *panel = make_button(service, "PANEL UPDATE", 120, 42,
-                                on_panel_update, nullptr);
-  lv_obj_set_pos(panel, 490, 92);
-  s_set_display = make_button(service, "SCREEN 60s", 140, 24,
-                              on_display_timeout, nullptr);
-  lv_obj_set_pos(s_set_display, 8, 136);
-  lv_obj_set_style_text_font(s_set_display, &lv_font_montserrat_12, 0);
+  lv_obj_t *display = make_panel(s, 12, 256, 332, 188);
+  make_label(display, "DISPLAY", &lv_font_montserrat_14, C_MUTED);
+  lv_obj_t *display_text = make_label(display, "Backlight off after",
+                                      &lv_font_montserrat_14, C_TEXT);
+  lv_obj_set_pos(display_text, 0, 28);
+  static const uint16_t kPresets[4] = {0, 30, 60, 300};
+  static const char *kPresetText[4] = {"OFF", "30 s", "60 s", "300 s"};
+  for (int i = 0; i < 4; ++i) {
+    s_disp_btn[i] = make_button(display, kPresetText[i], 68, 36,
+                                on_display_preset,
+                                (void *)(intptr_t)kPresets[i]);
+    lv_obj_set_pos(s_disp_btn[i], i * 74, 52);
+  }
+  s_set_display = s_disp_btn[2];
+  lv_obj_t *display_hint = make_label(
+      display, "First touch only wakes the display; it does not press the control underneath.",
+      &lv_font_montserrat_12, C_MUTED);
+  lv_obj_set_pos(display_hint, 0, 102);
+  lv_obj_set_width(display_hint, 300);
+  lv_label_set_long_mode(display_hint, LV_LABEL_LONG_WRAP);
+
+  lv_obj_t *panel = make_panel(s, 356, 256, 344, 188);
+  make_label(panel, "PANEL IMAGE", &lv_font_montserrat_14, C_MUTED);
+  s_set_panel_image = make_label(panel, "", &lv_font_montserrat_14, C_TEXT);
+  lv_obj_set_pos(s_set_panel_image, 0, 28);
+  s_set_panel_status = make_label(panel, "", &lv_font_montserrat_12, C_MUTED);
+  lv_obj_set_pos(s_set_panel_status, 0, 54);
+  lv_obj_set_width(s_set_panel_status, 300);
+  lv_label_set_long_mode(s_set_panel_status, LV_LABEL_LONG_CLIP);
+  s_set_panel_update = make_button(panel, "PANEL FROM SD", 180, 40,
+                                   on_panel_update, nullptr);
+  lv_obj_set_pos(s_set_panel_update, 0, 82);
+  lv_obj_t *panel_hint = make_label(
+      panel, "Loads the panel UF2 from SD, verifies it and reboots.",
+      &lv_font_montserrat_12, C_MUTED);
+  lv_obj_set_pos(panel_hint, 0, 132);
+  lv_obj_set_width(panel_hint, 300);
+  lv_label_set_long_mode(panel_hint, LV_LABEL_LONG_WRAP);
 }
 
 lv_obj_t *hub_card(lv_obj_t *parent, int x, int y, int w, int h,
@@ -2008,60 +2128,134 @@ lv_obj_t *hub_card(lv_obj_t *parent, int x, int y, int w, int h,
 void build_setup_hub(void) {
   lv_obj_t *s = s_screens[UI_SCREEN_SETUP];
   lv_obj_t *head = make_panel(s, 12, 8, 688, 48);
-  make_label(head, "SETUP", &lv_font_montserrat_20, C_TEXT);
-  lv_obj_t *hint = make_label(head, "build the grid, boards and alignment",
+  make_label(head, "BUILD", &lv_font_montserrat_20, C_TEXT);
+  lv_obj_t *hint = make_label(head, "grid, boards, motors and test",
+                              &lv_font_montserrat_14, C_MUTED);
+  lv_obj_align(hint, LV_ALIGN_RIGHT_MID, -12, 0);
+
+  struct setup_item {
+    const char *title;
+    const char *desc;
+    int target;
+  };
+  static const setup_item items[4] = {
+      {"GRID & LAYOUT", "Set columns and rows; inspect every position.",
+       UI_SCREEN_GRID},
+      {"BOARDS", "Discover boards, IDs and health.", UI_SCREEN_NODES},
+      {"ALIGN MOTORS", "Jog an axis and assign it to a position.",
+       UI_SCREEN_MOTOR},
+      {"TEST & CONFIG", "Drop, speed, gap; save or clear the map.",
+       UI_SCREEN_CONFIG},
+  };
+  const int first_y = 64;
+  const int row_h = 64;
+  const int step = 72;
+  for (int i = 0; i < 4; ++i) {
+    lv_obj_t *row = lv_obj_create(s);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_pos(row, 12, first_y + i * step);
+    lv_obj_set_size(row, 688, row_h);
+    lv_obj_set_style_bg_color(row, C_PANEL, 0);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(row, C_PANEL2, LV_STATE_PRESSED);
+    lv_obj_set_style_radius(row, 8, 0);
+    lv_obj_set_style_border_width(row, 1, 0);
+    lv_obj_set_style_border_color(row, C_LINE, 0);
+    lv_obj_set_style_pad_all(row, 0, 0);
+    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(row, on_tab, LV_EVENT_CLICKED,
+                        (void *)(intptr_t)items[i].target);
+
+    char num[4];
+    std::snprintf(num, sizeof(num), "%02d", i + 1);
+    lv_obj_t *n = make_label(row, num, &lv_font_montserrat_20, C_ACCENT);
+    lv_obj_set_pos(n, 14, 18);
+    lv_obj_t *title = make_label(row, items[i].title,
+                                 &lv_font_montserrat_20, C_TEXT);
+    lv_obj_set_pos(title, 58, 8);
+    lv_obj_t *desc = make_label(row, items[i].desc,
+                                &lv_font_montserrat_14, C_MUTED);
+    lv_obj_set_pos(desc, 58, 36);
+    lv_obj_set_width(desc, 540);
+    lv_obj_t *arrow = make_label(row, LV_SYMBOL_RIGHT,
+                                 &lv_font_montserrat_20, C_ACCENT);
+    lv_obj_align(arrow, LV_ALIGN_RIGHT_MID, -16, 0);
+  }
+
+  lv_obj_t *foot = make_panel(s, 12, 352, 688, 92);
+  lv_obj_t *text = make_label(
+      foot,
+      "Boards, then grid, then motors, then test.  Tap BUILD again to return.",
+      &lv_font_montserrat_14, C_TEXT);
+  lv_obj_set_pos(text, 12, 12);
+  lv_obj_set_width(text, 640);
+  lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
+}
+
+void build_service_hub(void) {
+  lv_obj_t *s = s_screens[UI_SCREEN_SERVICE];
+  lv_obj_t *head = make_panel(s, 12, 8, 688, 48);
+  lv_obj_t *title = make_label(head, "SERVICE", &lv_font_montserrat_20,
+                               C_TEXT);
+  lv_obj_set_pos(title, 0, 0);
+  lv_obj_t *hint = make_label(head, "firmware, diagnostics and system",
                               &lv_font_montserrat_12, C_MUTED);
   lv_obj_align(hint, LV_ALIGN_RIGHT_MID, -12, 0);
 
-  hub_card(s, 12, 64, 332, 106, "GRID & LAYOUT",
-           "Set columns and rows; inspect every position.", UI_SCREEN_GRID);
-  hub_card(s, 356, 64, 344, 106, "BOARDS",
-           "Discover boards, IDs and health.", UI_SCREEN_NODES);
-  hub_card(s, 12, 178, 332, 106, "ALIGN MOTORS",
-           "Jog an axis and assign it to a position.", UI_SCREEN_MOTOR);
-  hub_card(s, 356, 178, 344, 106, "TEST & CONFIG",
-           "Drop, speed, gap; save or clear the map.", UI_SCREEN_CONFIG);
+  struct service_item {
+    const char *title;
+    const char *desc;
+    int target;
+  };
+  static const service_item items[4] = {
+      {"FIRMWARE", "Node images, GitHub release and fleet upgrade.",
+       UI_SCREEN_UPGRADE},
+      {"CAN SCOPE", "Live traffic by identifier.", UI_SCREEN_CAN},
+      {"LOG", "Boot, CAN and commissioning events.", UI_SCREEN_LOG},
+      {"SYSTEM", "Build, display timeout and panel update.",
+       UI_SCREEN_SETTINGS},
+  };
+  for (int i = 0; i < 4; ++i) {
+    lv_obj_t *row = lv_obj_create(s);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_pos(row, 12, 64 + i * 72);
+    lv_obj_set_size(row, 688, 64);
+    lv_obj_set_style_bg_color(row, C_PANEL, 0);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(row, C_PANEL2, LV_STATE_PRESSED);
+    lv_obj_set_style_radius(row, 8, 0);
+    lv_obj_set_style_border_width(row, 1, 0);
+    lv_obj_set_style_border_color(row, C_LINE, 0);
+    lv_obj_set_style_pad_all(row, 0, 0);
+    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(row, on_tab, LV_EVENT_CLICKED,
+                        (void *)(intptr_t)items[i].target);
 
-  lv_obj_t *foot = make_panel(s, 12, 296, 688, 148);
-  make_label(foot, "ORDER", &lv_font_montserrat_14, C_MUTED);
-  lv_obj_t *text = make_label(
-      foot,
-      "1  Discover and name boards      2  Set the grid      3  Align axes      4  Run the test",
-      &lv_font_montserrat_14, C_TEXT);
-  lv_obj_set_pos(text, 12, 34);
-  lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
-  lv_obj_set_width(text, 640);
-  lv_obj_t *note = make_label(
-      foot, "Tap SETUP again to return to this page.  The rail is always visible.",
-      &lv_font_montserrat_12, C_MUTED);
-  lv_obj_set_pos(note, 12, 88);
-}
+    char num[4];
+    std::snprintf(num, sizeof(num), "%02d", i + 1);
+    lv_obj_t *n = make_label(row, num, &lv_font_montserrat_20, C_ACCENT);
+    lv_obj_set_pos(n, 14, 18);
+    lv_obj_t *t = make_label(row, items[i].title, &lv_font_montserrat_20,
+                             C_TEXT);
+    lv_obj_set_pos(t, 58, 8);
+    lv_obj_t *d = make_label(row, items[i].desc, &lv_font_montserrat_14,
+                             C_MUTED);
+    lv_obj_set_pos(d, 58, 36);
+    lv_obj_set_width(d, 540);
+    lv_obj_t *arrow = make_label(row, LV_SYMBOL_RIGHT,
+                                 &lv_font_montserrat_20, C_ACCENT);
+    lv_obj_align(arrow, LV_ALIGN_RIGHT_MID, -16, 0);
+  }
 
-void build_diagnostics_hub(void) {
-  lv_obj_t *s = s_screens[UI_SCREEN_DIAGNOSTICS];
-  lv_obj_t *head = make_panel(s, 12, 8, 688, 48);
-  make_label(head, "DIAGNOSTICS", &lv_font_montserrat_20, C_TEXT);
-  s_maint_net = make_label(head, "WiFi OFF", &lv_font_montserrat_12, C_MUTED);
-  lv_obj_align(s_maint_net, LV_ALIGN_RIGHT_MID, -12, 0);
-
-  hub_card(s, 12, 64, 332, 106, "CAN SCOPE",
-           "Live traffic by identifier.", UI_SCREEN_CAN);
-  hub_card(s, 356, 64, 344, 106, "LOG",
-           "Recent boot, CAN and commissioning events.", UI_SCREEN_LOG);
-  hub_card(s, 12, 178, 688, 106, "SYSTEM",
-           "Firmware, boot count, uptime, capacity and network summary.",
-           UI_SCREEN_SETTINGS);
-
-  lv_obj_t *foot = make_panel(s, 12, 296, 688, 148);
-  lv_obj_t *text = make_label(
-      foot,
-      "Network actions are disabled until their mode is active.  SD images need no WiFi.",
-      &lv_font_montserrat_12, C_MUTED);
-  lv_obj_set_pos(text, 12, 8);
-  lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
-  lv_obj_set_width(text, 640);
-  s_maint_fw = make_label(foot, "", &lv_font_montserrat_12, C_MUTED);
-  lv_obj_set_pos(s_maint_fw, 12, 52);
+  lv_obj_t *status = make_panel(s, 12, 352, 688, 92);
+  s_diag_can = make_label(status, "", &lv_font_montserrat_14, C_TEXT);
+  lv_obj_set_pos(s_diag_can, 0, 6);
+  s_diag_radio = make_label(status, "", &lv_font_montserrat_14, C_TEXT);
+  lv_obj_set_pos(s_diag_radio, 0, 30);
+  s_diag_fly = make_label(status, "", &lv_font_montserrat_14, C_MUTED);
+  lv_obj_set_pos(s_diag_fly, 0, 54);
 }
 
 }  // namespace
@@ -2097,7 +2291,7 @@ void ui_init(const ui_actions_t *actions) {
   build_settings();
   build_wifi();
   build_setup_hub();
-  build_diagnostics_hub();
+  build_service_hub();
 
   s_screen = UI_SCREEN_SHOW;
   ui_show_screen(UI_SCREEN_SHOW);
@@ -2237,15 +2431,10 @@ void ui_update(const ui_snapshot_t *snapshot) {
                                                 : (loading ? "loading" : "idle"));
   lv_obj_set_style_text_color(s_show_transport, loading ? C_WARN : C_MUTED, 0);
 
-  if (s_show_playing) {
-    lv_obj_add_flag(s_show_playlist_panel, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(s_show_library_panel, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(s_show_big_stop, LV_OBJ_FLAG_HIDDEN);
-  } else {
-    lv_obj_clear_flag(s_show_playlist_panel, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(s_show_library_panel, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(s_show_big_stop, LV_OBJ_FLAG_HIDDEN);
-  }
+  /* The playlist stays; only the library yields to the safety target. */
+  set_hidden(s_show_playlist_panel, false);
+  set_hidden(s_show_library_panel, s_show_playing);
+  set_hidden(s_show_big_stop, !s_show_playing);
 
   uint32_t show_hash = 2166136261u;
   show_hash = (show_hash ^ (uint32_t)s_snap->animation_count) * 16777619u;
@@ -2647,10 +2836,7 @@ void ui_update(const ui_snapshot_t *snapshot) {
   }
   for (int i = 0; i < 4; ++i) {
     lv_obj_t *btn = s_motor_axis_btn[i];
-    lv_obj_set_style_bg_color(
-        btn, axis_assigned[i] ? C_OK
-                              : ((i == s_selected_axis) ? C_ACCENT : C_PANEL2),
-        0);
+    lv_obj_set_style_bg_color(btn, axis_assigned[i] ? C_OK : C_PANEL2, 0);
     lv_obj_set_style_border_width(btn, (i == s_selected_axis) ? 2 : 1, 0);
     lv_obj_set_style_border_color(
         btn, (i == s_selected_axis) ? C_ACCENT : C_LINE, 0);
@@ -2675,12 +2861,16 @@ void ui_update(const ui_snapshot_t *snapshot) {
   lv_label_set_text_fmt(s_motor_assign_pos, "%d", s_assign_position);
 
   /* Config */
-  lv_label_set_text_fmt(s_cfg_grid, "%d x %d", s_snap->grid_cols, s_snap->grid_rows);
+  lv_label_set_text_fmt(s_cfg_cols, "%d", s_snap->grid_cols);
+  lv_label_set_text_fmt(s_cfg_rows, "%d", s_snap->grid_rows);
   lv_label_set_text_fmt(s_cfg_drop, "%u", (unsigned)s_snap->test_drop_mm);
   lv_label_set_text_fmt(s_cfg_speed, "%u", (unsigned)s_snap->test_speed_mm_s);
   lv_label_set_text_fmt(s_cfg_delay, "%u", (unsigned)s_snap->test_step_delay_ms);
   lv_obj_t *serp_lbl = lv_obj_get_child(s_cfg_serp, 0);
-  lv_label_set_text(serp_lbl, s_snap->test_serpentine ? "SERP ON" : "SERP OFF");
+  lv_label_set_text(serp_lbl, s_snap->test_serpentine ? "SERPENTINE ON"
+                                                      : "SERPENTINE OFF");
+  lv_obj_set_style_text_color(serp_lbl,
+                              s_snap->test_serpentine ? C_BG : C_TEXT, 0);
   lv_obj_set_style_bg_color(s_cfg_serp,
                             s_snap->test_serpentine ? C_OK : C_PANEL2, 0);
   lv_label_set_text(s_cfg_status,
@@ -2749,7 +2939,8 @@ void ui_update(const ui_snapshot_t *snapshot) {
     s_upgrade_shown_hash = up_hash;
     lv_obj_clean(s_upgrade_tiles);
     const int cols = 6;
-    const int tw = 104, th = 46, gap = 3;
+    const int tw = 107, th = 44, gap = 3;
+    const int x0 = (688 - (cols * tw + (cols - 1) * gap)) / 2;
     for (int slot = 0; slot < 30; ++slot) {
       const ui_node_t *n =
           (slot < s_snap->node_count) ? &s_snap->nodes[slot] : nullptr;
@@ -2757,7 +2948,7 @@ void ui_update(const ui_snapshot_t *snapshot) {
       const int row = slot / cols;
       lv_obj_t *tile = lv_obj_create(s_upgrade_tiles);
       lv_obj_remove_style_all(tile);
-      lv_obj_set_pos(tile, col * (tw + gap), row * (th + gap));
+      lv_obj_set_pos(tile, x0 + col * (tw + gap), row * (th + gap));
       lv_obj_set_size(tile, tw, th);
       lv_obj_set_style_radius(tile, 6, 0);
       lv_obj_set_style_bg_opa(tile, LV_OPA_COVER, 0);
@@ -2766,13 +2957,16 @@ void ui_update(const ui_snapshot_t *snapshot) {
       lv_obj_set_style_shadow_width(tile, 0, 0);
       lv_color_t bg = C_PANEL2;
       lv_color_t border = C_LINE;
+      lv_color_t fg = C_TEXT;
       const char *phase = "";
       if (n != nullptr) {
         switch (n->upgrade_color) {
           case UI_UPG_COLOR_RED:
-            bg = C_ERR; border = C_ERR; break;
+            /* Fleet core calls an outdated, queued board "red".  On the
+             * panel red means fault, so queued is neutral until work starts. */
+            bg = C_PANEL2; border = C_LINE; fg = C_TEXT; phase = "queued"; break;
           case UI_UPG_COLOR_YELLOW:
-            bg = C_WARN; border = C_WARN;
+            bg = C_WARN; border = C_WARN; fg = C_BG;
             switch (n->upgrade_state) {
               case UI_UPG_ENTERING: phase = "enter"; break;
               case UI_UPG_CONNECTING: phase = "connect"; break;
@@ -2783,13 +2977,14 @@ void ui_update(const ui_snapshot_t *snapshot) {
             }
             break;
           case UI_UPG_COLOR_GREEN:
-            bg = C_OK; border = C_OK; phase = "done"; break;
+            bg = C_OK; border = C_OK; fg = C_BG; phase = "done"; break;
           case UI_UPG_COLOR_FAILED:
-            bg = C_ERR; border = C_ERR; phase = "X"; break;
+            bg = C_ERR; border = C_ERR; fg = lv_color_white();
+            phase = "failed"; break;
           case UI_UPG_COLOR_DIM:
           default:
-            bg = C_OFF; border = C_LINE;
-            phase = "unknown";
+            bg = C_OFF; border = C_LINE; fg = C_MUTED;
+            phase = "skipped";
             if (n->upgrade_result[0] &&
                 std::strcmp(n->upgrade_result, "version unknown") != 0)
               phase = n->upgrade_result;
@@ -2798,7 +2993,7 @@ void ui_update(const ui_snapshot_t *snapshot) {
         lv_obj_add_event_cb(tile, on_upgrade_row, LV_EVENT_CLICKED,
                             (void *)(intptr_t)slot);
       } else {
-        bg = C_OFF;
+        bg = C_OFF; fg = C_MUTED;
       }
       lv_obj_set_style_bg_color(tile, bg, 0);
       lv_obj_set_style_border_color(tile, border, 0);
@@ -2807,9 +3002,8 @@ void ui_update(const ui_snapshot_t *snapshot) {
         std::snprintf(id, sizeof(id), "%02d", n->board_id);
       else
         std::snprintf(id, sizeof(id), "--");
-      lv_obj_t *idlabel = make_label(tile, id, &lv_font_montserrat_16,
-                                     n != nullptr ? C_TEXT : C_MUTED);
-      lv_obj_set_pos(idlabel, 8, 5);
+      lv_obj_t *idlabel = make_label(tile, id, &lv_font_montserrat_16, fg);
+      lv_obj_set_pos(idlabel, 8, 4);
       char phase_txt[20];
       if (n != nullptr && n->upgrade_state == UI_UPG_WRITING &&
           n->upgrade_color == UI_UPG_COLOR_YELLOW) {
@@ -2817,16 +3011,15 @@ void ui_update(const ui_snapshot_t *snapshot) {
                       (unsigned)n->upgrade_progress);
         phase = phase_txt;
       }
-      lv_obj_t *pl = make_label(tile, phase, &lv_font_montserrat_12,
-                                n != nullptr ? C_TEXT : C_MUTED);
-      lv_obj_set_pos(pl, 8, 22);
-      lv_obj_set_width(pl, 88);
+      lv_obj_t *pl = make_label(tile, phase, &lv_font_montserrat_12, fg);
+      lv_obj_set_pos(pl, 8, 23);
+      lv_obj_set_width(pl, 91);
       lv_label_set_long_mode(pl, LV_LABEL_LONG_CLIP);
     }
   }
   char head[128];
   if (s_snap->upgrade_image_build != 0) {
-    std::snprintf(head, sizeof(head), "fly_micro4 %s  build %lu  %s  %d/30  %s",
+    std::snprintf(head, sizeof(head), "%s  %lu  %s  %d/30  %s",
                   s_snap->upgrade_image_version[0]
                       ? s_snap->upgrade_image_version
                       : "--",
@@ -2883,19 +3076,11 @@ void ui_update(const ui_snapshot_t *snapshot) {
     s_wifi_shown_hash = wifi_hash;
     lv_obj_clean(s_wifi_list);
     for (int i = 0; i < s_snap->wifi_scan_count && i < UI_MAX_WIFI_SCAN; ++i) {
-      lv_obj_t *b = make_button(s_wifi_list, s_snap->wifi_scan_ssid[i], 276,
-                                19, on_wifi_row, (void *)(intptr_t)i);
-      lv_obj_set_pos(b, 0, i * 20);
-      lv_obj_set_style_text_font(b, &lv_font_montserrat_12, 0);
+      lv_obj_t *b = make_button(s_wifi_list, s_snap->wifi_scan_ssid[i], 264,
+                                44, on_wifi_row, (void *)(intptr_t)i);
+      lv_obj_set_style_text_font(b, &lv_font_montserrat_14, 0);
     }
   }
-  if (s_wifi_selected_index >= 0 &&
-      s_wifi_selected_index < s_snap->wifi_scan_count)
-    lv_label_set_text(s_wifi_selected,
-                      s_snap->wifi_scan_ssid[s_wifi_selected_index]);
-  else
-    lv_label_set_text(s_wifi_selected, "--");
-
   const bool wifi_connected = s_snap->wifi_connected;
   const bool wifi_ap = std::strcmp(s_snap->wifi_state, "AP_SETUP") == 0;
   const bool wifi_off = std::strcmp(s_snap->wifi_state, "OFF") == 0;
@@ -2903,11 +3088,26 @@ void ui_update(const ui_snapshot_t *snapshot) {
       std::strcmp(s_snap->wifi_state, "CONNECTING") == 0;
   const bool scanning = s_snap->wifi_scanning;
 
+  if (s_wifi_selected_index >= 0 &&
+      s_wifi_selected_index < s_snap->wifi_scan_count) {
+    lv_label_set_text(s_wifi_selected,
+                      s_snap->wifi_scan_ssid[s_wifi_selected_index]);
+  } else if (!wifi_ap && s_snap->wifi_has_credentials &&
+             s_snap->wifi_ssid[0] != '\0') {
+    lv_label_set_text(s_wifi_selected, s_snap->wifi_ssid);
+  } else {
+    lv_label_set_text(s_wifi_selected, "--");
+  }
+  if (!s_snap->wifi_has_credentials) s_wifi_sta_seeded = false;
+  if (!wifi_ap && !s_wifi_sta_seeded && s_snap->wifi_has_credentials) {
+    lv_textarea_set_text(s_wifi_pass, s_snap->wifi_password);
+    s_wifi_sta_seeded = true;
+  }
+
   /* AP mode uses the whole content area: join QR, configuration, browser QR. */
   if (wifi_ap) {
     set_hidden(s_wifi_ap_panel, false);
-    set_hidden(s_wifi_list, true);
-    set_hidden(s_wifi_scan_btn, true);
+    set_hidden(s_wifi_list_panel, true);
     set_hidden(s_wifi_connect_panel, true);
     set_hidden(s_wifi_service_panel, true);
     char payload[192];
@@ -2946,8 +3146,7 @@ void ui_update(const ui_snapshot_t *snapshot) {
       lv_obj_add_state(s_wifi_ap_forget, LV_STATE_DISABLED);
   } else {
     set_hidden(s_wifi_ap_panel, true);
-    set_hidden(s_wifi_list, false);
-    set_hidden(s_wifi_scan_btn, false);
+    set_hidden(s_wifi_list_panel, false);
     set_hidden(s_wifi_connect_panel, false);
     set_hidden(s_wifi_service_panel, false);
   }
@@ -2997,6 +3196,23 @@ void ui_update(const ui_snapshot_t *snapshot) {
           ? "CONNECT for downloads; AP for browser upload."
           : (wifi_off ? "WiFi off. Connect for downloads or start AP to upload."
                       : "AP mode uploads through the browser."));
+  lv_obj_t *connect_lbl = lv_obj_get_child(s_wifi_mode_connect, 0);
+  if (connect_lbl != nullptr)
+    lv_label_set_text(connect_lbl, wifi_connecting ? "CONNECTING" : "CONNECT");
+  if (s_wifi_connect_hint != nullptr) {
+    if (wifi_connecting) {
+      lv_label_set_text(s_wifi_connect_hint,
+                        "Connecting... retrying automatically.");
+      lv_obj_set_style_text_color(s_wifi_connect_hint, C_WARN, 0);
+    } else if (wifi_connected) {
+      lv_label_set_text(s_wifi_connect_hint, "Connected.");
+      lv_obj_set_style_text_color(s_wifi_connect_hint, C_OK, 0);
+    } else {
+      lv_label_set_text(s_wifi_connect_hint,
+                        "No selection uses the stored pair.");
+      lv_obj_set_style_text_color(s_wifi_connect_hint, C_MUTED, 0);
+    }
+  }
   lv_label_set_text(s_wifi_reason,
                     s_snap->wifi_reason[0]
                         ? s_snap->wifi_reason
@@ -3004,27 +3220,30 @@ void ui_update(const ui_snapshot_t *snapshot) {
                                     : ""));
 
   /* System */
-  if (s_snap->wifi_present) {
-    const char *state = s_snap->wifi_state[0] ? s_snap->wifi_state : "OFF";
-    lv_label_set_text(s_set_wifi, state);
-    lv_color_t state_color = C_MUTED;
-    if (std::strcmp(state, "CONNECTED") == 0) state_color = C_OK;
-    else if (std::strcmp(state, "FAILED") == 0) state_color = C_ERR;
-    else if (std::strcmp(state, "OFF") != 0) state_color = C_WARN;
-    lv_obj_set_style_text_color(s_set_wifi, state_color, 0);
-    lv_label_set_text(s_set_ssid,
-                      s_snap->wifi_ssid[0] ? s_snap->wifi_ssid : "--");
-    lv_label_set_text(s_set_ip, s_snap->wifi_ip[0] ? s_snap->wifi_ip : "--");
-    if (s_snap->wifi_connected)
-      lv_label_set_text_fmt(s_set_rssi, "%d dBm", (int)s_snap->wifi_rssi);
-    else
-      lv_label_set_text(s_set_rssi, "--");
+  const bool wifi_present = s_snap->wifi_present;
+  const char *wifi_state =
+      s_snap->wifi_state[0] ? s_snap->wifi_state : "OFF";
+  lv_label_set_text(s_set_wifi, wifi_present ? wifi_state : "not compiled");
+  lv_color_t state_color = C_MUTED;
+  if (std::strcmp(wifi_state, "CONNECTED") == 0) state_color = C_OK;
+  else if (std::strcmp(wifi_state, "FAILED") == 0) state_color = C_ERR;
+  else if (wifi_present && std::strcmp(wifi_state, "OFF") != 0)
+    state_color = C_WARN;
+  lv_obj_set_style_text_color(s_set_wifi, state_color, 0);
+  lv_label_set_text(s_set_ip, s_snap->wifi_ip[0] ? s_snap->wifi_ip : "--");
+  lv_label_set_text_fmt(s_set_boards, "%lu/%lu online",
+                        (unsigned long)s_snap->online_boards,
+                        (unsigned long)s_snap->discovered_boards);
+  lv_label_set_text_fmt(s_set_positions, "%lu/%lu assigned",
+                        (unsigned long)s_snap->assigned_positions,
+                        (unsigned long)s_snap->capacity);
+  if (s_snap->upgrade_image_version[0]) {
+    lv_label_set_text_fmt(s_set_node_image, "%s  %s",
+                          s_snap->upgrade_image_version,
+                          s_snap->upgrade_source[0] ? s_snap->upgrade_source
+                                                    : "SD");
   } else {
-    lv_label_set_text(s_set_wifi, "not compiled");
-    lv_obj_set_style_text_color(s_set_wifi, C_MUTED, 0);
-    lv_label_set_text(s_set_ssid, "--");
-    lv_label_set_text(s_set_ip, "--");
-    lv_label_set_text(s_set_rssi, "--");
+    lv_label_set_text(s_set_node_image, "--");
   }
   lv_label_set_text_fmt(s_set_can, "%s %s",
                         s_snap->can_running ? "running" : "stopped",
@@ -3035,35 +3254,59 @@ void ui_update(const ui_snapshot_t *snapshot) {
   lv_label_set_text_fmt(s_set_capacity, "%lu positions",
                         (unsigned long)s_snap->capacity);
   lv_label_set_text_fmt(s_set_watch, "%u", (unsigned)s_snap->last_watchpoint);
-  lv_obj_t *display_lbl =
-      s_set_display != nullptr ? lv_obj_get_child(s_set_display, 0) : nullptr;
-  if (display_lbl != nullptr) {
-    if (s_snap->display_timeout_s == 0) {
-      lv_label_set_text(display_lbl, "SCREEN OFF");
-    } else {
-      lv_label_set_text_fmt(display_lbl, "SCREEN %us",
-                            (unsigned)s_snap->display_timeout_s);
-    }
+
+  /* Display timeout is a four-way choice, not a hidden cycle: show which
+   * value is active instead of only its text. */
+  static const uint16_t kDisplayValues[4] = {0, 30, 60, 300};
+  for (int i = 0; i < 4; ++i) {
+    const bool active = (s_snap->display_timeout_s == kDisplayValues[i]);
+    lv_obj_set_style_bg_color(s_disp_btn[i], active ? C_ACCENT : C_PANEL2, 0);
+    lv_obj_set_style_border_color(s_disp_btn[i], active ? C_ACCENT : C_LINE,
+                                  0);
   }
-  if (s_maint_net != nullptr) {
-    lv_label_set_text_fmt(s_maint_net, "WiFi %s%s%s",
-                          s_snap->wifi_state[0] ? s_snap->wifi_state : "OFF",
-                          s_snap->wifi_ip[0] ? "  " : "",
-                          s_snap->wifi_ip[0] ? s_snap->wifi_ip : "");
-    lv_obj_set_style_text_color(
-        s_maint_net,
-        s_snap->wifi_connected ? C_OK : (wifi_ap || wifi_connecting ? C_WARN : C_MUTED),
-        0);
+
+  lv_label_set_text(s_set_panel_image,
+                    s_snap->panel_image_ready ? "image ready on SD"
+                                              : "no panel image on SD");
+  lv_obj_set_style_text_color(s_set_panel_image,
+                              s_snap->panel_image_ready ? C_OK : C_MUTED, 0);
+  if (s_snap->panel_image_ready) {
+    lv_obj_clear_state(s_set_panel_update, LV_STATE_DISABLED);
+  } else {
+    lv_obj_add_state(s_set_panel_update, LV_STATE_DISABLED);
   }
-  if (s_maint_fw != nullptr) {
-    lv_label_set_text_fmt(s_maint_fw,
-                          "Fly image %s  build %lu  source %s",
-                          s_snap->upgrade_image_version[0]
-                              ? s_snap->upgrade_image_version
-                              : "--",
+  lv_label_set_text(s_set_panel_status,
+                    s_snap->panel_status[0]
+                        ? s_snap->panel_status
+                        : (s_snap->panel_image_ready ? "ready to load"
+                                                     : "copy a panel UF2 to SD"));
+
+  /* SERVICE hub footer: the three facts that decide what to do next. */
+  lv_label_set_text_fmt(s_diag_can, "CAN %s %s  |  %lu/%lu boards  |  %lu/%lu positions",
+                        s_snap->can_running ? "running" : "stopped",
+                        s_snap->can_mock ? "MOCK" : "HW",
+                        (unsigned long)s_snap->online_boards,
+                        (unsigned long)s_snap->discovered_boards,
+                        (unsigned long)s_snap->assigned_positions,
+                        (unsigned long)s_snap->capacity);
+  lv_label_set_text_fmt(s_diag_radio, "WiFi %s  %s  |  panel %s",
+                        wifi_state,
+                        s_snap->wifi_ip[0] ? s_snap->wifi_ip : "--",
+                        s_snap->firmware_version);
+  lv_obj_set_style_text_color(
+      s_diag_radio,
+      s_snap->wifi_connected ? C_OK
+                             : (std::strcmp(wifi_state, "OFF") == 0 ? C_MUTED
+                                                                    : C_WARN),
+      0);
+  if (s_snap->upgrade_image_version[0]) {
+    lv_label_set_text_fmt(s_diag_fly, "Fly image %s  build %lu  %s",
+                          s_snap->upgrade_image_version,
                           (unsigned long)s_snap->upgrade_image_build,
                           s_snap->upgrade_source[0] ? s_snap->upgrade_source
                                                     : "SD");
+  } else {
+    lv_label_set_text(s_diag_fly, "Fly image --");
   }
 
   /* Log */

@@ -63,6 +63,7 @@ bool s_display_wake_lock = false;
 int s_selected_animation = 0;
 bool s_animation_loading = false;
 char s_animation_status[64] = "SD file listing is not implemented";
+char s_panel_status[64] = "idle";
 ss_can_id_entry_t *s_can_scratch = nullptr;
 
 static uint32_t lv_tick_cb(void) { return (uint32_t)millis(); }
@@ -186,6 +187,25 @@ void action_test_start(void) {
 
 void action_test_stop(void) { commission_test_run_stop(); }
 
+void action_display_timeout_set(uint16_t seconds) {
+  const int n = (int)(sizeof(kDisplayTimeouts) / sizeof(kDisplayTimeouts[0]));
+  bool allowed = false;
+  for (int i = 0; i < n; ++i) {
+    if (kDisplayTimeouts[i] == seconds) {
+      allowed = true;
+      break;
+    }
+  }
+  if (!allowed) return;
+  s_display_timeout_s = seconds;
+  s_display_last_ms = millis();
+  if (s_ui_prefs.begin("ssui", false)) {
+    s_ui_prefs.putUShort("timeout", s_display_timeout_s);
+    s_ui_prefs.end();
+  }
+  SS_LOGI("display", "off timeout %us", (unsigned)s_display_timeout_s);
+}
+
 void action_display_timeout_cycle(void) {
   const int n = (int)(sizeof(kDisplayTimeouts) / sizeof(kDisplayTimeouts[0]));
   int idx = 0;
@@ -195,13 +215,7 @@ void action_display_timeout_cycle(void) {
       break;
     }
   }
-  s_display_timeout_s = kDisplayTimeouts[(idx + 1) % n];
-  s_display_last_ms = millis();
-  if (s_ui_prefs.begin("ssui", false)) {
-    s_ui_prefs.putUShort("timeout", s_display_timeout_s);
-    s_ui_prefs.end();
-  }
-  SS_LOGI("display", "off timeout %us", (unsigned)s_display_timeout_s);
+  action_display_timeout_set(kDisplayTimeouts[(idx + 1) % n]);
 }
 
 void display_power_poll(void) {
@@ -341,8 +355,9 @@ void action_wifi_set_admin(const char *password) {
 }
 
 void action_panel_update(void) {
-  char text[80] = "idle";
-  if (!panel_ota_start(text, sizeof(text))) SS_LOGW("ota", "%s", text);
+  std::snprintf(s_panel_status, sizeof(s_panel_status), "starting...");
+  if (!panel_ota_start(s_panel_status, sizeof(s_panel_status)))
+    SS_LOGW("ota", "%s", s_panel_status);
 }
 
 void action_can_start(void) {
@@ -511,6 +526,9 @@ void build_snapshot(ui_snapshot_t *snap) {
   snap->test_run_remaining = commission_test_run_remaining();
   snap->config_dirty = config_store_dirty();
 
+  std::snprintf(snap->panel_status, sizeof(snap->panel_status), "%s",
+                s_panel_status);
+  snap->panel_image_ready = firmware_image_panel() != nullptr;
   snap->display_timeout_s = s_display_timeout_s;
   snap->boot_count = wd->boot_count;
   snap->last_watchpoint = wd->last_watchpoint;
@@ -633,6 +651,7 @@ void setup() {
   actions.test_run_start = action_test_start;
   actions.test_run_stop = action_test_stop;
   actions.display_timeout_cycle = action_display_timeout_cycle;
+  actions.display_timeout_set = action_display_timeout_set;
   actions.log_clear = action_log_clear;
   actions.can_start = action_can_start;
   actions.can_stop = action_can_stop;

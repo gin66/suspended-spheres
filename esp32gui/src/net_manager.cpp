@@ -990,6 +990,8 @@ extern "C" void net_manager_init(void) {
   net_link_init(&s_link);
   WiFi.persistent(false);
   WiFi.setAutoReconnect(false);
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
   register_handlers();
   if (xTaskCreatePinnedToCore(net_task, "net", 8192, nullptr, 2, nullptr, 0) !=
       pdPASS) {
@@ -1162,6 +1164,8 @@ extern "C" void net_manager_snapshot(ui_snapshot_t *snap) {
                   "%s", s_ap_pass);
   } else {
     std::snprintf(snap->wifi_ssid, sizeof(snap->wifi_ssid), "%s", s_ssid);
+    std::snprintf(snap->wifi_password, sizeof(snap->wifi_password), "%s",
+                  s_pass);
     snap->wifi_ap_ssid[0] = '\0';
     snap->wifi_ap_password[0] = '\0';
   }
