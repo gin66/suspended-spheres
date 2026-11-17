@@ -16,7 +16,6 @@ core directory; a fresh package install restores the original.
 
 import os
 import re
-import shutil
 import sys
 
 DROP = {
@@ -60,11 +59,18 @@ if removed:
 else:
     print("drop_optional_components: nothing to remove")
 
-# The Arduino package also ships the matching libraries.  PlatformIO compiles
-# them even after the managed components are gone, which made a clean build
-# fail on the now-missing headers.
-for name in ("RainMaker", "Zigbee", "Insights"):
-    lib = os.path.join(framework, "libraries", name)
-    if os.path.isdir(lib):
-        shutil.rmtree(lib)
-        print(f"drop_optional_components: removed libraries/{name}")
+# The Arduino CMakeLists registers every library named in ARDUINO_ALL_LIBRARIES.
+# Removing the directories breaks that file (the source list still names them);
+# remove the names from the list instead.  The directories stay for the
+# optional include-dir scan, but no source is compiled.
+cmake = os.path.join(framework, "CMakeLists.txt")
+if not os.path.isfile(cmake):
+    print(f"drop_optional_components: {cmake} not found")
+    sys.exit(1)
+with open(cmake, "r", encoding="utf-8") as f:
+    text = f.read()
+for name in ("Insights", "RainMaker", "Zigbee"):
+    text = re.sub(rf"^  {name}\s*\n", "", text, flags=re.MULTILINE)
+with open(cmake, "w", encoding="utf-8") as f:
+    f.write(text)
+print("drop_optional_components: removed Insights, RainMaker, Zigbee from ARDUINO_ALL_LIBRARIES")
