@@ -1,6 +1,8 @@
 #include "animation_store.h"
 
 #include <Arduino.h>
+
+#include "app_log.h"
 #include <dirent.h>
 #include <strings.h>
 #include <sys/stat.h>
@@ -110,6 +112,7 @@ void animation_store_refresh(void) {
   std::snprintf(s_status, sizeof(s_status), "%s", status);
   portEXIT_CRITICAL(&s_mux);
   std::free(local);
+  SS_LOGI("anim", "%d animation%s on SD", count, count == 1 ? "" : "s");
 }
 
 void animation_store_request_refresh(void) { s_refresh_request = true; }

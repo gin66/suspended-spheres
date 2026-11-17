@@ -326,7 +326,24 @@ void load_sd(void) {
   SS_LOGI("image", "SD mounted at %s (%lu KiB free)", kMount,
           (unsigned long)s_sd_free_kb);
 
-  candidate_t fly[kMaxCandidates];
+  /* These arrays are several KiB; the 8 KiB loop task cannot hold both. */
+  candidate_t *fly = (candidate_t *)heap_caps_malloc(
+      sizeof(candidate_t) * kMaxCandidates, MALLOC_CAP_SPIRAM);
+  if (fly == nullptr)
+    fly = (candidate_t *)heap_caps_malloc(sizeof(candidate_t) * kMaxCandidates,
+                                         MALLOC_CAP_INTERNAL);
+  candidate_t *panel = (candidate_t *)heap_caps_malloc(
+      sizeof(candidate_t) * kMaxCandidates, MALLOC_CAP_SPIRAM);
+  if (panel == nullptr)
+    panel = (candidate_t *)heap_caps_malloc(
+        sizeof(candidate_t) * kMaxCandidates, MALLOC_CAP_INTERNAL);
+  if (fly == nullptr || panel == nullptr) {
+    if (fly != nullptr) heap_caps_free(fly);
+    if (panel != nullptr) heap_caps_free(panel);
+    SS_LOGE("image", "no memory for SD image scan");
+    return;
+  }
+
   const int fly_n = scan_dir(kFlyDir, RC_TARGET_FLY, fly, kMaxCandidates);
   s_sd_fly_count = fly_n;
   if (fly_n > 0) {
@@ -353,7 +370,6 @@ void load_sd(void) {
       if (i != idx && fly[i].data != nullptr) heap_caps_free(fly[i].data);
   }
 
-  candidate_t panel[kMaxCandidates];
   const int panel_n = scan_dir(kPanelDir, RC_TARGET_PANEL, panel,
                                kMaxCandidates);
   s_sd_panel_count = panel_n;
@@ -374,6 +390,8 @@ void load_sd(void) {
     for (int i = 0; i < panel_n; ++i)
       if (panel[i].data != nullptr) heap_caps_free(panel[i].data);
   }
+  heap_caps_free(fly);
+  heap_caps_free(panel);
 }
 
 void load_embedded(void) {

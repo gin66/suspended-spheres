@@ -16,6 +16,7 @@ core directory; a fresh package install restores the original.
 
 import os
 import re
+import shutil
 import sys
 
 DROP = {
@@ -58,3 +59,12 @@ if removed:
     print("drop_optional_components: removed " + ", ".join(removed))
 else:
     print("drop_optional_components: nothing to remove")
+
+# The Arduino package also ships the matching libraries.  PlatformIO compiles
+# them even after the managed components are gone, which made a clean build
+# fail on the now-missing headers.
+for name in ("RainMaker", "Zigbee", "Insights"):
+    lib = os.path.join(framework, "libraries", name)
+    if os.path.isdir(lib):
+        shutil.rmtree(lib)
+        print(f"drop_optional_components: removed libraries/{name}")
