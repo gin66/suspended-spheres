@@ -209,6 +209,10 @@ typedef struct {
   char panel_update_stage[48];
   char panel_update_result[72];
   char ota_last_result[64];
+  bool sd_present;
+  int sd_fly_images;
+  int sd_panel_images;
+  uint32_t sd_free_mb;
 
   /* Display */
   uint16_t display_timeout_s;

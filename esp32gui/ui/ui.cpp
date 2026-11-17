@@ -175,6 +175,7 @@ lv_obj_t *s_upg_panel_update;
 lv_obj_t *s_set_boards;
 lv_obj_t *s_set_positions;
 lv_obj_t *s_set_node_image;
+lv_obj_t *s_set_sd;
 lv_obj_t *s_disp_btn[4];
 lv_obj_t *s_wifi_list;
 lv_obj_t *s_wifi_list_panel;
@@ -2154,6 +2155,9 @@ void build_settings(void) {
   s_set_boards = make_kv(state, "Boards", 74);
   s_set_positions = make_kv(state, "Positions", 96);
   s_set_node_image = make_kv(state, "Node image", 118);
+  s_set_sd = make_kv(state, "SD", 140);
+  lv_obj_set_width(s_set_sd, 190);
+  lv_label_set_long_mode(s_set_sd, LV_LABEL_LONG_CLIP);
 
   lv_obj_t *display = make_panel(s, 12, 256, 688, 188);
   make_label(display, "DISPLAY", &lv_font_montserrat_14, C_MUTED);
@@ -3419,6 +3423,15 @@ void ui_update(const ui_snapshot_t *snapshot) {
   lv_label_set_text_fmt(s_set_positions, "%lu/%lu assigned",
                         (unsigned long)s_snap->assigned_positions,
                         (unsigned long)s_snap->capacity);
+  if (s_snap->sd_present) {
+    lv_label_set_text_fmt(s_set_sd, "%d fly / %d panel / %lu GB",
+                          s_snap->sd_fly_images, s_snap->sd_panel_images,
+                          (unsigned long)(s_snap->sd_free_mb / 1024u));
+    lv_obj_set_style_text_color(s_set_sd, C_TEXT, 0);
+  } else {
+    lv_label_set_text(s_set_sd, "no card");
+    lv_obj_set_style_text_color(s_set_sd, C_MUTED, 0);
+  }
   if (s_snap->upgrade_image_version[0]) {
     lv_label_set_text_fmt(s_set_node_image, "%s  %s",
                           s_snap->upgrade_image_version,

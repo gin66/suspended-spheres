@@ -69,7 +69,7 @@ dead end.
    (SD and GitHub), and the GitHub release check.
 2. **CAN SCOPE** — live traffic by identifier.
 3. **LOG** — boot, CAN and commissioning events.
-4. **SYSTEM** — build/runtime and display timeout.
+4. **SYSTEM** — build/runtime, SD card state and display timeout.
 
 SHOW is the performance console, not a commissioning dashboard.  It owns the
 animation playlist and the transport: `PLAY`, `PAUSE`, `STOP`, `CYCLE`.  The
@@ -302,6 +302,9 @@ failure, not a review note.
   cuts the backlight before `esp_ota_write`, so the cache stall cannot draw a
   garbled frame.  On failure the backlight returns and the overlay shows the
   reason with `DISMISS`.
+- SYSTEM shows the SD card state: present/absent, Fly and panel image counts,
+  and free space.  A blank card is shown as `0 fly / 0 panel`, not as an
+  error; the firmware creates `/firmware/{fly,panel,katapult}` at mount.
 - The status strip carries the running panel version and build, so an update
   that rolls back is visible immediately.  Boards show each node's running
   `sw` version.  SYSTEM → `Last update` keeps the boot-check outcome

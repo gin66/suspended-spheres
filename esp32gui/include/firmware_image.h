@@ -31,6 +31,10 @@ typedef struct {
 
 void firmware_image_init(void);
 bool firmware_image_sd_present(void);
+
+/* Card state for the System screen: present, image counts, free space. */
+void firmware_image_sd_info(bool *present, int *fly_images, int *panel_images,
+                            uint32_t *free_kb);
 const ss_fw_image_t *firmware_image_fly(void);
 const rc_manifest_t *firmware_image_panel(void);
 const char *firmware_image_panel_path(void);

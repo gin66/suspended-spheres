@@ -246,8 +246,10 @@ The release bundle is copied to the panel's microSD card:
     └── katapult_rp2040_..._<config8>.config
 ```
 
-The card is FAT32 and may be read-only during a show. The panel scans only
-`/firmware/panel` for its own image and `/firmware/fly` for node images. It
+The card is FAT32 and may be read-only during a show.  Mounting creates
+`/firmware/{fly,panel,katapult}` so a blank card is a normal state.  The
+panel scans only `/firmware/panel` for its own image and `/firmware/fly` for
+node images. It
 ignores a file whose manifest is missing, invalid, of the wrong target, or
 whose SHA-256 fails.
 

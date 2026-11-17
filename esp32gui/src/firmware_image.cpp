@@ -46,6 +46,9 @@ struct candidate_t {
 };
 
 bool s_sd_mounted = false;
+int s_sd_fly_count = 0;
+int s_sd_panel_count = 0;
+uint32_t s_sd_free_kb = 0;
 bool s_fly_psram = false;
 ss_fw_image_t s_fly;
 rc_manifest_t s_panel;
@@ -309,10 +312,22 @@ void load_sd(void) {
     return;
   }
   s_sd_mounted = true;
-  SS_LOGI("image", "SD mounted at %s", kMount);
+  /* A blank card is a supported state: create the layout once and treat the
+   * folders as empty instead of warning on every boot. */
+  mkdir("/sdcard/firmware", 0777);
+  mkdir(kFlyDir, 0777);
+  mkdir(kPanelDir, 0777);
+  mkdir("/sdcard/firmware/katapult", 0777);
+  uint64_t total_bytes = 0;
+  uint64_t free_bytes = 0;
+  if (esp_vfs_fat_info(kMount, &total_bytes, &free_bytes) == ESP_OK)
+    s_sd_free_kb = (uint32_t)(free_bytes / 1024u);
+  SS_LOGI("image", "SD mounted at %s (%lu KiB free)", kMount,
+          (unsigned long)s_sd_free_kb);
 
   candidate_t fly[kMaxCandidates];
   const int fly_n = scan_dir(kFlyDir, RC_TARGET_FLY, fly, kMaxCandidates);
+  s_sd_fly_count = fly_n;
   if (fly_n > 0) {
     pc_image_list_t list = {};
     for (int i = 0; i < fly_n; ++i)
@@ -340,6 +355,7 @@ void load_sd(void) {
   candidate_t panel[kMaxCandidates];
   const int panel_n = scan_dir(kPanelDir, RC_TARGET_PANEL, panel,
                                kMaxCandidates);
+  s_sd_panel_count = panel_n;
   if (panel_n > 0) {
     pc_image_list_t list = {};
     for (int i = 0; i < panel_n; ++i)
@@ -468,6 +484,14 @@ extern "C" bool firmware_image_store_fly(const rc_manifest_t *m,
 }
 
 extern "C" bool firmware_image_sd_present(void) { return s_sd_mounted; }
+
+extern "C" void firmware_image_sd_info(bool *present, int *fly_images,
+                                       int *panel_images, uint32_t *free_kb) {
+  if (present) *present = s_sd_mounted;
+  if (fly_images) *fly_images = s_sd_fly_count;
+  if (panel_images) *panel_images = s_sd_panel_count;
+  if (free_kb) *free_kb = s_sd_free_kb;
+}
 
 extern "C" const ss_fw_image_t *firmware_image_fly(void) {
   return s_fly.present ? &s_fly : nullptr;

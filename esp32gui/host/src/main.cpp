@@ -317,6 +317,10 @@ ui_snapshot_t make_snapshot() {
     std::memcpy(e->data, can_rows[i].data, can_rows[i].len);
   }
 
+  s.sd_present = true;
+  s.sd_fly_images = 1;
+  s.sd_panel_images = 1;
+  s.sd_free_mb = 14800;
   s.display_timeout_s = 60;
   s.boot_count = 7;
   s.last_watchpoint = 3;

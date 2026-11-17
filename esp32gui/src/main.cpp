@@ -550,6 +550,10 @@ void build_snapshot(ui_snapshot_t *snap) {
                 s_panel_status);
   snap->panel_image_ready = firmware_image_panel() != nullptr;
   panel_ota_last_note(snap->ota_last_result, sizeof(snap->ota_last_result));
+  uint32_t sd_free_kb = 0;
+  firmware_image_sd_info(&snap->sd_present, &snap->sd_fly_images,
+                         &snap->sd_panel_images, &sd_free_kb);
+  snap->sd_free_mb = sd_free_kb / 1024u;
   panel_update_get(&snap->panel_update_active, &snap->panel_update_error,
                    &snap->panel_update_progress, snap->panel_update_stage,
                    sizeof(snap->panel_update_stage),
