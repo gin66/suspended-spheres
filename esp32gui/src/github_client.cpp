@@ -38,6 +38,9 @@ char s_release[4096];
 net_github_result_t s_result;
 bool s_have_release = false;
 bool s_fly_update = false;
+/* Parsed into a static: rc_release_t is ~3 KiB and the net task stack is
+ * shared with the TLS client. */
+rc_release_t s_release_meta;
 
 bool sntp_valid(void) { return time(nullptr) > 1700000000; }
 
@@ -275,7 +278,7 @@ extern "C" void github_client_check(void) {
   std::snprintf(s_status, sizeof(s_status), "checking...");
   if (!fetch_text(url, s_release, sizeof(s_release))) return;
 
-  rc_release_t rel;
+  rc_release_t &rel = s_release_meta;
   if (rc_release_parse(s_release, &rel) != 0) {
     std::snprintf(s_status, sizeof(s_status), "error: invalid release.json");
     s_have_release = false;
@@ -313,7 +316,7 @@ extern "C" void github_client_install(void) {
     return;
   }
   panel_update_clear();
-  rc_release_t rel;
+  rc_release_t &rel = s_release_meta;
   if (rc_release_parse(s_release, &rel) != 0) {
     std::snprintf(s_status, sizeof(s_status), "bad release.json");
     return;

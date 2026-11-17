@@ -1043,7 +1043,10 @@ extern "C" void net_manager_init(void) {
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
   register_handlers();
-  if (xTaskCreatePinnedToCore(net_task, "net", 8192, nullptr, 2, nullptr, 0) !=
+  /* 20 KiB: TLS, release.json parsing and the panel/Fly manifests all run on
+   * this task.  The old 8 KiB stack reset the panel on CHECK with a stack
+   * canary fault in the net task. */
+  if (xTaskCreatePinnedToCore(net_task, "net", 20480, nullptr, 2, nullptr, 0) !=
       pdPASS) {
     SS_LOGE("net", "network task not started");
   }
