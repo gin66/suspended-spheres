@@ -63,7 +63,7 @@ bool s_display_wake_lock = false;
 int s_selected_animation = 0;
 bool s_animation_loading = false;
 char s_animation_status[64] = "SD file listing is not implemented";
-char s_panel_status[64] = "idle";
+char s_panel_status[64] = "";
 ss_can_id_entry_t *s_can_scratch = nullptr;
 
 static uint32_t lv_tick_cb(void) { return (uint32_t)millis(); }

@@ -65,10 +65,11 @@ dead end.
 
 **SERVICE**
 
-1. **FIRMWARE** — node image, versions, fleet upgrade, GitHub release check.
+1. **FIRMWARE** — node image versions and fleet upgrade, the panel image
+   (SD and GitHub), and the GitHub release check.
 2. **CAN SCOPE** — live traffic by identifier.
 3. **LOG** — boot, CAN and commissioning events.
-4. **SYSTEM** — build/runtime, display timeout, panel image update.
+4. **SYSTEM** — build/runtime and display timeout.
 
 SHOW is the performance console, not a commissioning dashboard.  It owns the
 animation playlist and the transport: `PLAY`, `PAUSE`, `STOP`, `CYCLE`.  The
@@ -146,7 +147,8 @@ make the screen jump and remove the explanation.
 - `SET ADMIN` is available in AP mode; it is not needed for STA.
 - GitHub check/install lives in **SERVICE → FIRMWARE**.  It is disabled
   unless CONNECTED; it has no meaning in AP mode.
-- `PANEL FROM SD` is disabled when no panel image is present on SD.
+- `PANEL FROM SD` in SERVICE → FIRMWARE is disabled when no panel image is
+  present on SD.  Panel update has exactly one home: the firmware screen.
 - Firmware actions are disabled while a fleet upgrade is active; `STOP` is
   disabled when idle.
 - Show actions that would conflict with an active upgrade are disabled.
@@ -246,8 +248,9 @@ failure, not a review note.
 - CONNECT failure stays in CONNECTING and retries; no AP appears.
 - AP only starts from an explicit **AP** action; the AP screen shows a
   join QR and a browser QR, the current password, and `NEW KEY`/`SET KEY`.
-- GitHub check/install is in SERVICE → FIRMWARE and disabled unless
-  CONNECTED.
+- GitHub check/install and the SD panel image are both in SERVICE →
+  FIRMWARE; GitHub is disabled unless CONNECTED.  No other screen updates
+  the panel.
 - `FORGET` ends in OFF, not AP.
 - Network-only actions are disabled with an inline reason when not
   connected.
@@ -272,7 +275,10 @@ failure, not a review note.
   fields are disabled outside AP.
 - SYSTEM is the read-only build/runtime screen; the former footer buttons
   that overlapped the panel border are gone.  Display timeout is a four-way
-  segmented control (OFF, 30 s, 60 s, 300 s), not a hidden cycle.
+  segmented control (OFF, 30 s, 60 s, 300 s), not a hidden cycle.  Panel
+  update lives in FIRMWARE, not SYSTEM.
+- Local builds compile the GitHub owner/repository defaults; the tag workflow
+  overrides them from the repository that ran the tag.
 - While an animation is running, the library panel yields to the square red
   **STOP** target.  It sends the immediate stop; the transport `STOP`
   remains the decelerating stop.  The playlist never moves.

@@ -118,9 +118,10 @@ All technical Markdown belongs in `doc/`. Only `README.md` and `AGENTS.md` sit a
   are the panel path. The bench
   console has `wifi ap|off|forget|scan|retry|status|list|key`, `service on|off`,
   `github check|install|status` and `panelota`.  The GitHub owner/repository
-  are compiled from `SS_GITHUB_OWNER`/`SS_GITHUB_REPO`; the release workflow
-  fills them from the repository that ran the tag, so no extra variables
-  need to be configured.  An empty value disables the pull. LVGL objects, the UI snapshot and the CAN scratch copy are in
+  are compiled from `SS_GITHUB_OWNER`/`SS_GITHUB_REPO`; local builds default
+  to `gin66/suspended-spheres` and the release workflow overrides them from
+  the repository that ran the tag, so no extra variables need to be
+  configured.  An empty value disables the pull. LVGL objects, the UI snapshot and the CAN scratch copy are in
   PSRAM so internal DRAM remains for lwIP and the WiFi driver. `release_gate.h` rejects a
   build that sets both `SS_RELEASE` and `SS_CAN_MOCK`. Never upload or flash
   without an explicit request.

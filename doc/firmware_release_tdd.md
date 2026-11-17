@@ -515,9 +515,11 @@ On clean commit `bc954a62`, build id `1794858657`:
   `.../releases/download/<tag>/<asset>`, rejects an asset URL outside the
   pinned repository, verifies SHA-256, stores the Fly bundle on SD and applies
   the panel image with `panel_ota_apply` (reboot).
-- Settings has **CHECK UPDATES**; the web control page has check and
-  install (the POST is the confirmation); the bench console has
-  `github check|install|status`.
+- SERVICE → FIRMWARE has **GITHUB CHECK** and **INSTALL**; the web control
+  page has check and install (the POST is the confirmation); the bench
+  console has `github check|install|status`.  Local builds default the owner
+  and repository to `gin66/suspended-spheres`; the tag workflow overrides
+  both.
 - The panel WIFI screen and keyboard are compiled and shown in the host PNG;
   touch/keyboard interaction on the panel has not been exercised yet.
 - Not exercised against GitHub in this session: the setup AP was started and

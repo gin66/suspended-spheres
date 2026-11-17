@@ -264,10 +264,10 @@ in `esp32gui/host/png/`.
 | Config | Grid size, test-run drop/speed/gap, serpentine, save/reset/clear, SPIFFS state |
 | Connect | Explicit OFF / CONNECT / AP, scan, password keypad, service, AP password/rotate/edit, join/browser QR, reason |
 | Service hub | Firmware, CAN scope, Log, System |
-| Firmware | Fly image, node versions, fleet upgrade, GitHub check/install; 30 tiles on one page in 6 × 5 order; board ID, neutral queued, the one yellow Katapult board, green verified, dim excluded; `QUERY ALL`, `UPGRADE ALL OUTDATED`, `UPGRADE SELECTED`, `STOP`, image version/build/source and `n / 30` |
+| Firmware | Fly node image, panel image from SD, GitHub check/install, fleet upgrade; 30 tiles on one page in 6 × 5 order; board ID, neutral queued, the one yellow Katapult board, green verified, dim excluded; `QUERY ALL`, `UPGRADE ALL OUTDATED`, `UPGRADE SELECTED`, `STOP`, image version/build/source and `n / 30` |
 | CAN | Received-frame scope by identifier (raw ID, type, count, last data), TX sent/rejected, RX drops, bus-off state; clear |
 | Log | Recent PSRAM log ring, boot count, last watchpoint, last safe hold, thermal transitions |
-| System | Firmware, boot, uptime, capacity, watchpoint, CAN state, WiFi/IP, online boards, assigned positions, node image, display timeout, panel image update |
+| System | Firmware, boot, uptime, capacity, watchpoint, CAN state, WiFi/IP, online boards, assigned positions, node image, display timeout |
 
 The Animations screen is the file-selection UI. The SD enumeration and HBP2
 load/playback backend are not implemented yet, so the firmware reports that

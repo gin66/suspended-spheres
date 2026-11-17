@@ -164,10 +164,8 @@ lv_obj_t *s_set_boot;
 lv_obj_t *s_set_uptime;
 lv_obj_t *s_set_capacity;
 lv_obj_t *s_set_watch;
-lv_obj_t *s_set_display;
-lv_obj_t *s_set_panel_status;
-lv_obj_t *s_set_panel_update;
-lv_obj_t *s_set_panel_image;
+lv_obj_t *s_upg_panel_status;
+lv_obj_t *s_upg_panel_update;
 lv_obj_t *s_set_boards;
 lv_obj_t *s_set_positions;
 lv_obj_t *s_set_node_image;
@@ -1716,7 +1714,7 @@ void build_upgrade(void) {
   lv_obj_t *s = s_screens[UI_SCREEN_UPGRADE];
   lv_obj_t *head = make_panel(s, 12, 8, 688, 48);
   make_back_button(head, UI_SCREEN_SERVICE);
-  lv_obj_t *title = make_label(head, "NODE FIRMWARE", &lv_font_montserrat_20,
+  lv_obj_t *title = make_label(head, "FIRMWARE", &lv_font_montserrat_20,
                                C_TEXT);
   lv_obj_set_pos(title, 44, 0);
   s_upgrade_summary = make_label(head, "", &lv_font_montserrat_12, C_MUTED);
@@ -1751,22 +1749,36 @@ void build_upgrade(void) {
   lv_obj_set_style_radius(s_upgrade_progress, 4, 0);
   lv_obj_set_style_radius(s_upgrade_progress, 4, LV_PART_INDICATOR);
 
-  lv_obj_t *gh = make_panel(s, 12, 158, 688, 44);
-  lv_obj_set_style_pad_all(gh, 8, 0);
-  make_label(gh, "GITHUB", &lv_font_montserrat_12, C_MUTED);
-  lv_obj_set_pos(lv_obj_get_child(gh, 0), 0, 8);
-  s_upg_github_check = make_button(gh, "CHECK", 82, 28, on_github_check,
+  /* One row for both firmware sources: the panel image on SD and the
+   * GitHub release.  A panel update belongs here, with the node image,
+   * not under SYSTEM. */
+  lv_obj_t *src = make_panel(s, 12, 158, 688, 44);
+  lv_obj_set_style_pad_all(src, 4, 0);
+  lv_obj_t *pl = make_label(src, "PANEL", &lv_font_montserrat_12, C_MUTED);
+  lv_obj_set_pos(pl, 0, 10);
+  s_upg_panel_update = make_button(src, "FROM SD", 88, 28, on_panel_update,
                                    nullptr);
-  lv_obj_set_pos(s_upg_github_check, 54, 0);
+  lv_obj_set_pos(s_upg_panel_update, 44, 0);
+  lv_obj_set_style_text_font(s_upg_panel_update, &lv_font_montserrat_12, 0);
+  s_upg_panel_status = make_label(src, "", &lv_font_montserrat_12, C_MUTED);
+  lv_obj_set_pos(s_upg_panel_status, 138, 6);
+  lv_obj_set_width(s_upg_panel_status, 156);
+  lv_label_set_long_mode(s_upg_panel_status, LV_LABEL_LONG_CLIP);
+
+  lv_obj_t *gl = make_label(src, "GITHUB", &lv_font_montserrat_12, C_MUTED);
+  lv_obj_set_pos(gl, 304, 10);
+  s_upg_github_check = make_button(src, "CHECK", 64, 28, on_github_check,
+                                   nullptr);
+  lv_obj_set_pos(s_upg_github_check, 356, 0);
   lv_obj_set_style_text_font(s_upg_github_check, &lv_font_montserrat_12, 0);
-  s_upg_github_install = make_button(gh, "INSTALL", 84, 28, on_github_install,
+  s_upg_github_install = make_button(src, "INSTALL", 70, 28, on_github_install,
                                      nullptr);
-  lv_obj_set_pos(s_upg_github_install, 144, 0);
+  lv_obj_set_pos(s_upg_github_install, 426, 0);
   lv_obj_set_style_text_font(s_upg_github_install, &lv_font_montserrat_12, 0);
-  s_upg_github_status = make_label(gh, "not queried",
+  s_upg_github_status = make_label(src, "not queried",
                                    &lv_font_montserrat_12, C_MUTED);
-  lv_obj_set_pos(s_upg_github_status, 240, 8);
-  lv_obj_set_width(s_upg_github_status, 420);
+  lv_obj_set_pos(s_upg_github_status, 502, 6);
+  lv_obj_set_width(s_upg_github_status, 166);
   lv_label_set_long_mode(s_upg_github_status, LV_LABEL_LONG_CLIP);
 
   /* 30 tiles on one page: 6 columns by 5 rows, no second page and no
@@ -2032,7 +2044,7 @@ void build_settings(void) {
   lv_obj_t *title = make_label(head, "SYSTEM", &lv_font_montserrat_20,
                                C_TEXT);
   lv_obj_set_pos(title, 44, 0);
-  lv_obj_t *hint = make_label(head, "build, display and panel",
+  lv_obj_t *hint = make_label(head, "build, runtime and display",
                               &lv_font_montserrat_12, C_MUTED);
   lv_obj_align(hint, LV_ALIGN_RIGHT_MID, -12, 0);
 
@@ -2053,44 +2065,31 @@ void build_settings(void) {
   s_set_positions = make_kv(state, "Positions", 96);
   s_set_node_image = make_kv(state, "Node image", 118);
 
-  lv_obj_t *display = make_panel(s, 12, 256, 332, 188);
+  lv_obj_t *display = make_panel(s, 12, 256, 688, 188);
   make_label(display, "DISPLAY", &lv_font_montserrat_14, C_MUTED);
   lv_obj_t *display_text = make_label(display, "Backlight off after",
                                       &lv_font_montserrat_14, C_TEXT);
-  lv_obj_set_pos(display_text, 0, 28);
+  lv_obj_set_pos(display_text, 0, 34);
   static const uint16_t kPresets[4] = {0, 30, 60, 300};
   static const char *kPresetText[4] = {"OFF", "30 s", "60 s", "300 s"};
   for (int i = 0; i < 4; ++i) {
-    s_disp_btn[i] = make_button(display, kPresetText[i], 68, 36,
+    s_disp_btn[i] = make_button(display, kPresetText[i], 110, 40,
                                 on_display_preset,
                                 (void *)(intptr_t)kPresets[i]);
-    lv_obj_set_pos(s_disp_btn[i], i * 74, 52);
+    lv_obj_set_pos(s_disp_btn[i], i * 120, 62);
   }
-  s_set_display = s_disp_btn[2];
   lv_obj_t *display_hint = make_label(
-      display, "First touch only wakes the display; it does not press the control underneath.",
+      display,
+      "The first touch only wakes the display; it is consumed and does not "
+      "press the control underneath.",
       &lv_font_montserrat_12, C_MUTED);
-  lv_obj_set_pos(display_hint, 0, 102);
-  lv_obj_set_width(display_hint, 300);
+  lv_obj_set_pos(display_hint, 0, 112);
+  lv_obj_set_width(display_hint, 640);
   lv_label_set_long_mode(display_hint, LV_LABEL_LONG_WRAP);
-
-  lv_obj_t *panel = make_panel(s, 356, 256, 344, 188);
-  make_label(panel, "PANEL IMAGE", &lv_font_montserrat_14, C_MUTED);
-  s_set_panel_image = make_label(panel, "", &lv_font_montserrat_14, C_TEXT);
-  lv_obj_set_pos(s_set_panel_image, 0, 28);
-  s_set_panel_status = make_label(panel, "", &lv_font_montserrat_12, C_MUTED);
-  lv_obj_set_pos(s_set_panel_status, 0, 54);
-  lv_obj_set_width(s_set_panel_status, 300);
-  lv_label_set_long_mode(s_set_panel_status, LV_LABEL_LONG_CLIP);
-  s_set_panel_update = make_button(panel, "PANEL FROM SD", 180, 40,
-                                   on_panel_update, nullptr);
-  lv_obj_set_pos(s_set_panel_update, 0, 82);
-  lv_obj_t *panel_hint = make_label(
-      panel, "Loads the panel UF2 from SD, verifies it and reboots.",
+  lv_obj_t *display_hint2 = make_label(
+      display, "A running test or firmware queue keeps the screen on.",
       &lv_font_montserrat_12, C_MUTED);
-  lv_obj_set_pos(panel_hint, 0, 132);
-  lv_obj_set_width(panel_hint, 300);
-  lv_label_set_long_mode(panel_hint, LV_LABEL_LONG_WRAP);
+  lv_obj_set_pos(display_hint2, 0, 148);
 }
 
 lv_obj_t *hub_card(lv_obj_t *parent, int x, int y, int w, int h,
@@ -3061,6 +3060,24 @@ void ui_update(const ui_snapshot_t *snapshot) {
     else lv_obj_add_state(s_upgrade_stop, LV_STATE_DISABLED);
   }
 
+  /* Panel image source, next to the node image: one firmware screen owns
+   * both.  The SD path needs no network; the GitHub path needs CONNECTED. */
+  const bool panel_ready = s_snap->panel_image_ready;
+  if (panel_ready) lv_obj_clear_state(s_upg_panel_update, LV_STATE_DISABLED);
+  else lv_obj_add_state(s_upg_panel_update, LV_STATE_DISABLED);
+  const char *panel_text = s_snap->panel_status;
+  if (!panel_ready) {
+    panel_text = "no image on SD";
+  } else if (panel_text[0] == '\0' || std::strcmp(panel_text, "idle") == 0) {
+    panel_text = "ready to load";
+  }
+  lv_label_set_text(s_upg_panel_status, panel_text);
+  lv_color_t panel_color = panel_ready ? C_OK : C_MUTED;
+  if (std::strncmp(panel_text, "error", 5) == 0 ||
+      std::strstr(panel_text, "failed") != nullptr)
+    panel_color = C_ERR;
+  lv_obj_set_style_text_color(s_upg_panel_status, panel_color, 0);
+
   /* Network screen */
   uint32_t wifi_hash = 2166136261u;
   for (const char *p = s_snap->wifi_state; *p != '\0'; ++p)
@@ -3264,22 +3281,6 @@ void ui_update(const ui_snapshot_t *snapshot) {
     lv_obj_set_style_border_color(s_disp_btn[i], active ? C_ACCENT : C_LINE,
                                   0);
   }
-
-  lv_label_set_text(s_set_panel_image,
-                    s_snap->panel_image_ready ? "image ready on SD"
-                                              : "no panel image on SD");
-  lv_obj_set_style_text_color(s_set_panel_image,
-                              s_snap->panel_image_ready ? C_OK : C_MUTED, 0);
-  if (s_snap->panel_image_ready) {
-    lv_obj_clear_state(s_set_panel_update, LV_STATE_DISABLED);
-  } else {
-    lv_obj_add_state(s_set_panel_update, LV_STATE_DISABLED);
-  }
-  lv_label_set_text(s_set_panel_status,
-                    s_snap->panel_status[0]
-                        ? s_snap->panel_status
-                        : (s_snap->panel_image_ready ? "ready to load"
-                                                     : "copy a panel UF2 to SD"));
 
   /* SERVICE hub footer: the three facts that decide what to do next. */
   lv_label_set_text_fmt(s_diag_can, "CAN %s %s  |  %lu/%lu boards  |  %lu/%lu positions",
