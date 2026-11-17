@@ -200,6 +200,8 @@ void install_release(const rc_release_t *rel) {
     } else if (need_fly) {
       s_fly_update = false;
       panel_update_clear();
+      panel_ota_set_note(fly_stored ? "node stored; panel current"
+                                    : "node store failed");
       std::snprintf(s_status, sizeof(s_status), "node %s stored", version);
     } else {
       std::snprintf(s_status, sizeof(s_status), "nothing to apply");

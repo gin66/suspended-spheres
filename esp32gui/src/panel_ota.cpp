@@ -73,7 +73,6 @@ int ota_mark(void *ctx) {
 extern "C" bool panel_ota_apply(const rc_manifest_t *m, const uint8_t *data,
                                 size_t len, char *status,
                                 unsigned status_len) {
-  set_note("pending boot check");
   if (m == nullptr || data == nullptr || len == 0) {
     set_status(status, status_len, "bad panel bundle");
     return false;
@@ -197,16 +196,23 @@ extern "C" void panel_ota_boot_check(bool display_ok, bool can_ok) {
   if (esp_ota_get_state_partition(running, &state) != ESP_OK) return;
   if (state != ESP_OTA_IMG_PENDING_VERIFY) return;
   if (display_ok && can_ok) {
-    set_note("validated");
+    set_note(firmware_image_fly() ? "validated; node ready"
+                                  : "validated; node missing");
     const esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
     SS_LOGI("ota", "pending image marked valid: %s", esp_err_to_name(err));
   } else {
-    set_note(display_ok ? "rollback: CAN off" : "rollback: display");
+    char note[64];
+    std::snprintf(note, sizeof(note), "rollback: %s; node %s",
+                  display_ok ? "CAN off" : "display",
+                  firmware_image_fly() ? "ready" : "missing");
+    set_note(note);
     SS_LOGE("ota", "self-test failed (display=%d can=%d); rolling back",
             (int)display_ok, (int)can_ok);
     esp_ota_mark_app_invalid_rollback_and_reboot();
   }
 }
+
+extern "C" void panel_ota_set_note(const char *text) { set_note(text); }
 
 extern "C" void panel_ota_last_note(char *out, unsigned len) {
   if (out == nullptr || len == 0) return;

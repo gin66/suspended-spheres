@@ -296,15 +296,18 @@ failure, not a review note.
   **STOP** target.  It sends the immediate stop; the transport `STOP`
   remains the decelerating stop.  The playlist never moves.
 - A panel update shows a full-screen overlay with the stage and download
-  percentage.  After the image is downloaded, the overlay stays visible for
-  1.5 s, then the main loop cuts the backlight before `esp_ota_write`, so the
-  cache stall cannot draw a garbled frame.  On failure the backlight returns
-  and the overlay shows the reason with `DISMISS`.
+  percentage.  While it is up, the snapshot task stops redrawing the hidden
+  screens so the download does not compete with the RGB panel.  After the
+  image is downloaded, the overlay stays visible for 1.5 s, then the main loop
+  cuts the backlight before `esp_ota_write`, so the cache stall cannot draw a
+  garbled frame.  On failure the backlight returns and the overlay shows the
+  reason with `DISMISS`.
 - The status strip carries the running panel version and build, so an update
   that rolls back is visible immediately.  Boards show each node's running
   `sw` version.  SYSTEM → `Last update` keeps the boot-check outcome
-  (`validated`, `rollback: CAN off`, ...), which survives the rollback reset
-  in RTC memory.
+  (`validated; node ready`, `rollback: CAN off; node missing`, ...), which
+  survives the rollback reset in RTC memory.  A node-only install records
+  `node stored; panel current`.
 - The display backlight turns off after inactivity; the first touch only
   wakes the display and is consumed, so it cannot activate the control
   underneath.

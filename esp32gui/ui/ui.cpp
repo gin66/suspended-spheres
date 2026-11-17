@@ -2478,6 +2478,9 @@ void ui_update(const ui_snapshot_t *snapshot) {
                       done ? "Rebooting into the new image."
                            : (failed ? s_snap->panel_update_result : ""));
     set_hidden(s_update_dismiss, !failed);
+    /* The overlay covers the UI; do not spend PSRAM/CPU redrawing the hidden
+     * screens while TLS is downloading the image. */
+    return;
   }
 
   /* SHOW — now playing, transport, playlist and library.  A file that fails

@@ -27,6 +27,9 @@ void panel_ota_boot_check(bool display_ok, bool can_ok);
 /* Copy the last boot-check outcome ("validated", "rollback: CAN", ...). */
 void panel_ota_last_note(char *out, unsigned len);
 
+/* Replace the RTC note (used before a reboot to record the node result). */
+void panel_ota_set_note(const char *text);
+
 #ifdef __cplusplus
 }
 #endif

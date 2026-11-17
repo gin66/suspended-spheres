@@ -167,7 +167,9 @@ bool load_spiffs_fly(void) {
   if (rc_manifest_parse(text, &m) != 0 ||
       std::strcmp(m.target, RC_TARGET_FLY) != 0 ||
       !rc_manifest_katapult_ok(&m)) {
-    SS_LOGW("image", "SPIFFS fly manifest rejected");
+    SS_LOGW("image", "SPIFFS fly manifest rejected; removing");
+    SPIFFS.remove(kSpiffsFlyBin);
+    SPIFFS.remove(kSpiffsFlyJson);
     return false;
   }
   File bf = SPIFFS.open(kSpiffsFlyBin, FILE_READ);
@@ -178,7 +180,9 @@ bool load_spiffs_fly(void) {
   const size_t len = bf.size();
   if (len == 0 || len != m.size) {
     bf.close();
-    SS_LOGW("image", "SPIFFS fly size mismatch");
+    SS_LOGW("image", "SPIFFS fly size mismatch; removing");
+    SPIFFS.remove(kSpiffsFlyBin);
+    SPIFFS.remove(kSpiffsFlyJson);
     return false;
   }
   uint8_t *data = (uint8_t *)heap_caps_malloc(len, MALLOC_CAP_SPIRAM);
@@ -195,7 +199,9 @@ bool load_spiffs_fly(void) {
   rc_sha256_hex(data, len, sha);
   if (got != len || std::strcmp(sha, m.sha256) != 0) {
     heap_caps_free(data);
-    SS_LOGW("image", "SPIFFS fly read/SHA-256 failed");
+    SS_LOGW("image", "SPIFFS fly read/SHA-256 failed; removing");
+    SPIFFS.remove(kSpiffsFlyBin);
+    SPIFFS.remove(kSpiffsFlyJson);
     return false;
   }
   /* Both stores may hold a generation; the highest build wins. */
@@ -238,9 +244,9 @@ bool store_spiffs_fly(const rc_manifest_t *m, const uint8_t *data, size_t len,
     if (status && status_len) std::snprintf(status, status_len, "SPIFFS full");
     return false;
   }
-  const char *tmp_bin = "/fw_fly.bin.tmp";
-  const char *tmp_json = "/fw_fly.json.tmp";
-  File f = SPIFFS.open(tmp_bin, FILE_WRITE);
+  /* Write the binary first, then the manifest.  A missing or bad manifest on
+   * the next boot is ignored; a half-written pair is never treated as valid. */
+  File f = SPIFFS.open(kSpiffsFlyBin, FILE_WRITE);
   if (!f) {
     if (status && status_len) std::snprintf(status, status_len, "open failed");
     return false;
@@ -248,29 +254,22 @@ bool store_spiffs_fly(const rc_manifest_t *m, const uint8_t *data, size_t len,
   const bool bin_ok = f.write(data, len) == len;
   f.close();
   if (!bin_ok) {
-    SPIFFS.remove(tmp_bin);
+    SPIFFS.remove(kSpiffsFlyBin);
     if (status && status_len) std::snprintf(status, status_len, "short write");
     return false;
   }
-  f = SPIFFS.open(tmp_json, FILE_WRITE);
+  f = SPIFFS.open(kSpiffsFlyJson, FILE_WRITE);
   if (!f) {
-    SPIFFS.remove(tmp_bin);
+    SPIFFS.remove(kSpiffsFlyBin);
     if (status && status_len) std::snprintf(status, status_len, "json open failed");
     return false;
   }
   const bool json_ok = f.write((const uint8_t *)text, tn) == tn;
   f.close();
   if (!json_ok) {
-    SPIFFS.remove(tmp_bin);
-    SPIFFS.remove(tmp_json);
+    SPIFFS.remove(kSpiffsFlyBin);
+    SPIFFS.remove(kSpiffsFlyJson);
     if (status && status_len) std::snprintf(status, status_len, "json write failed");
-    return false;
-  }
-  SPIFFS.remove(kSpiffsFlyBin);
-  SPIFFS.remove(kSpiffsFlyJson);
-  if (!SPIFFS.rename(tmp_bin, kSpiffsFlyBin) ||
-      !SPIFFS.rename(tmp_json, kSpiffsFlyJson)) {
-    if (status && status_len) std::snprintf(status, status_len, "rename failed");
     return false;
   }
   firmware_image_reload();
