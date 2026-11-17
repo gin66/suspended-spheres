@@ -75,6 +75,15 @@ jobs:
           .platformio-venv/bin/pip install "platformio==6.2.0"
           .platformio-venv/bin/pio --version
           echo "$PWD/.platformio-venv/bin" >> "$GITHUB_PATH"
+          # The runner image ships a -post.1 Core that pioarduino rejects
+          # inside its size-check subprocess.  Point every pio at the pinned
+          # venv core.
+          mkdir -p "$HOME/.platformio/penv/bin"
+          ln -sf "$PWD/.platformio-venv/bin/pio" "$HOME/.platformio/penv/bin/pio"
+          sudo ln -sf "$PWD/.platformio-venv/bin/pio" /usr/local/bin/pio
+          hash -r
+          which -a pio
+          pio --version
 
       - name: Host tests
         run: |
