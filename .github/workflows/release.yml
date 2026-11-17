@@ -106,6 +106,7 @@ jobs:
           cd rp2040
           export PATH="$GITHUB_WORKSPACE/.platformio-venv/bin:$PATH"
           export PYTHONEXE="$GITHUB_WORKSPACE/.platformio-venv/bin/python"
+          unset PYTHONPATH PYTHONHOME
           pio --version
           pio run -e fly_micro4_katapult
 
@@ -123,6 +124,7 @@ jobs:
           cd esp32gui
           export PATH="$GITHUB_WORKSPACE/.platformio-venv/bin:$PATH"
           export PYTHONEXE="$GITHUB_WORKSPACE/.platformio-venv/bin/python"
+          unset PYTHONPATH PYTHONHOME
           pio --version
           pio run -e esp32can
 
