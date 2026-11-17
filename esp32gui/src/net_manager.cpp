@@ -61,6 +61,7 @@ volatile cmd_t s_cmd = CMD_NONE;
 volatile bool s_cmd_service_on = false;
 
 char s_scan[12][33];
+int s_scan_rssi[12];
 int s_scan_count = 0;
 char s_pending_ssid[33] = "";
 char s_pending_pass[65] = "";
@@ -296,10 +297,26 @@ void do_scan(void) {
   unlock();
   const int n = WiFi.scanNetworks();
   lock();
-  s_scan_count = n < 0 ? 0 : (n > 12 ? 12 : n);
-  for (int i = 0; i < s_scan_count; ++i) {
-    std::snprintf(s_scan[i], sizeof(s_scan[i]), "%s",
-                  WiFi.SSID(i).c_str());
+  s_scan_count = 0;
+  for (int i = 0; i < n && s_scan_count < 12; ++i) {
+    const String ssid = WiFi.SSID(i);
+    if (ssid.length() == 0) continue;
+    const int rssi = WiFi.RSSI(i);
+    int found = -1;
+    for (int j = 0; j < s_scan_count; ++j) {
+      if (ssid == s_scan[j]) {
+        found = j;
+        break;
+      }
+    }
+    if (found >= 0) {
+      if (rssi > s_scan_rssi[found]) s_scan_rssi[found] = rssi;
+    } else {
+      std::snprintf(s_scan[s_scan_count], sizeof(s_scan[s_scan_count]), "%s",
+                    ssid.c_str());
+      s_scan_rssi[s_scan_count] = rssi;
+      ++s_scan_count;
+    }
   }
   unlock();
   WiFi.scanDelete();
@@ -797,6 +814,14 @@ void register_handlers(void) {
 
 void net_task(void *arg) {
   (void)arg;
+  /* Stored credentials are an operator opt-in from an earlier session.  Join
+   * that network at boot, but keep the HTTP service off until Settings.  Give
+   * the Arduino WiFi driver a moment to finish its own initialization. */
+  vTaskDelay(pdMS_TO_TICKS(2000));
+  if (s_have_cred && s_ssid[0] != '\0') {
+    SS_LOGI("net", "auto-connect to stored %s", s_ssid);
+    connect_sta();
+  }
   for (;;) {
     vTaskDelay(pdMS_TO_TICKS(50));
     cmd_t cmd;
@@ -954,9 +979,10 @@ extern "C" bool net_manager_service_on(void) {
 extern "C" void net_manager_status(char *out, unsigned len) {
   if (out == nullptr || len == 0) return;
   lock();
-  std::snprintf(out, len, "%s ssid=%s ip=%s service=%s %s",
+  std::snprintf(out, len, "%s ssid=%s ip=%s service=%s cred=%d admin=%d %s",
                 net_state_text(s_link.state), s_ssid[0] ? s_ssid : s_ap_ssid,
-                s_ip, s_service_on ? "on" : "off", s_link.reason);
+                s_ip, s_service_on ? "on" : "off", s_have_cred ? 1 : 0,
+                admin_set() ? 1 : 0, s_link.reason);
   unlock();
 }
 

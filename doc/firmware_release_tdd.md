@@ -537,3 +537,15 @@ On clean commit `bc954a62`, build id `1794858657`:
   because the repository has no GitHub Release yet.  WiFi, SNTP and the TLS
   request path therefore work; the install path still needs a published
   release.
+
+### WiFi persistence and scan dedupe (2026-11-17)
+
+- Credentials and the admin hash live in NVS (`Preferences` namespace
+  `ssnet`), not in SPIFFS or the version-2 config.  `wifi` reports
+  `cred=1 admin=1`; `FORGET` removes them.
+- A stored SSID/password auto-connects two seconds after boot; the HTTP
+  service remains off until Settings **SERVER**.
+- `WiFi.scanNetworks()` returns one entry per BSSID.  The firmware now folds
+  entries with the same SSID into one row, keeping the strongest RSSI.  Join
+  uses the SSID/password, so five APs with one SSID are one logical network;
+  there is no per-BSSID selection.
