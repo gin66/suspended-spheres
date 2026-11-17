@@ -165,8 +165,9 @@ All technical Markdown belongs in `doc/`. Only `README.md` and `AGENTS.md` sit a
 - **Firmware release.** Pushing an tag `vMAJOR.MINOR.PATCH` is the
   publish action.  The workflow drops the Arduino RainMaker, Zigbee and
   diagnostics managed components with `tools/drop_optional_components.py`
-  before the panel build; locally, run that script after `pio pkg install`
-  if the optional components are not wanted. `.github/workflows/release.yml` creates the GitHub Release
+  before the panel build, and `lib_ignore` excludes the matching Arduino
+  libraries; locally, run that script after `pio pkg install` if the optional
+  components are not wanted. `.github/workflows/release.yml` creates the GitHub Release
   after the host tests pass. The contract is
   `doc/firmware_release_whitepaper.md` §1.6. The test order is
   `doc/firmware_release_tdd.md`.
