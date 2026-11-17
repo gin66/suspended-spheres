@@ -5,7 +5,9 @@
 > jumper-selectable — J3 inserted only on the last board, open on every other
 > node. R39/R58 stay fitted; no desoldering is needed. This file owns board
 > identity, discovery, the volatile board ID, and CAN-ID allocation. The host
-> owns the map from a board axis to a grid position. A board does not.
+> owns the map from a local axis to a grid position and sends it to the board
+> with `PARAM`/`POSMAP`. Motion frames are then addressed by grid position;
+> the host does not translate a position into a board and an axis.
 >
 > Motion payloads, sample timing and the bus budget stay in
 > `motion_streaming_whitepaper.md`. Do not copy the ID layout back into that
@@ -45,7 +47,7 @@ The raw 8-byte flash ID is not a payload and is not a CAN identifier. A
 48-bit UUID does not fit in an 11-bit identifier, so the UUID is only a name.
 The short board ID in §2 is the runtime alias.
 
-## 2. Board ID and stepper addresses
+## 2. Board ID and motion addressing
 
 The 6-byte UUID is the only identity that survives power. The short board ID
 is RAM. A power cycle clears it, and the board is unidentified until the
@@ -54,24 +56,32 @@ master assigns it again.
 - Board IDs are **0–29**. The master assigns one. The board does not choose
   it and does not store it in flash.
 - Local stepper axes are **0–3**, in silkscreen order Drive0–Drive3.
-- The motor field skips **63**, because `(63 << 4) | 0` is Katapult's admin
-  identifier `0x3F0` (`katapult_whitepaper.md`). With
-  `raw = board_id × 4 + axis`:
+- The position field skips **63**, because `(63 << 4) | 0` is Katapult's
+  admin identifier `0x3F0` (`katapult_whitepaper.md`):
 
-  | `raw` | Motor field |
-  |-------|-------------|
-  | `0 … 62` | `raw` |
-  | `63 … 119` | `raw + 1` |
+  | Position | Field |
+  |----------|-------|
+  | `0 … 62` | position |
+  | `63 … 119` | position + 1 |
 
-  Board 0 owns motors 0–3. Board 15 owns 60, 61, 62 and 64. Board 29 owns
-  117–120. Field 63 is never a motor. Fields 121–127 are not motors.
-- The host stores `(uuid, axis 0–3) → position 0–119`. The board never
-  learns that position. Motion frames use the motor field above; the host
-  translates a grid position into a board and an axis before it sends.
+  The board ID still selects the node for status, command, home, version,
+  parameter and health frames. It does not select a motion field.
+- **Motion is addressed by grid position.** Position 0–119 uses the same
+  skip-63 encoding, so there are still 120 legal type-0 fields:
+  `field = position` for 0–62, `field = position + 1` for 63–119. Field 63
+  stays free for Katapult's `0x3F0`, and fields 121–127 are never motion.
+- The host stores `(uuid, axis 0–3) → position 0–119`. It sends that map to
+  the board with `PARAM`/`POSMAP` (type 6) after `ASSIGN`, after a mapping
+  change and before a show. The board keeps it in RAM and accepts type-0
+  frames only for those four position fields. It never derives a position
+  from its board ID or from `board × 4 + axis`.
+- A node that reboots loses its RAM board ID and its map, advertises on the
+  next `ASK`, and receives `ASSIGN` and `POSMAP` again.
 
 A known UUID is given the same board ID it already has in the host map,
-so the four motor fields stay put. An unknown UUID receives the lowest
-free board ID.
+so its status, command and health identifiers stay put. An unknown UUID
+receives the lowest free board ID and starts with all four positions
+unassigned until the operator maps them.
 
 ## 3. Discovery and assignment
 
@@ -144,7 +154,7 @@ Four identifiers are reserved for Katapult and are never a legal show frame.
 | 3 | status |
 | 4 | command |
 | 5 | home |
-| 6 | parameter |
+| 6 | parameter; sub-command 1 is `POSMAP` (motor 0–3 → grid position) |
 | 7 | fault / E-stop |
 | 8 | `DISC` — unidentified board, payload is the 6-byte UUID plus two zero bytes |
 | 9 | reserved (was `HELLO`) |
@@ -158,7 +168,7 @@ The 7-bit field is a motor field, a board ID, 127, or zero. The type says which:
 
 | Types | Field |
 |-------|--------|
-| 0 (motion) | motor field from §2: `0–62` and `64–120`. Field 63 and fields `121–127` are rejected |
+| 0 (motion) | position field from §2: `0–62` and `64–120`, i.e. grid position 0–119 with 63 skipped. Field 63 and fields `121–127` are rejected |
 | 1, 9 | reserved; reject |
 | 2 (sync), 8 (`DISC`), 11 (`ASK`) | 0 |
 | 3–7 (status, command, home, parameter, fault) | board ID 0–29, or 127 for every board |

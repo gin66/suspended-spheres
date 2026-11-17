@@ -41,6 +41,12 @@ bool can_transport_send(const ss_can_frame_t *frame) {
   return true;
 }
 
+bool can_transport_send_timeout(const ss_can_frame_t *frame,
+                                uint32_t timeout_ms) {
+  (void)timeout_ms;
+  return can_transport_send(frame);
+}
+
 void can_transport_get_stats(ss_can_stats_t *out) {
   if (out != nullptr) *out = s_stats;
 }

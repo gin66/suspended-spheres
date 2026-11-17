@@ -55,4 +55,12 @@ void tick();
 // re-advertises the board.
 bool take_reidentify_request();
 
+// Motor 0..3 -> grid position map from the last PARAM/POSMAP frame.  The
+// board stores it in RAM; the panel re-sends it after ASSIGN and before a
+// show.  Motion frames are accepted only for these four position fields.
+bool owns_motion_field(int field);
+// Local motor 0..3 for a type-0 position field, or -1.
+int motor_for_field(int field);
+int position_for_axis(int axis);
+
 }  // namespace can_node

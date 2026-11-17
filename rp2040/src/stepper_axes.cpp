@@ -133,6 +133,39 @@ void stopAll() {
     }
 }
 
+void abortAll() {
+    for (uint8_t i = 0; i < board::kDriveCount; i++) {
+        FastAccelStepper* stepper = axis(i);
+        if (stepper == nullptr) {
+            continue;
+        }
+        stepper->forceStop();
+        stepper->resumeCommands();
+    }
+}
+
+int timedChunk(uint8_t index, int16_t steps, uint16_t ticks) {
+    FastAccelStepper* stepper = axis(index);
+    if (stepper == nullptr || ticks == 0) {
+        return -1;
+    }
+    uint32_t actual = 0;
+    for (int attempt = 0; attempt < 4; ++attempt) {
+        const MoveTimedResultCode rc =
+            stepper->moveTimed(steps, (uint32_t)ticks, &actual, true);
+        if (rc == MoveTimedResultCode::OK ||
+            rc == MoveTimedResultCode::MoveEmpty) {
+            return 0;
+        }
+        if (rc == MoveTimedResultCode::DirChangePauseInjected ||
+            rc == MoveTimedResultCode::DirPin2msPauseAdded) {
+            continue;
+        }
+        return (int)rc;
+    }
+    return -100;
+}
+
 bool moveTo(uint8_t index, int32_t position) {
     FastAccelStepper* stepper = axis(index);
     if (stepper == nullptr) {

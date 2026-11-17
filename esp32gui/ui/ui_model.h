@@ -115,6 +115,8 @@ typedef struct {
   bool can_mock;
   bool bus_ok;
   bool safe_hold;
+  bool show_playing;
+  bool show_cycle;
   char hold_reason[64];
   char run_state[24];
   char pattern_name[40];
@@ -251,6 +253,7 @@ typedef struct {
   void (*animation_pause)(void);
   void (*animation_stop)(void);
   void (*animation_stop_immediate)(void);
+  void (*animation_cycle)(bool on);
   void (*version_query_all)(void);
   void (*upgrade_selected)(void);
   void (*upgrade_all_outdated)(void);

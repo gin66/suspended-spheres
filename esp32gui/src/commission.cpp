@@ -17,6 +17,7 @@ enum : int {
   kTypeStatus = 3,
   kTypeCommand = 4,
   kTypeHome = 5,
+  kTypeParam = 6,
   kTypeFault = 7,
   kTypeDisc = 8,
   kTypeAssign = 10,
@@ -187,6 +188,46 @@ void send_assign(int board_id, const uint8_t uuid[SS_UUID_LEN]) {
   }
 }
 
+/* Motor 0..3 -> grid position for one board, from the persisted map.  The
+ * board never derives this itself; the panel is the only writer. */
+void build_posmap(const uint8_t uuid[SS_UUID_LEN],
+                  uint8_t position[MC_AXES_PER_NODE]) {
+  for (int i = 0; i < MC_AXES_PER_NODE; ++i)
+    position[i] = MC_POS_UNASSIGNED;
+  const ss_config_t *cfg = config_store_get();
+  if (cfg == nullptr) return;
+  const int cap = config_store_capacity();
+  for (int p = 0; p < cap && p < SS_MAX_POSITIONS; ++p) {
+    const ss_position_map_t *m = &cfg->positions[p];
+    if (!m->assigned || m->axis >= MC_AXES_PER_NODE) continue;
+    if (std::memcmp(m->uuid, uuid, SS_UUID_LEN) != 0) continue;
+    position[m->axis] = (uint8_t)p;
+  }
+}
+
+void send_posmap(int board_id, const uint8_t uuid[SS_UUID_LEN]) {
+  mc_posmap_t map;
+  build_posmap(uuid, map.position);
+  map.seq = s_cmd_seq++;
+
+  ss_can_frame_t f;
+  std::memset(&f, 0, sizeof(f));
+  const int id = mc_id_make(board_id, kTypeParam);
+  if (id < 0) return;
+  f.id = (uint32_t)id;
+  f.len = 8;
+  if (mc_pack_param_posmap(&map, f.data) != 0) return;
+  if (!can_transport_send_timeout(&f, 5)) {
+    s_stats.tx_errors++;
+    SS_LOGW("commission", "POSMAP board %d send failed", board_id);
+    return;
+  }
+  SS_LOGI("commission",
+          "POSMAP board %d: %d %d %d %d", board_id,
+          (int)map.position[0], (int)map.position[1],
+          (int)map.position[2], (int)map.position[3]);
+}
+
 void handle_disc(const ss_can_frame_t *frame) {
   uint8_t uuid[SS_UUID_LEN];
   if (mc_unpack_uuid(frame->data, uuid) != 0) return;
@@ -226,6 +267,7 @@ void handle_disc(const ss_can_frame_t *frame) {
 
   if (assign_board >= 0) {
     send_assign(assign_board, uuid);
+    send_posmap(assign_board, uuid);
   } else {
     SS_LOGE("commission", "no free board ID for a discovered node");
   }
@@ -378,6 +420,50 @@ void recompute_stats(void) {
 }
 
 }  // namespace
+
+bool commission_send_posmap(int board_id) {
+  uint8_t uuid[SS_UUID_LEN];
+  bool found = false;
+  portENTER_CRITICAL(&s_lock);
+  const int idx = find_board_locked(board_id);
+  if (idx >= 0) {
+    std::memcpy(uuid, s_nodes[idx].uuid, SS_UUID_LEN);
+    found = true;
+  }
+  portEXIT_CRITICAL(&s_lock);
+  if (!found) return false;
+  send_posmap(board_id, uuid);
+  return true;
+}
+
+bool commission_any_fault(void) {
+  bool fault = false;
+  portENTER_CRITICAL(&s_lock);
+  for (int i = 0; i < s_count; ++i) {
+    if (!s_nodes[i].used || !s_nodes[i].status_seen) continue;
+    if (s_nodes[i].state == MC_STATUS_FAULT || s_nodes[i].fault_flags != 0) {
+      fault = true;
+      break;
+    }
+  }
+  portEXIT_CRITICAL(&s_lock);
+  return fault;
+}
+
+void commission_sync_posmaps(void) {
+  int ids[SS_MAX_BOARDS];
+  uint8_t uuids[SS_MAX_BOARDS][SS_UUID_LEN];
+  int count = 0;
+  portENTER_CRITICAL(&s_lock);
+  for (int i = 0; i < s_count && count < SS_MAX_BOARDS; ++i) {
+    if (!s_nodes[i].used || s_nodes[i].board_id < 0) continue;
+    ids[count] = s_nodes[i].board_id;
+    std::memcpy(uuids[count], s_nodes[i].uuid, SS_UUID_LEN);
+    ++count;
+  }
+  portEXIT_CRITICAL(&s_lock);
+  for (int i = 0; i < count; ++i) send_posmap(ids[i], uuids[i]);
+}
 
 void commission_init(void) {
   portENTER_CRITICAL(&s_lock);

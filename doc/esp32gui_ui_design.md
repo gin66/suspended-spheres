@@ -77,12 +77,19 @@ playlist lists only playable animations.  A file that fails HBP2 validation
 is not a playlist entry; it is counted as invalid and kept out of the list.
 Health moves to a single status line at the bottom.
 
+`CYCLE` is an icon-only circular-arrow toggle, not an ON/OFF caption: the
+icon and its border are blue when the show repeats and muted when it does
+not.  Colour is the state, so the button can never be read as an action.
+The one filled accent action follows the current action: `PLAY` while idle
+or paused, `PAUSE` while running.  `PLAY` is disabled and neutral during a
+show, so it never stays highlighted after playback starts.
+
 Library is part of SHOW.  The panel lists `/sdcard/animations/*.hbp`; the
 browser control page can upload a take to the same folder without removing the
-card.  Playback of HBP2 is still a separate master task, so `LOAD` reports
-that it is not implemented.  While an animation is playing the selected
-playlist stays visible and the library slot becomes the large square **STOP**
-target, so the choice is never hidden by the safety control.
+card.  `LOAD` starts the HBP2 show task, or resumes a paused show of the same
+file.  While an animation is playing the selected playlist stays visible and
+the library slot becomes the large square **STOP** target, so the choice is
+never hidden by the safety control.
 
 Firmware is deliberately not a top-level destination: it is a rare operation
 and it needs a network, so it lives in SERVICE where the reason and the image

@@ -27,12 +27,14 @@ Suspended_Spheres/
 │   ├── release_core/           # SHA-256, tag/filename, manifest, selectors
 │   ├── fleet_core/             # Outdated set, Katapult queue, tile colour
 │   ├── panel_core/             # Config v2, version retry, SD list, OTA policy
+│   ├── show_core/              # HBP2 view, position plan, node playback chunks
 │   └── net_core/               # WiFi/web/GitHub release host policy
 ├── tests/                      # Host-only harness (CMake, no hardware)
 │   ├── CMakeLists.txt
 │   ├── assert.h
 │   ├── test_runner.cpp
-│   └── abi_c.c
+│   ├── abi_c.c
+│   └── fixtures/               # golden HBP2 for the show host gate
 ├── tools/                      # pattern_check and release_pack
 ├── .github/workflows/          # release.yml: the only tag publisher
 ├── wasm/                       # Native/Emscripten parity driver

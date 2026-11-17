@@ -305,9 +305,12 @@ the node decelerates, holds, and keeps its step position; the next absolute
 The payload format is a design choice; the requirements constrain the
 outcomes, not the encoding.
 
-### 4.2 Baseline wire format — one cubic segment per motor
+### 4.2 Baseline wire format — one cubic segment per grid position
 
-One classic CAN data frame per motor per segment. The segment length is
+One classic CAN data frame per grid position per segment. The type-0 field is
+the position field from `Fly_Micro4_addressing.md` §2, not `board × 4 + axis`.
+Each Fly maps the position to one of its four local motors from the `POSMAP`
+it received during configuration. The segment length is
 `N·Δt` from the sync frame. `Δt` and `N` change only at a pattern boundary,
 not mid-segment. CAN ID type 0 (`Fly_Micro4_addressing.md`). Little-endian:
 
@@ -331,6 +334,14 @@ p(τ) = p0 + v0·τ + a0·τ²/2 + j·τ³/6
 Positive position, speed, and acceleration are upward. The node converts
 `p0` with `code × 2 000 000 / 65 535` and the other three fields by their
 LSBs, then evaluates with the integer Horner form in §4.7.
+
+**Start reference.** `p0` is absolute. When a node accepts its first segment
+it resets its step accumulator to `p0`; it does not command a move to `p0`
+first. The physical axis must therefore already be at the first frame's
+position when a show starts. Homing and commissioning establish that
+reference; a pre-show positioning move is not part of this firmware. This is
+also why `CYCLE` is only offered for a take that ends where it starts: the
+end position then equals the next start and no re-reference is needed.
 
 A lost frame is still a bounded gap: the next message carries an absolute
 `p0`, not a delta from the previous sample. The master chooses `p0`, `v0`,
@@ -402,6 +413,25 @@ node owns, and how a board is commissioned are in `Fly_Micro4_addressing.md`.
   start of each `N·Δt` window gives the nominal `T` for the following motion
   frames. Identifiers stay 11-bit. Nodes timestamp the start-of-frame with a
   free-running 1 MHz timer and fit offset/rate.
+
+  **Send-ahead.** `SHOW_SYNC_LEAD_US` is 20 ms. The master sends the sync at
+  `T − 20 ms` and must finish the whole window (sync plus 120 frames,
+  ≈15.6 ms at 1 Mbit/s) before `T`. The node fills its stepper queue to
+  `SHOW_LOOKAHEAD_US` (10 ms) ahead but does not start the window before `T`.
+- **Parameter / POSMAP** (master → node, type 6, field = board 0–29 or 127).
+  Payload byte 0 is the sub-command; 1 is `POSMAP`:
+
+  | Offset | Type | Field |
+  |--------|------|--------|
+  | 0 | `uint8` | `1` = `POSMAP` |
+  | 1–4 | `uint8` × 4 | grid position for local motor 0–3; `0xFF` = unassigned |
+  | 5 | `uint8` | `seq` |
+  | 6–7 | `uint8` × 2 | reserved, 0 |
+
+  The node stores the map in RAM and accepts type-0 frames only for those
+  four position fields. The master re-sends it after `ASSIGN`, after a
+  mapping change and before a show; a node that lost power gets it again
+  through the ASK/DISC/ASSIGN cycle.
 - **Status** (node → master, 1 Hz, plus immediately on a state or fault
   change). One 8-byte frame, type 3, little-endian:
 

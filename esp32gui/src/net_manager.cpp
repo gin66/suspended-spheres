@@ -1,5 +1,7 @@
 #include "net_manager.h"
 
+#include "show_player.h"
+
 #include <Arduino.h>
 #include <strings.h>
 #include <sys/stat.h>
@@ -958,7 +960,7 @@ void handle_upload_final(void) {
   net_upload_req_t req = {};
   req.server_on = s_service_on;
   req.password_ok = true;
-  req.show_running = false;
+  req.show_running = show_player_running();
   req.queue_active = upgrade_manager_active();
   req.max_size = fly_path ? (2u * 1024u * 1024u) : (6u * 1024u * 1024u);
   const net_upload_result_t check =

@@ -19,6 +19,7 @@ set(RELEASE_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib/release_core")
 set(FLEET_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib/fleet_core")
 set(PANEL_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib/panel_core")
 set(NET_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib/net_core")
+set(SHOW_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib/show_core")
 
 add_library(motion_core STATIC
     "${MOTION_CORE_DIR}/src/motion_core.cpp"
@@ -26,6 +27,15 @@ add_library(motion_core STATIC
 target_include_directories(motion_core PUBLIC
     "${MOTION_CORE_DIR}/include"
 )
+
+add_library(show_core STATIC
+    "${SHOW_CORE_DIR}/src/show_hbp.cpp"
+    "${SHOW_CORE_DIR}/src/show_node.cpp"
+)
+target_include_directories(show_core PUBLIC
+    "${SHOW_CORE_DIR}/include"
+)
+target_link_libraries(show_core PUBLIC motion_core)
 
 add_library(pattern_core STATIC
     "${PATTERN_CORE_DIR}/src/bake.cpp"
@@ -97,6 +107,7 @@ add_executable(motion_core_tests
     test_steps.cpp
     test_clock.cpp
     test_node.cpp
+    test_show.cpp
     test_commission.cpp
     test_pattern.cpp
     test_live.cpp
@@ -113,7 +124,7 @@ add_executable(motion_core_tests
     abi_c.c
 )
 
-target_link_libraries(motion_core_tests PRIVATE motion_core pattern_core
+target_link_libraries(motion_core_tests PRIVATE motion_core show_core pattern_core
     tmc_uart_bits homing_core release_core fleet_core panel_core net_core)
 target_include_directories(motion_core_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -154,7 +165,16 @@ endforeach()
 target_compile_definitions(motion_core_tests PRIVATE MC_H3_CHECK_RAN=1)
 target_compile_definitions(motion_core_tests PRIVATE
     RELEASE_PACK_BIN="$<TARGET_FILE:release_pack>"
+    SHOW_GOLDEN_HBP="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/golden_sine.hbp"
     ESP32GUI_PLATFORMIO_INI="${CMAKE_CURRENT_SOURCE_DIR}/../esp32gui/platformio.ini"
     ESP32GUI_RELEASE_GATE_H="${CMAKE_CURRENT_SOURCE_DIR}/../esp32gui/include/release_gate.h"
     RELEASE_WORKFLOW_YML="${CMAKE_CURRENT_SOURCE_DIR}/../.github/workflows/release.yml")
+
+# The 60 s take is a 1.9 MB generated file and sd/ is not in the repository.
+# Run the extra parse check only where the SD export exists locally.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../sd/animations/sine_60s.hbp")
+    target_compile_definitions(motion_core_tests PRIVATE
+        SHOW_SINE60_HBP="${CMAKE_CURRENT_SOURCE_DIR}/../sd/animations/sine_60s.hbp")
+endif()
+
 add_dependencies(motion_core_tests release_pack)

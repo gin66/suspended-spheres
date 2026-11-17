@@ -1,5 +1,7 @@
 #include "panel_ota.h"
 
+#include "show_player.h"
+
 #include <Arduino.h>
 #include <esp_attr.h>
 #include <esp_flash.h>
@@ -86,7 +88,7 @@ extern "C" bool panel_ota_apply(const rc_manifest_t *m, const uint8_t *data,
   char pt_sha[65];
   const bool have_pt = partition_table_sha(pt_sha);
   pc_ota_request_t req = {};
-  req.show_running = false;            /* the show task is not implemented */
+  req.show_running = show_player_running();
   req.queue_active = upgrade_manager_active();
   req.server_on = false;
   req.max_size = part->size;

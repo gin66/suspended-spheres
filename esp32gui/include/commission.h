@@ -123,6 +123,17 @@ bool commission_query_versions(void);
 /* Clear one board's version and send VERSION_REQ to that board ID only. */
 bool commission_query_version(int board_id);
 
+/* Send the persisted motor 0..3 -> grid position map to one board, or to
+ * every assigned board.  The node stores it in RAM; the panel re-sends it
+ * after ASSIGN, after a position change and before a show. */
+bool commission_send_posmap(int board_id);
+void commission_sync_posmaps(void);
+
+/* True when an online board reports a fault state or fault bits.  The show
+ * task uses it to stop the run instead of continuing a pattern with a dead
+ * ball. */
+bool commission_any_fault(void);
+
 bool commission_stop_all(void);
 
 /* Commissioning cascade: requires every grid position to be assigned. Rows

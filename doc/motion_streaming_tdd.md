@@ -203,15 +203,20 @@ Whitepaper §3.2, §4.2, Appendix A.
 - [x] **I7** Motor 5 / type 0 and board 5 / type 3 produce different
   identifiers. The decoder reports a motor for type 0 and a board for
   types 3–7. Type 9 is rejected (I5).
-- [x] **I8** Board *b* owns the motor fields for `4b … 4b+3`, skipping 63.
-  Board 0 owns 0–3; board 15 owns 60, 61, 62 and 64; board 29 owns
-  117–120. Board IDs outside 0–29 own nothing.
-- [x] **I9** Board *b* accepts motion for those four motors, frames
-  addressed to board *b*, field 127 on types 3–7, and field 0 on types
-  2, 8 and 11. Any other motion frame is discarded before the payload is
-  parsed. A table drives all 30 boards.
-- [x] **I10** **Property.** For every valid motor field (type 0), exactly
-  one board accepts the frame; field 63 is accepted by none.
+- [x] **I8** The field map skips 63. `mc_board_first_motor` and
+  `mc_board_owns_motor` keep the old `board × 4 + axis` grouping for the
+  CAN-ID budget and the release identity check; motion no longer uses it.
+  Board 15 maps to 60, 61, 62 and 64; the field map itself is position
+  0–119 with 63 skipped.
+- [x] **I9** A board accepts board-addressed frames for board *b*, field
+  127 on types 3–7, and field 0 on types 2, 8 and 11. Type-0 motion is
+  position-addressed: the node accepts only the four fields from its
+  `POSMAP` (`mc_posmap_motor`, S1 and S6). Any other motion frame is
+  discarded in the CAN IRQ before the payload is parsed.
+- [x] **I10** **Property.** For every valid position field (type 0), at
+  most one configured motor accepts the frame; field 63 is accepted by
+  none. The legacy board grouping still assigns exactly one board per
+  field for the release check.
 
 ---
 
@@ -540,6 +545,42 @@ Whitepaper §6.3, §6.7. Still no board.
 
 ---
 
+## 12.1 Show path: HBP2 view, position plan and node chunks
+
+`lib/show_core/` is the shared show path: the HBP2 view, the per-window wire
+plan and the node state machine. It has no SD, CAN driver or LVGL. The host
+tests are `tests/test_show.cpp`.
+
+- [x] **S1** A `POSMAP` frame packs and unpacks four positions; duplicate
+  assigned positions and values above 119 are rejected. Position 63 maps to
+  field 64, so `0x3F0` stays free.
+- [x] **S2** A synthetic HBP2 file parses; a single flipped body byte fails
+  the block CRC.
+- [x] **S3** The checked-in `sd/animations/golden_sine.hbp` parses as
+  10 × 12, 34 windows and 4080 frames, and `sd/animations/sine_60s.hbp`
+  parses as 10 × 12, 2000 windows and 240 000 frames (32 block CRCs).
+- [x] **S4** One window is one sync plus one type-0 frame per position;
+  the sync carries `T`, `Δt`, `N` and the sequence, and position 63 uses
+  `0x400`.
+- [x] **S5** A node fed two windows produces 15 chunks per window and the
+  sum of the step deltas equals the commanded per-window movement.
+- [x] **S6** A node with positions `{0, 2}` accepts those two fields and
+  ignores position 1.
+- [x] **S7** A take whose last window ends at a different position or speed
+  is not loopable; a constant-position take is.
+- [x] **S8** The real `golden_sine.hbp` is planned window by window and fed
+  to a node that owns positions 0–3: 34 windows, 510 chunks, no join fault,
+  and the step totals match the commanded per-window movement.  The queue
+  stays within 2 ms of the timeline and the first chunk is not queued
+  before `T`.
+- [x] **S9** A node whose clock runs 35 ppm fast keeps the master-time error
+  below 200 µs over 2000 windows (60 s); free-running would be ~2 ms.
+
+**Status (2026-11-17).** S1–S9 pass as part of `./build/motion_core_tests`
+(196 tests).
+
+---
+
 ## 13. Suggested order
 
 The list is already in dependency order. The first session is §0.2:
@@ -553,6 +594,7 @@ After that:
 5. Commissioning M1–M7 (§9). **Done.**
 6. Pattern bake (§10) and live file state (§11). **Done.**
 7. Native/WASM parity (§12). **Done.**
+8. Show path (§12.1). **Done.**
 
 Phase 12 is the host gate named in roadmap W1: golden traces pass, and
 the worst-case chunk and tick asserts (S3–S5) pass. W0 and the scope

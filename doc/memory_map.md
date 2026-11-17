@@ -80,6 +80,7 @@ The largest internal-RAM objects in this build:
 | Release metadata | ~3 200 | static `rc_release_t`, one per task, not on the net stack |
 | Animation library | ~1 800 | 32 cached `.hbp` rows, copied under a critical section |
 | `s_can_buf` | 24 576 | CAN scope text snapshot, 256 × 96 B |
+| Show task stack | 8 192 | `show_player`, core 0, dynamic internal heap |
 | UI snapshot | 18 952 | PSRAM (`s_snapshot`) and LVGL copy (`s_snap`) |
 | CAN monitor table | 14 336 | 256 × 56 B identifier rows |
 | CAN snapshot scratch | 14 336 | 256 × 56 B copy before the UI snapshot |
@@ -114,7 +115,7 @@ The module is `ESP32-S3-WROOM-1-N16R8`. `CONFIG_SPIRAM_USE_MALLOC=y` and
 | SD panel image | ≤ 786 432 | read for the OTA write, PSRAM; freed after `esp_ota_end` |
 | Application log ring | 262 144 | 256 KiB, `APP_LOG_DEFAULT_BYTES` |
 | Rotation scratch | 32 000 | only when the panel is not in landscape |
-| **HBP2 chunk cache target** | **4 194 304** | 4 MiB, see §4 |
+| **HBP2 show body** | **≤ 4 194 304** | whole file in PSRAM, see §4 |
 | **Committed total** | **~5.01 MiB** | with rotation scratch |
 | **Margin** | **~2.99 MiB** | heap, fragmentation, future buffers |
 
@@ -124,20 +125,19 @@ does not move objects to PSRAM.
 
 ---
 
-## 4. HBP2 playback: PSRAM chunks, not continuous SD streaming
+## 4. HBP2 playback: whole body in PSRAM, not continuous SD streaming
 
 The SD card is a source, not the live playback medium. A stalled SD read must
-not stall the CAN stream, so the show task never reads the card directly.
+not stall the CAN stream, so the show task never reads the card during a show.
 
-- At load, read the HBP2 header and block table into internal RAM.
-- Fill a PSRAM chunk cache from SD before starting. If the whole body fits,
-  SD is idle during the show.
-- If the body is larger than the cache, a low-priority refill task replaces
-  consumed chunks. The show task takes frames only from PSRAM.
-- Check each HBP2 block CRC32 before publishing the block to the show task.
-  Never play a partial block.
-- On a short read, CRC failure or cache underrun: retry the block once, then
-  stop with a safe hold and a log entry. Do not play stale frames.
+- At load, the player reads the whole file once (header, block table, body).
+  It validates the header, every block boundary and every block CRC32 before
+  the first frame is sent.
+- The body is copied to one PSRAM allocation and played from there; SD is
+  idle during the show. A file larger than the 4 MiB cap is refused at load
+  rather than streamed.
+- On a short read, a bad CRC or a parse failure: the show does not start and
+  the reason is shown on the SHOW screen. There is no stale-frame fallback.
 
 Budget at `N=3`, `Δt=10 ms`, 120 motors:
 

@@ -136,6 +136,15 @@ int animation_store_count(void) {
   return n;
 }
 
+bool animation_store_get_name(int index, char *out, size_t cap) {
+  if (out == nullptr || cap == 0) return false;
+  portENTER_CRITICAL(&s_mux);
+  const bool ok = index >= 0 && index < s_count;
+  if (ok) std::snprintf(out, cap, "%s", s_items[index].name);
+  portEXIT_CRITICAL(&s_mux);
+  return ok;
+}
+
 void animation_store_snapshot(int *count, ui_animation_t *dst, int cap,
                               char *status, size_t status_cap) {
   portENTER_CRITICAL(&s_mux);

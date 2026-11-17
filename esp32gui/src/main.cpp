@@ -34,6 +34,7 @@
 #include "panel_console.h"
 #include "panel_ota.h"
 #include "panel_update.h"
+#include "show_player.h"
 #include "ui.h"
 #include "upgrade_manager.h"
 
@@ -63,8 +64,8 @@ uint32_t s_display_last_ms = 0;
 bool s_display_on = true;
 bool s_display_wake_lock = false;
 int s_selected_animation = 0;
-bool s_animation_loading = false;
-char s_animation_status[64] = "SD file listing is not implemented";
+bool s_show_cycle_on = false;
+char s_animation_status[64] = "";
 char s_panel_status[64] = "";
 ss_can_id_entry_t *s_can_scratch = nullptr;
 
@@ -152,6 +153,7 @@ void action_config_grid(int cols, int rows) {
   if (!config_store_set_grid((uint8_t)cols, (uint8_t)rows)) {
     SS_LOGW("config", "grid %dx%d rejected", cols, rows);
   }
+  commission_sync_posmaps();
 }
 
 void action_config_test(int drop_mm, int speed_mm_s, int delay_ms, int serp) {
@@ -174,10 +176,12 @@ void action_config_reset(void) {
   config_store_reset_defaults();
   commission_reload_config();
   commission_select(0);
+  commission_sync_posmaps();
 }
 
 void action_config_clear_map(void) {
   config_store_clear_positions();
+  commission_sync_posmaps();
   SS_LOGI("config", "grid mapping cleared (unsaved)");
 }
 
@@ -307,27 +311,75 @@ void action_animation_select(int index) {
 }
 
 void action_animation_load(void) {
-  if (!s_animation_loading) {
+  char name[40];
+  if (!animation_store_get_name(s_selected_animation, name, sizeof(name))) {
     std::snprintf(s_animation_status, sizeof(s_animation_status),
-                  "HBP2 load and playback are not implemented");
-    SS_LOGW("anim", "load selected: HBP2 load/playback is not implemented");
+                  "no animation selected");
+    return;
+  }
+  if (!can_transport_running()) {
+    std::snprintf(s_animation_status, sizeof(s_animation_status),
+                  "CAN is off");
+    return;
+  }
+  const ss_commission_stats_t *cs = commission_stats();
+  if (cs != nullptr && cs->assigned_positions < cs->capacity) {
+    /* The master still sends all 120 position frames; a position without an
+     * owner is simply ignored by every Fly.  Report it, do not block the
+     * burst: this is also how a bench validates the stream before all nodes
+     * are commissioned. */
+    SS_LOGW("anim", "%lu positions unassigned; those balls stay still",
+            (unsigned long)(cs->capacity - cs->assigned_positions));
+  }
+  if (cs != nullptr && cs->online_boards < cs->assigned_boards) {
+    /* Degraded mode is allowed: an offline node simply holds its four
+     * balls.  Log it, but do not block the other 116. */
+    SS_LOGW("anim", "%lu boards offline; degraded show",
+            (unsigned long)(cs->assigned_boards - cs->online_boards));
+  }
+  ss_show_status_t st;
+  show_player_snapshot(&st);
+  if (st.state == SS_SHOW_PAUSED && std::strcmp(st.name, name) == 0) {
+    if (show_player_resume())
+      std::snprintf(s_animation_status, sizeof(s_animation_status),
+                    "resuming %s", name);
+    return;
+  }
+  char path[160];
+  std::snprintf(path, sizeof(path), "/sdcard/animations/%s", name);
+  /* The nodes must have the current motor -> position map before the first
+   * window.  A node that just rebooted has none yet. */
+  commission_sync_posmaps();
+  if (show_player_start(path, name, s_show_cycle_on)) {
+    std::snprintf(s_animation_status, sizeof(s_animation_status),
+                  "loading %s", name);
+    SS_LOGI("anim", "show start requested: %s", name);
+  } else {
+    std::snprintf(s_animation_status, sizeof(s_animation_status),
+                  "show request refused");
   }
 }
 
+void action_animation_cycle(bool on) {
+  s_show_cycle_on = on;
+  show_player_set_cycle(on);
+  SS_LOGI("anim", "cycle %s", on ? "on" : "off");
+}
+
 void action_animation_pause(void) {
-  std::snprintf(s_animation_status, sizeof(s_animation_status),
-                "HBP2 pause is not implemented");
-  SS_LOGW("anim", "pause: HBP2 playback is not implemented");
+  show_player_pause();
+  std::snprintf(s_animation_status, sizeof(s_animation_status), "pausing");
 }
 
 void action_animation_stop(void) {
-  std::snprintf(s_animation_status, sizeof(s_animation_status),
-                "HBP2 stop is not implemented");
-  SS_LOGW("anim", "stop: HBP2 playback is not implemented");
+  show_player_stop();
+  std::snprintf(s_animation_status, sizeof(s_animation_status), "stop sent");
+  SS_LOGW("anim", "show stop requested");
 }
 
 void action_animation_stop_immediate(void) {
   commission_stop_all();
+  show_player_stop();
   std::snprintf(s_animation_status, sizeof(s_animation_status),
                 "immediate stop sent");
   SS_LOGW("anim", "immediate stop sent to all boards");
@@ -461,18 +513,38 @@ void build_snapshot(ui_snapshot_t *snap) {
     dst->interval_min_ms = src->interval_min_ms;
     dst->interval_max_ms = src->interval_max_ms;
   }
+  ss_show_status_t show;
+  show_player_snapshot(&show);
+  const bool test_run = commission_test_run_active();
+  const bool show_loading = show.state == SS_SHOW_LOADING;
+  const bool show_playing = show.state == SS_SHOW_PLAYING;
+  const bool show_paused = show.state == SS_SHOW_PAUSED;
+  const bool show_fault = show.state == SS_SHOW_FAULT;
+  const bool show_active = show_loading || show_playing || show_paused;
+
   snap->safe_hold = wd->safe_hold;
+  snap->show_playing = show_playing;
+  snap->show_cycle = (show_active || show_fault) ? show.cycle : s_show_cycle_on;
   std::snprintf(snap->hold_reason, sizeof(snap->hold_reason), "%s",
                 wd->hold_reason);
-  std::snprintf(snap->run_state, sizeof(snap->run_state), "%s",
-                commission_test_run_active()
-                    ? "TEST RUN"
-                    : (wd->safe_hold ? "SAFE HOLD" : "IDLE"));
-  std::snprintf(snap->pattern_name, sizeof(snap->pattern_name), "%s",
-                commission_test_run_active() ? "COMMISSIONING TEST"
-                                             : "NO ANIMATION");
-  snap->elapsed_ms =
-      commission_test_run_active() ? (millis() - s_test_run_started_ms) : 0;
+  if (!test_run && show_active) {
+    std::snprintf(snap->run_state, sizeof(snap->run_state), "%s",
+                  show_loading ? "LOADING" : (show_paused ? "PAUSED" : "PLAYING"));
+    std::snprintf(snap->pattern_name, sizeof(snap->pattern_name), "%s",
+                  show.name[0] ? show.name : "NO ANIMATION");
+    snap->elapsed_ms = show_loading ? 0 : show.elapsed_ms;
+  } else if (!test_run && show_fault) {
+    std::snprintf(snap->run_state, sizeof(snap->run_state), "FAULT");
+    std::snprintf(snap->pattern_name, sizeof(snap->pattern_name), "%s",
+                  show.name[0] ? show.name : "NO ANIMATION");
+    snap->elapsed_ms = 0;
+  } else {
+    std::snprintf(snap->run_state, sizeof(snap->run_state), "%s",
+                  test_run ? "TEST RUN" : (wd->safe_hold ? "SAFE HOLD" : "IDLE"));
+    std::snprintf(snap->pattern_name, sizeof(snap->pattern_name), "%s",
+                  test_run ? "COMMISSIONING TEST" : "NO ANIMATION");
+    snap->elapsed_ms = test_run ? (millis() - s_test_run_started_ms) : 0;
+  }
   snap->uptime_s = millis() / 1000u;
 
   snap->discovered_boards = stats->discovered_boards;
@@ -530,10 +602,19 @@ void build_snapshot(ui_snapshot_t *snap) {
     s_selected_animation = animation_count > 0 ? animation_count - 1 : 0;
   snap->animation_count = animation_count;
   snap->selected_animation = s_selected_animation;
-  snap->animation_loading = s_animation_loading;
+  snap->animation_loading = show_loading;
   std::snprintf(snap->animation_source, sizeof(snap->animation_source), "SD");
+  /* A running show owns the status line; an old action message must not
+   * reappear after it ends. */
+  if (show_active || show_fault) s_animation_status[0] = '\0';
+  const char *status_text = nullptr;
+  if (show_fault) status_text = show.error;
+  else if (show_loading) status_text = "loading";
+  else if (show_playing) status_text = "playing";
+  else if (show_paused) status_text = "paused";
+  else status_text = s_animation_status[0] ? s_animation_status : animation_status;
   std::snprintf(snap->animation_status, sizeof(snap->animation_status), "%s",
-                animation_status);
+                status_text != nullptr ? status_text : "idle");
   snap->grid_cols = cfg->grid_cols;
   snap->grid_rows = cfg->grid_rows;
   for (int pos = 0; pos < UI_MAX_POSITIONS; ++pos) {
@@ -643,6 +724,7 @@ void setup() {
   firmware_image_init();
   animation_store_init();
   commission_init();
+  show_player_init();
   upgrade_manager_init();
   net_manager_init();
   if (s_ui_prefs.begin("ssui", false)) {
@@ -706,6 +788,7 @@ void setup() {
   actions.animation_pause = action_animation_pause;
   actions.animation_stop = action_animation_stop;
   actions.animation_stop_immediate = action_animation_stop_immediate;
+  actions.animation_cycle = action_animation_cycle;
   actions.version_query_all = action_version_query_all;
   actions.upgrade_selected = action_upgrade_selected;
   actions.upgrade_all_outdated = action_upgrade_all_outdated;

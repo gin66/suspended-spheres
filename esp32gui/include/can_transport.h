@@ -48,7 +48,12 @@ bool can_transport_start(uint32_t bitrate, ss_can_rx_fn cb, void *ctx);
 void can_transport_stop(void);
 bool can_transport_running(void);
 bool can_transport_send(const ss_can_frame_t *frame);
-void can_transport_get_stats(ss_can_stats_t *out);
+
+/* A show burst queues ~121 frames back to back.  Zero timeout drops frames
+ * as soon as the driver queue is full; this variant waits up to
+ * `timeout_ms` for room. */
+bool can_transport_send_timeout(const ss_can_frame_t *frame,
+                                uint32_t timeout_ms);void can_transport_get_stats(ss_can_stats_t *out);
 bool can_transport_is_mock(void);
 
 #ifdef SS_CAN_MOCK

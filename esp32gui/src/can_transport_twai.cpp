@@ -270,7 +270,8 @@ void can_transport_stop(void) {
 
 bool can_transport_running(void) { return s_running; }
 
-bool can_transport_send(const ss_can_frame_t *frame) {
+namespace {
+bool send_impl(const ss_can_frame_t *frame, TickType_t wait) {
   if (!s_running || frame == nullptr) {
     s_stats.tx_failed++;
     return false;
@@ -287,14 +288,23 @@ bool can_transport_send(const ss_can_frame_t *frame) {
   msg.data_length_code = frame->len;
   std::memcpy(msg.data, frame->data, frame->len);
 
-  const esp_err_t tx_err = twai_transmit(&msg, 0);
+  const esp_err_t tx_err = twai_transmit(&msg, wait);
   if (tx_err != ESP_OK) {
     s_stats.tx_failed++;
-    SS_LOGW("can", "tx failed: %s", esp_err_to_name(tx_err));
     return false;
   }
   s_stats.tx_frames++;
   return true;
+}
+}  // namespace
+
+bool can_transport_send(const ss_can_frame_t *frame) {
+  return send_impl(frame, 0);
+}
+
+bool can_transport_send_timeout(const ss_can_frame_t *frame,
+                                uint32_t timeout_ms) {
+  return send_impl(frame, pdMS_TO_TICKS(timeout_ms));
 }
 
 void can_transport_get_stats(ss_can_stats_t *out) {

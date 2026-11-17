@@ -16,7 +16,8 @@ void animation_store_refresh(void);
 void animation_store_request_refresh(void);
 void animation_store_poll(void);
 int animation_store_count(void);
-void animation_store_snapshot(int *count, ui_animation_t *dst, int cap,
+/* Copy the display name (the SD file name) of one cached row. */
+bool animation_store_get_name(int index, char *out, size_t cap);void animation_store_snapshot(int *count, ui_animation_t *dst, int cap,
                               char *status, size_t status_cap);
 
 #ifdef __cplusplus

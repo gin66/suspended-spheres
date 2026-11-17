@@ -29,7 +29,6 @@ void ui_update(const ui_snapshot_t *snapshot);
 void ui_show_screen(int index);
 int ui_current_screen(void);
 void ui_debug_open_wifi_modal(int target);
-void ui_debug_set_playing(int playing);
 
 #ifdef __cplusplus
 }

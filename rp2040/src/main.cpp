@@ -24,6 +24,7 @@
 #include "homing.h"
 #include "katapult_enter.h"
 #include "motion_core.h"
+#include "playback.h"
 #include "status_led.h"
 #include "stepper_axes.h"
 #include "tmc2209.h"
@@ -43,9 +44,9 @@ uint8_t s_last_status_state = 0xFF;
 void send_status(int board_id) {
     mc_status_t st = {};
     st.state = s_node_state;
-    st.fault_flags = 0;
-    st.buffer_depth = 0;
-    st.last_seq = 0;
+    st.fault_flags = playback::fault_flags();
+    st.buffer_depth = playback::buffer_depth();
+    st.last_seq = playback::last_seq();
 
     uint8_t payload[8];
     if (mc_pack_status(&st, payload) != 0) {
@@ -111,6 +112,7 @@ void stop_axes(uint8_t mask) {
 
 void jog(bool up, uint8_t mask, uint16_t distance_mm, uint16_t speed_mm_s,
          uint8_t seq) {
+    playback::stop();
     if (mask == 0) {
         mask = MC_AXIS_MASK_ALL;
     }
@@ -161,6 +163,24 @@ void handle_frame(const can_node::Frame& frame) {
     const int type = mc_id_type(id);
     const int board = can_node::assigned_board_id();
 
+    if (type == can_node::kMotion) {
+        if (board < 0 || homing::busy()) return;
+        const int field = mc_id_field(id);
+        if (!can_node::owns_motion_field(field)) return;
+        mc_segment_t seg;
+        if (mc_unpack_frame(frame.data, frame.dlc, 0, &seg) != 0) return;
+        playback::on_motion(field, seg);
+        return;
+    }
+    if (type == can_node::kSync) {
+        if (homing::busy()) return;
+        if (mc_id_field(id) != 0) return;
+        mc_sync_t sync;
+        if (mc_unpack_sync(frame.data, &sync) != 0) return;
+        playback::on_sync(sync);
+        return;
+    }
+
     if (type == can_node::kCommand) {
         mc_command_t cmd;
         if (mc_unpack_command(frame.data, frame.dlc, &cmd) != 0) {
@@ -171,6 +191,7 @@ void handle_frame(const can_node::Frame& frame) {
         }
         if (cmd.action == MC_CMD_STOP) {
             homing::cancel();
+            playback::stop();
             stop_axes(cmd.axis_mask);
             s_node_state = MC_STATUS_IDLE;
             if (bench_console::logs_enabled()) {
@@ -188,6 +209,7 @@ void handle_frame(const can_node::Frame& frame) {
                 return;
             }
             homing::cancel();
+            playback::stop();
             stepper_axes::stopAll();
             stepper_axes::setEnabled(false);
             if (katapult_enter::request()) {
@@ -205,6 +227,7 @@ void handle_frame(const can_node::Frame& frame) {
         if (board < 0 || mc_board_accepts_id(board, id) == 0) {
             return;
         }
+        playback::stop();
         if (!homing::start(mask)) {
             if (bench_console::logs_enabled()) {
                 Serial.print("home: rejected (mask=0x");
@@ -235,6 +258,7 @@ void setup() {
     }
 
     stepper_axes::begin();
+    playback::begin();
 
     const uint8_t tmc_all = (uint8_t)((1u << board::kDriveCount) - 1u);
     uint8_t tmc_ready = tmc2209::begin();
@@ -286,12 +310,15 @@ void loop() {
         /* can_node dropped the RAM ID in the receive path. Leave the
          * outputs enabled so a partly wound ball is held, not dropped. */
         homing::cancel();
+        playback::stop();
         stepper_axes::stopAll();
         s_node_state = MC_STATUS_IDLE;
         if (bench_console::logs_enabled()) {
             Serial.println("command: re-identify; axes stopped");
         }
     }
+
+    playback::poll();
 
     uint32_t now = millis();
     // No UART work during the homing search: tmc2209::poll() reads on a DIAG
@@ -308,7 +335,12 @@ void loop() {
         s_node_state = MC_STATUS_HOMING;
     } else if (homing::faulted()) {
         s_node_state = MC_STATUS_FAULT;
-    } else if (s_node_state == MC_STATUS_HOMING) {
+    } else if (playback::fault_flags() != 0) {
+        s_node_state = MC_STATUS_FAULT;
+    } else if (playback::active()) {
+        s_node_state = MC_STATUS_PLAYING;
+    } else if (s_node_state == MC_STATUS_HOMING ||
+               s_node_state == MC_STATUS_PLAYING) {
         s_node_state = MC_STATUS_IDLE;
     }
 
@@ -389,7 +421,11 @@ void loop() {
         Serial.println(s.dropped);
     }
 
-    delay(1);
+    if (playback::active()) {
+        delayMicroseconds(250);
+    } else {
+        delay(1);
+    }
 }
 
 void loop1() {

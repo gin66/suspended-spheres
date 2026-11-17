@@ -66,6 +66,21 @@ int mc_raw_to_motor_field(int raw);
 /* A field in 0…120 other than 63 is a motor field. */
 int mc_motor_field_valid(int field);
 
+/* Position-addressed motion (Fly_Micro4_addressing.md §2.1).  The show master
+ * does not know which board owns a grid position: motion frame type 0 carries
+ * the field of the ball/position instead.  The Fly is told, per local axis,
+ * which position it drives with a PARAM/POSMAP frame; it accepts the four
+ * fields that result.  Position 0…119 maps through the same skip-63 wire
+ * encoding, so the 11-bit allocation does not change. */
+int mc_position_field(int position);       /* 0…119 → wire field, -1 invalid */
+
+/* Motor index 0…3 whose configured position maps to `field`, or -1. */
+int mc_posmap_motor(const uint8_t position[MC_AXES_PER_NODE], int field);
+
+/* Each entry is a position 0…119, or MC_POS_UNASSIGNED; assigned entries
+ * must be unique. */
+int mc_posmap_valid(const uint8_t position[MC_AXES_PER_NODE]);
+
 /* id = (field << 4) | type; -1 on any invalid combination:
  *   type 0     motion        field = a motor field (0…62, 64…120) (I2)
  *   type 1     reserved      rejected                (I2)
@@ -93,18 +108,19 @@ int mc_id_motor(int id);
 int mc_id_board(int id);
 int mc_id_node(int id);    /* legacy alias for mc_id_board */
 
-/* Ownership (I8): board b owns the four motor fields for raw
- * 4b … 4b+3. Board 0 owns 0–3; board 15 owns 60, 61, 62, 64; board 29
- * owns 117–120. Field 63 is never a motor. Board IDs outside 0–29 own
- * nothing. */
+/* Legacy board×4+axis grouping (I8): board b maps to the four fields for
+ * raw 4b … 4b+3. Type-0 motion is position-addressed now
+ * (mc_position_field/mc_posmap_motor); these helpers keep the old grouping
+ * for the CAN-ID budget and the release identity check. */
 int mc_board_first_motor(int board);      /* -1 outside 0…29 */
 int mc_board_owns_motor(int board, int motor);
 int mc_node_first_motor(int node);        /* legacy aliases */
 int mc_node_owns_motor(int node, int motor);
 
-/* Accept filter (I9): a board accepts motion (type 0) for its four
- * motors, frames addressed to it, field 127 on types 3–7, and field 0 on
- * types 2, 8 and 11. A table drives all 30 boards. */
+/* Legacy accept filter (I9): board-addressed frames for board b, field 127
+ * on types 3–7, and field 0 on types 2, 8 and 11. The type-0 branch is the
+ * old board×4+axis view; a node filters motion with
+ * mc_posmap_motor() instead. */
 int mc_board_accepts_id(int board, int id);
 int mc_node_accepts_id(int node, int id); /* legacy alias */
 
@@ -237,6 +253,26 @@ int mc_unpack_command(const uint8_t buf[8], int len, mc_command_t *c);
  *   [0] axis_mask   [1..7] reserved (0) */
 int mc_pack_home(uint8_t axis_mask, uint8_t buf[8]);
 int mc_unpack_home(const uint8_t buf[8], int len, uint8_t *axis_mask);
+
+/* Parameter frame, type 6, field = board 0…29 or 127.  Payload byte 0 is the
+ * sub-command; the rest is parameter-specific.  Byte 0 = 1 is POSMAP: one
+ * position index (0…119, or MC_POS_UNASSIGNED) per local axis 0…3, then a
+ * sequence byte and two reserved zero bytes:
+ *   [0] 1  [1..4] position per axis  [5] seq  [6..7] 0
+ * The Fly stores the map in RAM and accepts motion frames for those four
+ * position fields only.  The master re-sends it after ASSIGN, after a mapping
+ * change, and before a show. */
+#define MC_TYPE_PARAM          6
+#define MC_PARAM_POSMAP        1
+#define MC_POS_UNASSIGNED      0xFF
+
+typedef struct {
+    uint8_t position[MC_AXES_PER_NODE];
+    uint8_t seq;
+} mc_posmap_t;
+
+int mc_pack_param_posmap(const mc_posmap_t *m, uint8_t buf[8]);
+int mc_unpack_param_posmap(const uint8_t buf[8], int len, mc_posmap_t *m);
 
 /* Version query and response, types 12 and 13. The request is eight zeros;
  * the response carries a semantic version and a 32-bit build id,

@@ -564,7 +564,9 @@ int main(int argc, char **argv) {
 
   ui_show_screen(UI_SCREEN_SHOW);
   ui_update(&snap);
-  ui_debug_set_playing(1);
+  snap.show_playing = true;
+  snap.show_cycle = true;
+  ui_update(&snap);
   clear_background();
   lv_obj_invalidate(lv_screen_active());
   lv_refr_now(s_disp);
@@ -573,7 +575,6 @@ int main(int argc, char **argv) {
                 "%s/output_show_playing.png", output_dir);
   render_to_png(playing_png);
   if (audit_layout("show_playing") != 0) audit_failures++;
-  ui_debug_set_playing(0);
 
   ui_snapshot_t updating = snap;
   updating.panel_update_active = true;

@@ -49,6 +49,17 @@ volatile uint32_t disc_due_us = 0;
 volatile bool version_pending = false;
 volatile uint32_t version_due_us = 0;
 
+/* Position map.  The IRQ only copies a PARAM frame; tick() validates it so
+ * the 1 Mbit/s ACK path stays short. */
+volatile int16_t s_position_field[MC_AXES_PER_NODE] = {-1, -1, -1, -1};
+volatile uint8_t s_position[MC_AXES_PER_NODE] = {MC_POS_UNASSIGNED,
+                                                 MC_POS_UNASSIGNED,
+                                                 MC_POS_UNASSIGNED,
+                                                 MC_POS_UNASSIGNED};
+volatile bool s_posmap_pending = false;
+volatile uint8_t s_posmap_data[8];
+volatile uint32_t s_posmap_seq = 0;
+
 void parse_version(void) {
     unsigned major = 0, minor = 0, patch = 0;
     (void)sscanf(SS_FW_VERSION, "%u.%u.%u", &major, &minor, &patch);
@@ -93,6 +104,14 @@ void __not_in_flash_func(on_can)(struct can2040*, uint32_t notify,
                                  1000u * ((uint32_t)bid % 10u);
                 version_pending = true;
             }
+        } else if (frame_type == kParameter && msg->dlc >= 8 &&
+                   msg->data[0] == MC_PARAM_POSMAP &&
+                   (field(id) == MC_BOARD_ALL ||
+                    (int)field(id) == board_id)) {
+            /* Copy only; tick() validates and applies it outside the IRQ. */
+            for (uint8_t i = 0; i < 8; i++)
+                s_posmap_data[i] = msg->data[i];
+            s_posmap_pending = true;
         } else if (frame_type == kCommand && msg->dlc >= 8 &&
                    msg->data[0] == MC_CMD_REIDENTIFY &&
                    (field(id) == MC_BOARD_ALL || (int)field(id) == board_id)) {
@@ -103,6 +122,17 @@ void __not_in_flash_func(on_can)(struct can2040*, uint32_t notify,
             board_id = -1;
             disc_pending = false;
             reidentify_requested = true;
+        }
+
+        /* Drop the type-0 traffic of the other 119 positions here, before the
+         * queue: the node hears every motion frame on the bus. */
+        if (frame_type == kParameter) return;
+        if (frame_type == kMotion) {
+            const int f = (int)field(id);
+            bool owned = false;
+            for (uint8_t i = 0; i < MC_AXES_PER_NODE; i++)
+                if (s_position_field[i] == f) owned = true;
+            if (!owned) return;
         }
 
         uint8_t next = (uint8_t)((head + 1) % kQueueLength);
@@ -177,6 +207,21 @@ bool poll(Frame* out) {
     return true;
 }
 
+bool owns_motion_field(int f) {
+    return motor_for_field(f) >= 0;
+}
+
+int motor_for_field(int f) {
+    for (uint8_t i = 0; i < MC_AXES_PER_NODE; i++)
+        if (s_position_field[i] == f) return (int)i;
+    return -1;
+}
+
+int position_for_axis(int axis) {
+    if (axis < 0 || axis >= MC_AXES_PER_NODE) return -1;
+    return (int)s_position[axis];
+}
+
 bool assigned() {
     return assigned_board_id() >= 0;
 }
@@ -197,7 +242,27 @@ bool send(uint16_t id, const uint8_t data[8], uint8_t dlc) {
     return can2040_transmit(&cbus, &msg) == 0;
 }
 
+void apply_posmap(void) {
+    if (!s_posmap_pending) return;
+    uint8_t data[8];
+    for (uint8_t i = 0; i < 8; i++) data[i] = s_posmap_data[i];
+    __dmb();
+    s_posmap_pending = false;
+
+    mc_posmap_t map;
+    if (mc_unpack_param_posmap(data, 8, &map) != 0) return;
+    for (uint8_t i = 0; i < MC_AXES_PER_NODE; i++) {
+        s_position[i] = map.position[i];
+        s_position_field[i] =
+            map.position[i] == MC_POS_UNASSIGNED
+                ? -1
+                : (int16_t)mc_position_field(map.position[i]);
+    }
+    s_posmap_seq = map.seq;
+}
+
 void tick() {
+    apply_posmap();
     if (version_pending) {
         int bid = board_id;
         if ((int32_t)(time_us_32() - version_due_us) >= 0) {

@@ -64,21 +64,26 @@ frames           # 8-byte cubic wire frames, window-major
   frame per motor per `N·Δt`. No trajectory fitting or pattern bake runs on
   the panel.
 - **Playback does not depend on continuous SD streaming.** The panel reads
-  whole HBP2 blocks into a PSRAM chunk cache ahead of the playback window;
-  the `show` task consumes only PSRAM. A low-priority refill task replaces
-  consumed chunks from SD. If the file fits in the cache, the whole body is
-  loaded before start and SD is idle during the show.
+  the whole HBP2 file into one PSRAM buffer at load (the body cap is 4 MiB;
+  a larger file is refused), validates every block CRC, and the `show` task
+  consumes only PSRAM. SD is idle during the show.
 - One second of frames is about 32 KB at `N=3`, `Δt=10 ms`. The 4 MiB cache
   target covers about 131 s of playback; the exact internal-RAM, flash and
   PSRAM budget is in `memory_map.md`.
-- Missing SD, a corrupt block, a short read, a cache underrun, or a SHA-256
-  mismatch stops the show with a safe hold and a log entry. It never
-  continues with stale or partial frames.
+- Missing SD, a corrupt block or a short read stops the show with a safe
+  hold and a log entry; it never continues with stale or partial frames.
+  Every block CRC32 is checked at load. The header SHA-256 is stored but not
+  yet verified by the firmware.
 - `codec` is `none` in the first firmware. Compression, if added, is a
   per-block codec: an 8–16 KB block decompresses independently, so one bad
   block does not take down the file.
 - The panel verifies the header and block table at load time and shows the
   pattern name, duration and codec on the Show screen.
+- `PAUSE` stops after the window that was already sent has finished, so the
+  node holds exactly at a window boundary; `PLAY` then resumes at the next
+  window. `STOP` stops immediately. `CYCLE` repeats a take only when its last
+  window ends at the first window's position and speed; otherwise the take
+  plays once.
 
 The PC still watches and bakes `.anim.json`; it only writes HBP2 when the
 report is clean.
@@ -96,12 +101,11 @@ esp32gui/                  PlatformIO project
 └── include/
 ```
 
-The first implemented stage is the board bring-up, the commissioning model
-and the UI. The CAN transport boundary selects a mock at build time because
-the bench has no bus wiring yet; the TWAI implementation is present and
-compile-guarded (`SS_CAN_MOCK`). WiFi onboarding, explicit CONNECT/AP,
-GitHub release pull and browser upload are implemented; no `.private` secret
-is compiled. Credentials live in NVS. The panel UI contract is
+The board bring-up, the commissioning model, the UI and HBP2 playback are
+implemented. The CAN transport boundary selects the mock at build time
+(`SS_CAN_MOCK`) and TWAI in the release build. WiFi onboarding, explicit
+CONNECT/AP, GitHub release pull and browser upload are implemented; no
+`.private` secret is compiled. Credentials live in NVS. The panel UI contract is
 `esp32gui_ui_design.md`; the image update is
 `firmware_release_whitepaper.md` §3.
 
@@ -234,11 +238,13 @@ The show task is the master scheduler in `motion_streaming_whitepaper.md`
 runs from a hardware timer or a pinned FreeRTOS task. LVGL's handler runs
 on the other core and never calls `twai_transmit`.
 
-In the first stage the UI and commissioning service run in the Arduino
-main loop, and the transport owns its own RX task (TWAI build) or delivers
-synchronously (mock build). The separate `show` task arrives with HBP2
-playback. The SPIFFS config store is mutated only from the main loop; the
-CAN callback only updates the RAM registry and queues `ASSIGN`.
+The UI and commissioning service run in the Arduino main loop, and the
+transport owns its own RX task (TWAI build) or delivers synchronously (mock
+build). The `show` task in `src/show_player.cpp` is pinned to core 0, reads
+the HBP2 body into PSRAM, and sends one sync plus 120 position frames per
+window at `T − 20 ms`; it is the only task that drives a frame burst. The
+SPIFFS config store is mutated only from the main loop; the CAN callback
+only updates the RAM registry and queues `ASSIGN`.
 
 ---
 
@@ -269,11 +275,11 @@ in `esp32gui/host/png/`.
 | Log | Recent PSRAM log ring, boot count, last watchpoint, last safe hold, thermal transitions |
 | System | Running firmware/build, boot, uptime, capacity, last OTA boot-check result, CAN state, WiFi/IP, online boards, assigned positions, node image, SD counts/free, display timeout |
 
-The Animations screen is the file-selection UI. The SD enumeration and HBP2
-load/playback backend are not implemented yet, so the firmware reports that
-`REFRESH` and `LOAD SELECTED` are pending; the host harness fills the list with
-sample files. The screen reads only from the snapshot, so the backend can fill
-it without changing the LVGL code.
+The Animations screen is the file-selection UI. The SD enumeration and the
+HBP2 load/playback backend are implemented: `LOAD SELECTED` starts (or
+resumes) `show_player`, which validates the header and every block CRC, copies
+the body to PSRAM and streams it. The host harness fills the list with sample
+files. The screen reads only from the snapshot.
 
 The CAN scope keeps 256 identifiers: a running show already uses 120
 per-motor type-0 IDs plus 30 status IDs, 30 health IDs and the sync ID, and

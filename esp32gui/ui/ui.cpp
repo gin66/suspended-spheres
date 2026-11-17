@@ -85,7 +85,6 @@ lv_obj_t *s_show_big_stop;
 lv_obj_t *s_show_status;
 uint32_t s_show_list_hash = 0;
 uint32_t s_playlist_source_hash = 0;
-bool s_show_playing = false;
 lv_obj_t *s_update_overlay;
 lv_obj_t *s_update_title;
 lv_obj_t *s_update_stage;
@@ -93,7 +92,6 @@ lv_obj_t *s_update_result;
 lv_obj_t *s_update_bar;
 lv_obj_t *s_update_dismiss;
 bool s_playlist_flags[UI_MAX_ANIMATIONS];
-bool s_show_cycle_on = false;
 
 /* Animations screen */
 lv_obj_t *s_anim_list;
@@ -616,7 +614,6 @@ void on_anim_refresh(lv_event_t *e) {
 void on_anim_load(lv_event_t *e) {
   (void)e;
   if (s_actions.animation_load != nullptr) s_actions.animation_load();
-  s_show_playing = true;
   if (s_snap != nullptr) ui_update(s_snap);
 }
 
@@ -637,14 +634,12 @@ void on_anim_remove(lv_event_t *e) {
 void on_anim_pause(lv_event_t *e) {
   (void)e;
   if (s_actions.animation_pause != nullptr) s_actions.animation_pause();
-  s_show_playing = false;
   if (s_snap != nullptr) ui_update(s_snap);
 }
 
 void on_anim_stop(lv_event_t *e) {
   (void)e;
   if (s_actions.animation_stop != nullptr) s_actions.animation_stop();
-  s_show_playing = false;
   if (s_snap != nullptr) ui_update(s_snap);
 }
 
@@ -652,14 +647,17 @@ void on_anim_stop_now(lv_event_t *e) {
   (void)e;
   if (s_actions.animation_stop_immediate != nullptr)
     s_actions.animation_stop_immediate();
-  s_show_playing = false;
   if (s_snap != nullptr) ui_update(s_snap);
 }
 
 void on_anim_cycle(lv_event_t *e) {
   (void)e;
-  s_show_cycle_on = !s_show_cycle_on;
-  if (s_snap != nullptr) ui_update(s_snap);
+  const bool next = !(s_snap != nullptr && s_snap->show_cycle);
+  if (s_actions.animation_cycle != nullptr) s_actions.animation_cycle(next);
+  if (s_snap != nullptr) {
+    s_snap->show_cycle = next;
+    ui_update(s_snap);
+  }
 }
 
 void on_can_clear(lv_event_t *e) {
@@ -1256,8 +1254,6 @@ void build_show(void) {
 
   lv_obj_t *transport = make_panel(s, 12, 112, 688, 64);
   s_show_play = make_button(transport, "PLAY", 92, 40, on_anim_load, nullptr);
-  lv_obj_set_style_bg_color(s_show_play, C_ACCENT, 0);
-  lv_obj_set_style_border_color(s_show_play, C_ACCENT, 0);
   lv_obj_set_pos(s_show_play, 8, 0);
   s_show_pause = make_button(transport, "PAUSE", 96, 40, on_anim_pause,
                              nullptr);
@@ -1265,13 +1261,19 @@ void build_show(void) {
   s_show_stop = make_button(transport, "STOP", 84, 40, on_anim_stop,
                             nullptr);
   lv_obj_set_pos(s_show_stop, 212, 0);
-  s_show_cycle = make_button(transport, "CYCLE OFF", 104, 40, on_anim_cycle,
-                             nullptr);
+  /* A single circular-arrow icon: accent when the cycle is on, muted when
+   * it is off.  No ON/OFF wording, so the label can never be read as the
+   * action instead of the state. */
+  s_show_cycle = make_button(transport, LV_SYMBOL_REFRESH, 48, 40,
+                             on_anim_cycle, nullptr);
+  lv_obj_t *cycle_icon = lv_obj_get_child(s_show_cycle, 0);
+  if (cycle_icon != nullptr)
+    lv_obj_set_style_text_font(cycle_icon, &lv_font_montserrat_20, 0);
   lv_obj_set_pos(s_show_cycle, 304, 0);
   s_show_transport = make_label(transport, "idle", &lv_font_montserrat_12,
                                 C_MUTED);
-  lv_obj_set_pos(s_show_transport, 424, 12);
-  lv_obj_set_width(s_show_transport, 228);
+  lv_obj_set_pos(s_show_transport, 364, 12);
+  lv_obj_set_width(s_show_transport, 288);
   lv_label_set_long_mode(s_show_transport, LV_LABEL_LONG_WRAP);
 
   lv_obj_t *playlist = make_panel(s, 12, 184, 332, 220);
@@ -2415,11 +2417,6 @@ int ui_current_screen(void) { return s_screen; }
 
 void ui_debug_open_wifi_modal(int target) { wifi_open_modal(target); }
 
-void ui_debug_set_playing(int playing) {
-  s_show_playing = playing != 0;
-  if (s_snap != nullptr) ui_update(s_snap);
-}
-
 void ui_update(const ui_snapshot_t *snapshot) {
   if (snapshot == nullptr || s_snap == nullptr) return;
   *s_snap = *snapshot;
@@ -2541,8 +2538,15 @@ void ui_update(const ui_snapshot_t *snapshot) {
                         : "NO ANIMATION");
   lv_label_set_text(s_show_state, s_snap->run_state);
   lv_color_t run_color = C_MUTED;
-  if (std::strcmp(s_snap->run_state, "TEST RUN") == 0) run_color = C_OK;
-  else if (std::strcmp(s_snap->run_state, "SAFE HOLD") == 0) run_color = C_ERR;
+  if (std::strcmp(s_snap->run_state, "TEST RUN") == 0 ||
+      std::strcmp(s_snap->run_state, "PLAYING") == 0)
+    run_color = C_OK;
+  else if (std::strcmp(s_snap->run_state, "SAFE HOLD") == 0 ||
+           std::strcmp(s_snap->run_state, "FAULT") == 0)
+    run_color = C_ERR;
+  else if (std::strcmp(s_snap->run_state, "PAUSED") == 0 ||
+           std::strcmp(s_snap->run_state, "LOADING") == 0)
+    run_color = C_WARN;
   lv_obj_set_style_text_color(s_show_state, run_color, 0);
   lv_label_set_text_fmt(s_show_elapsed, "%lu:%02lu",
                         (unsigned long)(s_snap->elapsed_ms / 60000),
@@ -2558,19 +2562,37 @@ void ui_update(const ui_snapshot_t *snapshot) {
   lv_bar_set_value(s_show_progress, progress, LV_ANIM_OFF);
 
   const bool loading = s_snap->animation_loading;
+  const bool playing = s_snap->show_playing;
   lv_obj_t *play_lbl = lv_obj_get_child(s_show_play, 0);
   if (play_lbl != nullptr) lv_label_set_text(play_lbl, loading ? "LOADING" : "PLAY");
+  /* Exactly one filled accent action: PLAY while idle/paused, PAUSE while
+   * running.  PLAY never stays highlighted once the show is running. */
+  const bool play_primary = selected_valid && !loading && !playing;
+  lv_obj_set_style_bg_color(s_show_play, play_primary ? C_ACCENT : C_PANEL2, 0);
+  lv_obj_set_style_border_color(s_show_play, play_primary ? C_ACCENT : C_LINE,
+                                0);
   lv_obj_clear_state(s_show_play, LV_STATE_DISABLED);
-  if (!selected_valid || loading) lv_obj_add_state(s_show_play, LV_STATE_DISABLED);
-  if (!selected_valid) lv_obj_add_state(s_show_pause, LV_STATE_DISABLED);
-  else lv_obj_clear_state(s_show_pause, LV_STATE_DISABLED);
+  if (!selected_valid || loading || playing)
+    lv_obj_add_state(s_show_play, LV_STATE_DISABLED);
+  const bool pause_primary = selected_valid && playing;
+  lv_obj_set_style_bg_color(s_show_pause, pause_primary ? C_ACCENT : C_PANEL2,
+                            0);
+  lv_obj_set_style_border_color(s_show_pause,
+                                pause_primary ? C_ACCENT : C_LINE, 0);
+  if (!selected_valid || !playing)
+    lv_obj_add_state(s_show_pause, LV_STATE_DISABLED);
+  else
+    lv_obj_clear_state(s_show_pause, LV_STATE_DISABLED);
   if (!selected_valid) lv_obj_add_state(s_show_stop, LV_STATE_DISABLED);
   else lv_obj_clear_state(s_show_stop, LV_STATE_DISABLED);
+  /* CYCLE is a toggle: the icon is the label and blue is the state. */
+  lv_obj_set_style_bg_color(s_show_cycle, C_PANEL2, 0);
+  lv_obj_set_style_border_color(s_show_cycle,
+                                s_snap->show_cycle ? C_ACCENT : C_LINE, 0);
   lv_obj_t *cycle_lbl = lv_obj_get_child(s_show_cycle, 0);
   if (cycle_lbl != nullptr)
-    lv_label_set_text(cycle_lbl, s_show_cycle_on ? "CYCLE ON" : "CYCLE OFF");
-  lv_obj_set_style_bg_color(s_show_cycle,
-                            s_show_cycle_on ? C_ACCENT : C_PANEL2, 0);
+    lv_obj_set_style_text_color(cycle_lbl,
+                                s_snap->show_cycle ? C_ACCENT : C_MUTED, 0);
   lv_label_set_text(s_show_transport,
                     s_snap->animation_status[0] ? s_snap->animation_status
                                                 : (loading ? "loading" : "idle"));
@@ -2578,8 +2600,8 @@ void ui_update(const ui_snapshot_t *snapshot) {
 
   /* The playlist stays; only the library yields to the safety target. */
   set_hidden(s_show_playlist_panel, false);
-  set_hidden(s_show_library_panel, s_show_playing);
-  set_hidden(s_show_big_stop, !s_show_playing);
+  set_hidden(s_show_library_panel, playing);
+  set_hidden(s_show_big_stop, !playing);
 
   uint32_t show_hash = 2166136261u;
   show_hash = (show_hash ^ (uint32_t)s_snap->animation_count) * 16777619u;

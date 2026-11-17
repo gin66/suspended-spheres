@@ -194,6 +194,46 @@ int mc_node_accepts_id(int node, int id) {
     return mc_board_accepts_id(node, id);
 }
 
+/* Position-addressed motion.  A ball/position uses the same skip-63 wire
+ * encoding as the old board×4+axis motor field, so the 11-bit map is
+ * unchanged; only the meaning of the field moves from the board to the
+ * grid position. */
+int mc_position_field(int position) {
+    return mc_raw_to_motor_field(position);
+}
+
+int mc_posmap_motor(const uint8_t position[MC_AXES_PER_NODE], int field) {
+    if (position == 0 || !mc_motor_field_valid(field))
+        return -1;
+    for (int axis = 0; axis < MC_AXES_PER_NODE; ++axis) {
+        if (position[axis] == MC_POS_UNASSIGNED)
+            continue;
+        if (mc_position_field(position[axis]) == field)
+            return axis;
+    }
+    return -1;
+}
+
+int mc_posmap_valid(const uint8_t position[MC_AXES_PER_NODE]) {
+    if (position == 0)
+        return 0;
+    uint8_t seen[MC_MOTOR_FIELD_MAX + 1];
+    for (int i = 0; i <= MC_MOTOR_FIELD_MAX; ++i)
+        seen[i] = 0;
+    for (int axis = 0; axis < MC_AXES_PER_NODE; ++axis) {
+        const uint8_t p = position[axis];
+        if (p == MC_POS_UNASSIGNED)
+            continue;
+        if (p > 119)
+            return 0;
+        const int field = mc_position_field(p);
+        if (field < 0 || seen[field])
+            return 0;
+        seen[field] = 1;
+    }
+    return 1;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Motion frame: one cubic segment per motor (P1–P3, P10; §4.2)       */
 /* ------------------------------------------------------------------ */
@@ -401,6 +441,33 @@ int mc_unpack_home(const uint8_t buf[8], int len, uint8_t *axis_mask) {
     if ((buf[0] & (uint8_t)~MC_AXIS_MASK_ALL) != 0)
         return -1;
     *axis_mask = buf[0];
+    return 0;
+}
+
+int mc_pack_param_posmap(const mc_posmap_t *m, uint8_t buf[8]) {
+    if (m == 0 || buf == 0 || !mc_posmap_valid(m->position))
+        return -1;
+    for (int i = 0; i < 8; ++i)
+        buf[i] = 0;
+    buf[0] = MC_PARAM_POSMAP;
+    for (int axis = 0; axis < MC_AXES_PER_NODE; ++axis)
+        buf[1 + axis] = m->position[axis];
+    buf[5] = m->seq;
+    return 0;
+}
+
+int mc_unpack_param_posmap(const uint8_t buf[8], int len, mc_posmap_t *m) {
+    if (buf == 0 || m == 0 || len != 8)
+        return -1;
+    if (buf[0] != MC_PARAM_POSMAP)
+        return -1;
+    mc_posmap_t tmp;
+    for (int axis = 0; axis < MC_AXES_PER_NODE; ++axis)
+        tmp.position[axis] = buf[1 + axis];
+    tmp.seq = buf[5];
+    if (!mc_posmap_valid(tmp.position))
+        return -1;
+    *m = tmp;
     return 0;
 }
 
