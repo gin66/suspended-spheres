@@ -201,6 +201,12 @@ typedef struct {
   bool service_on;
   char github_status[64];
   bool github_update_available;
+  bool panel_update_active;
+  bool panel_update_error;
+  int panel_update_progress;      /* -1 when unknown */
+  char panel_update_stage[48];
+  char panel_update_result[72];
+  char ota_last_result[64];
 
   /* Display */
   uint16_t display_timeout_s;
@@ -259,6 +265,7 @@ typedef struct {
   void (*wifi_set_admin)(const char *password);
   void (*display_timeout_cycle)(void);
   void (*display_timeout_set)(uint16_t seconds);
+  void (*panel_update_dismiss)(void);
   void (*mock_inject)(void);  /* host harness only; may be NULL */
 } ui_actions_t;
 

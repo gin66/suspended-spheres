@@ -1,6 +1,7 @@
 #include "panel_ota.h"
 
 #include <Arduino.h>
+#include <esp_attr.h>
 #include <esp_flash.h>
 #include <esp_heap_caps.h>
 #include <esp_ota_ops.h>
@@ -19,6 +20,21 @@ namespace {
 
 constexpr uint32_t kPartitionTableOffset = 0x8000u;
 constexpr size_t kPartitionTableSize = 0xC00u;
+
+/* RTC_NOINIT lies outside the image and survives the rollback reset.  The
+ * magic rejects random cold-boot contents. */
+constexpr uint32_t kOtaNoteMagic = 0x4F54414Eu;  /* "OTAN" */
+struct ota_note_t {
+  uint32_t magic;
+  char text[64];
+};
+RTC_NOINIT_ATTR static ota_note_t s_ota_note;
+
+void set_note(const char *text) {
+  s_ota_note.magic = kOtaNoteMagic;
+  std::snprintf(s_ota_note.text, sizeof(s_ota_note.text), "%s",
+                text ? text : "");
+}
 
 void set_status(char *out, unsigned len, const char *text) {
   if (out == nullptr || len == 0) return;
@@ -57,6 +73,7 @@ int ota_mark(void *ctx) {
 extern "C" bool panel_ota_apply(const rc_manifest_t *m, const uint8_t *data,
                                 size_t len, char *status,
                                 unsigned status_len) {
+  set_note("pending boot check");
   if (m == nullptr || data == nullptr || len == 0) {
     set_status(status, status_len, "bad panel bundle");
     return false;
@@ -173,17 +190,29 @@ extern "C" bool panel_ota_start(char *status, unsigned status_len) {
   return true;
 }
 
-extern "C" void panel_ota_boot_check(bool panel_ok) {
+extern "C" void panel_ota_boot_check(bool display_ok, bool can_ok) {
   const esp_partition_t *running = esp_ota_get_running_partition();
   if (running == nullptr) return;
   esp_ota_img_states_t state;
   if (esp_ota_get_state_partition(running, &state) != ESP_OK) return;
   if (state != ESP_OTA_IMG_PENDING_VERIFY) return;
-  if (panel_ok) {
+  if (display_ok && can_ok) {
+    set_note("validated");
     const esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
     SS_LOGI("ota", "pending image marked valid: %s", esp_err_to_name(err));
   } else {
-    SS_LOGE("ota", "self-test failed; rolling back");
+    set_note(display_ok ? "rollback: CAN off" : "rollback: display");
+    SS_LOGE("ota", "self-test failed (display=%d can=%d); rolling back",
+            (int)display_ok, (int)can_ok);
     esp_ota_mark_app_invalid_rollback_and_reboot();
   }
+}
+
+extern "C" void panel_ota_last_note(char *out, unsigned len) {
+  if (out == nullptr || len == 0) return;
+  if (s_ota_note.magic != kOtaNoteMagic) {
+    out[0] = '\0';
+    return;
+  }
+  std::snprintf(out, len, "%s", s_ota_note.text);
 }

@@ -259,7 +259,7 @@ in `esp32gui/host/png/`.
 | Show | Now playing, elapsed time, PLAY/PAUSE/STOP/CYCLE, playable playlist/library with add/remove, compact CAN/board/thermal status; while playing the library slot becomes the square immediate STOP and the playlist stays visible |
 | Build hub | Grid & Layout, Boards, Align Motors, Test & Config |
 | Grid | One cell per ball: assigned, free, thermal warning, fault; click a cell to select its board |
-| Nodes | Discovered boards by 6-byte UUID, board ID, online state, build, assigned positions, MCU temperature, TMC OTPW/OT, health age |
+| Nodes | Discovered boards by 6-byte UUID, board ID, online state, running `sw` version, assigned positions, MCU temperature, TMC OTPW/OT, health age |
 | Motor | Selected board and axis (assigned axes are green); board health; HOME, UP, DOWN, STOP; tap a grid cell to choose the position, then assign/unassign |
 | Config | Grid size, test-run drop/speed/gap, serpentine, save/reset/clear, SPIFFS state |
 | Connect | Explicit OFF / CONNECT / AP, scan, password keypad, service, AP password/rotate/edit, join/browser QR, reason |
@@ -267,7 +267,7 @@ in `esp32gui/host/png/`.
 | Firmware | Fly node image, panel image from SD, GitHub check/install, fleet upgrade; 30 tiles on one page in 6 × 5 order; board ID, neutral queued, the one yellow Katapult board, green verified, dim excluded; `QUERY ALL`, `UPGRADE ALL OUTDATED`, `UPGRADE SELECTED`, `STOP`, image version/build/source and `n / 30` |
 | CAN | Received-frame scope by identifier (raw ID, type, count, last data), TX sent/rejected, RX drops, bus-off state; clear |
 | Log | Recent PSRAM log ring, boot count, last watchpoint, last safe hold, thermal transitions |
-| System | Firmware, boot, uptime, capacity, watchpoint, CAN state, WiFi/IP, online boards, assigned positions, node image, display timeout |
+| System | Running firmware/build, boot, uptime, capacity, last OTA boot-check result, CAN state, WiFi/IP, online boards, assigned positions, node image, display timeout |
 
 The Animations screen is the file-selection UI. The SD enumeration and HBP2
 load/playback backend are not implemented yet, so the firmware reports that

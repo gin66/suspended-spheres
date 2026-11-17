@@ -565,6 +565,22 @@ int main(int argc, char **argv) {
   if (audit_layout("show_playing") != 0) audit_failures++;
   ui_debug_set_playing(0);
 
+  ui_snapshot_t updating = snap;
+  updating.panel_update_active = true;
+  updating.panel_update_progress = 42;
+  std::snprintf(updating.panel_update_stage,
+                sizeof(updating.panel_update_stage), "%s", "panel image");
+  ui_show_screen(UI_SCREEN_UPGRADE);
+  ui_update(&updating);
+  clear_background();
+  lv_obj_invalidate(lv_screen_active());
+  lv_refr_now(s_disp);
+  char updating_png[512];
+  std::snprintf(updating_png, sizeof(updating_png),
+                "%s/output_updating.png", output_dir);
+  render_to_png(updating_png);
+  if (audit_layout("updating") != 0) audit_failures++;
+
   ui_show_screen(UI_SCREEN_WIFI);
   ui_update(&snap);
   ui_debug_open_wifi_modal(2);

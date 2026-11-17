@@ -15,6 +15,7 @@
 #include "firmware_image.h"
 #include "net_core.h"
 #include "panel_ota.h"
+#include "panel_update.h"
 #include "release_core.h"
 
 #ifndef SS_GITHUB_OWNER
@@ -22,6 +23,9 @@
 #endif
 #ifndef SS_GITHUB_REPO
 #define SS_GITHUB_REPO ""
+#endif
+#ifndef SS_FW_VERSION
+#define SS_FW_VERSION "dev"
 #endif
 #ifndef SS_BUILD_ID
 #define SS_BUILD_ID 0
@@ -43,6 +47,7 @@ bool fetch(const char *url, size_t max, uint8_t **out, size_t *out_len) {
   client.setTimeout(15);
   HTTPClient http;
   http.setTimeout(15000);
+  http.addHeader("Cache-Control", "no-cache");
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   if (!http.begin(client, url)) {
     std::snprintf(s_status, sizeof(s_status), "error: cannot open URL");
@@ -71,6 +76,7 @@ bool fetch(const char *url, size_t max, uint8_t **out, size_t *out_len) {
   WiFiClient *stream = http.getStreamPtr();
   size_t off = 0;
   const uint32_t start = millis();
+  panel_update_progress(0);
   while (off < (size_t)size && (uint32_t)(millis() - start) < 20000u) {
     const size_t avail = stream->available();
     if (avail == 0) {
@@ -82,6 +88,7 @@ bool fetch(const char *url, size_t max, uint8_t **out, size_t *out_len) {
     const size_t got = stream->readBytes(buf + off, take);
     if (got == 0) break;
     off += got;
+    panel_update_progress((int)((off * 100u) / (size_t)size));
   }
   http.end();
   if (off != (size_t)size) {
@@ -169,6 +176,7 @@ void install_release(const rc_release_t *rel) {
       }
     }
   }
+  if (need_fly) panel_update_stage("node image");
   if (fly_ok &&
       fetch_bin(rel, &fly_m, 2u * 1024u * 1024u, &fly_bin, &fly_len)) {
     char text[80];
@@ -188,6 +196,7 @@ void install_release(const rc_release_t *rel) {
       std::snprintf(s_status, sizeof(s_status), "node store failed");
     } else if (need_fly) {
       s_fly_update = false;
+      panel_update_clear();
       std::snprintf(s_status, sizeof(s_status), "node %s stored", version);
     } else {
       std::snprintf(s_status, sizeof(s_status), "nothing to apply");
@@ -212,11 +221,18 @@ void install_release(const rc_release_t *rel) {
     std::snprintf(s_status, sizeof(s_status), "panel asset unavailable");
     return;
   }
+  panel_update_begin("panel image");
   uint8_t *panel_bin = nullptr;
   size_t panel_len = 0;
   if (!fetch_bin(rel, &panel_m, 6u * 1024u * 1024u, &panel_bin, &panel_len)) {
+    panel_update_error("panel download failed");
     return;
   }
+  panel_update_begin_write();
+  /* The main loop blanks the backlight after the overlay has been visible;
+   * write only then, so a cache stall cannot draw a garbled frame. */
+  for (int i = 0; i < 40 && !panel_update_blanked(); ++i)
+    vTaskDelay(pdMS_TO_TICKS(100));
   char text[80];
   const bool ok = panel_ota_apply(&panel_m, panel_bin, panel_len, text,
                                   sizeof(text));
@@ -224,8 +240,10 @@ void install_release(const rc_release_t *rel) {
   if (!ok) {
     std::snprintf(s_status, sizeof(s_status), "panel: %s", text);
     SS_LOGE("github", "panel install failed: %s", text);
+    panel_update_error(text);
     return;
   }
+  panel_update_done("rebooting");
   std::snprintf(s_status, sizeof(s_status), "installed; rebooting");
   vTaskDelay(pdMS_TO_TICKS(500));
   esp_restart();
@@ -247,10 +265,13 @@ extern "C" void github_client_check(void) {
     std::snprintf(s_status, sizeof(s_status), "error: %s", reason);
     return;
   }
-  char url[256];
+  char url[288];
+  /* The timestamp busts the edge cache on releases/latest; the tag-specific
+   * asset URL is immutable and does not need it. */
   std::snprintf(url, sizeof(url),
-                "https://github.com/%s/%s/releases/latest/download/release.json",
-                SS_GITHUB_OWNER, SS_GITHUB_REPO);
+                "https://github.com/%s/%s/releases/latest/download/release.json?ts=%lu",
+                SS_GITHUB_OWNER, SS_GITHUB_REPO,
+                (unsigned long)time(nullptr));
   std::snprintf(s_status, sizeof(s_status), "checking...");
   if (!fetch_text(url, s_release, sizeof(s_release))) return;
 
@@ -271,11 +292,13 @@ extern "C" void github_client_check(void) {
   s_have_release = true;
 
   if (s_result.update_available) {
-    std::snprintf(s_status, sizeof(s_status), "newer %s", s_result.version);
+    std::snprintf(s_status, sizeof(s_status), "newer %s  you %s",
+                  s_result.version, SS_FW_VERSION);
   } else if (s_fly_update) {
     char version[16] = "--";
     if (rel.fly.present) rc_semver_format(&rel.fly.version, version);
-    std::snprintf(s_status, sizeof(s_status), "node %s", version);
+    std::snprintf(s_status, sizeof(s_status), "node %s  you %s", version,
+                  SS_FW_VERSION);
   } else if (s_result.build == SS_BUILD_ID) {
     std::snprintf(s_status, sizeof(s_status), "same %s", s_result.version);
   } else {
@@ -289,6 +312,7 @@ extern "C" void github_client_install(void) {
     std::snprintf(s_status, sizeof(s_status), "no update checked");
     return;
   }
+  panel_update_clear();
   rc_release_t rel;
   if (rc_release_parse(s_release, &rel) != 0) {
     std::snprintf(s_status, sizeof(s_status), "bad release.json");

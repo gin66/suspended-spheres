@@ -32,6 +32,7 @@
 #include "katapult_client.h"
 #include "panel_console.h"
 #include "panel_ota.h"
+#include "panel_update.h"
 #include "ui.h"
 #include "upgrade_manager.h"
 
@@ -219,6 +220,25 @@ void action_display_timeout_cycle(void) {
 }
 
 void display_power_poll(void) {
+  /* The update overlay is visible first; after a short dwell the backlight
+   * is cut so the flash write cannot show a garbled RGB frame. */
+  if (panel_update_blank_due(millis(), 1500u)) {
+    board_ws7_backlight(false);
+    s_display_on = false;
+    panel_update_mark_blanked(true);
+    SS_LOGI("ota", "backlight off for flash write");
+  }
+  bool pu_active = false;
+  bool pu_error = false;
+  panel_update_get(&pu_active, &pu_error, nullptr, nullptr, 0, nullptr, 0);
+  (void)pu_active;
+  if (panel_update_blanked() && pu_error) {
+    board_ws7_backlight(true);
+    s_display_on = true;
+    s_display_last_ms = millis();
+    panel_update_mark_blanked(false);
+    SS_LOGW("ota", "update failed; backlight restored");
+  }
   if (!s_display_on || s_display_timeout_s == 0) return;
   /* Never blank a running commissioning pass or a firmware queue. */
   if (commission_test_run_active() || upgrade_manager_active()) {
@@ -529,6 +549,12 @@ void build_snapshot(ui_snapshot_t *snap) {
   std::snprintf(snap->panel_status, sizeof(snap->panel_status), "%s",
                 s_panel_status);
   snap->panel_image_ready = firmware_image_panel() != nullptr;
+  panel_ota_last_note(snap->ota_last_result, sizeof(snap->ota_last_result));
+  panel_update_get(&snap->panel_update_active, &snap->panel_update_error,
+                   &snap->panel_update_progress, snap->panel_update_stage,
+                   sizeof(snap->panel_update_stage),
+                   snap->panel_update_result,
+                   sizeof(snap->panel_update_result));
   snap->display_timeout_s = s_display_timeout_s;
   snap->boot_count = wd->boot_count;
   snap->last_watchpoint = wd->last_watchpoint;
@@ -652,6 +678,7 @@ void setup() {
   actions.test_run_stop = action_test_stop;
   actions.display_timeout_cycle = action_display_timeout_cycle;
   actions.display_timeout_set = action_display_timeout_set;
+  actions.panel_update_dismiss = panel_update_clear;
   actions.log_clear = action_log_clear;
   actions.can_start = action_can_start;
   actions.can_stop = action_can_stop;
@@ -694,7 +721,7 @@ void setup() {
     s_display_last_ms = millis();
   }
 
-  panel_ota_boot_check(s_display != nullptr && can_transport_running());
+  panel_ota_boot_check(s_display != nullptr, can_transport_running());
   panel_console_begin();
   WATCH(3);
   SS_LOGI("boot", "ready: %s transport, %d position capacity",

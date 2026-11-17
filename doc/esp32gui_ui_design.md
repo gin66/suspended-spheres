@@ -273,6 +273,11 @@ failure, not a review note.
   the safety stop, so a pending board never reads as a failure.
 - The 30 firmware tiles use 6 × 5 at 107 × 44 px to keep both ID and phase
   text inside each tile and a 12 px bottom margin.
+- The panel/GitHub source row sits directly under the header, above the node
+  fleet controls: the GitHub check is the primary update action, not a
+  footnote below the fleet buttons.  Offline it reads `connect to check`
+  instead of leaving a stale result on screen.  The `release.json` request
+  carries a timestamp so the edge cache cannot serve an older tag.
 - `CONNECT` is the network screen.  The Network screen exposes OFF, CONNECT
   and AP; GitHub check/install is disabled unless CONNECTED; AP-only admin/key
   fields are disabled outside AP.
@@ -285,6 +290,16 @@ failure, not a review note.
 - While an animation is running, the library panel yields to the square red
   **STOP** target.  It sends the immediate stop; the transport `STOP`
   remains the decelerating stop.  The playlist never moves.
+- A panel update shows a full-screen overlay with the stage and download
+  percentage.  After the image is downloaded, the overlay stays visible for
+  1.5 s, then the main loop cuts the backlight before `esp_ota_write`, so the
+  cache stall cannot draw a garbled frame.  On failure the backlight returns
+  and the overlay shows the reason with `DISMISS`.
+- The status strip carries the running panel version and build, so an update
+  that rolls back is visible immediately.  Boards show each node's running
+  `sw` version.  SYSTEM → `Last update` keeps the boot-check outcome
+  (`validated`, `rollback: CAN off`, ...), which survives the rollback reset
+  in RTC memory.
 - The display backlight turns off after inactivity; the first touch only
   wakes the display and is consumed, so it cannot activate the control
   underneath.

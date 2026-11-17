@@ -19,8 +19,13 @@ bool panel_ota_apply(const rc_manifest_t *m, const uint8_t *data, size_t len,
                      char *status, unsigned status_len);
 
 /* Called at the end of bring-up.  If this image is PENDING_VERIFY, mark it
- * valid when the panel and CAN are up, otherwise roll back. */
-void panel_ota_boot_check(bool panel_ok);
+ * valid when the display and CAN are up, otherwise roll back.  The outcome
+ * is kept in RTC memory and survives the reset, so the previous image can
+ * show why an update did not stick. */
+void panel_ota_boot_check(bool display_ok, bool can_ok);
+
+/* Copy the last boot-check outcome ("validated", "rollback: CAN", ...). */
+void panel_ota_last_note(char *out, unsigned len);
 
 #ifdef __cplusplus
 }

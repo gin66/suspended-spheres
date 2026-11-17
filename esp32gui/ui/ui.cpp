@@ -86,6 +86,12 @@ lv_obj_t *s_show_status;
 uint32_t s_show_list_hash = 0;
 uint32_t s_playlist_source_hash = 0;
 bool s_show_playing = false;
+lv_obj_t *s_update_overlay;
+lv_obj_t *s_update_title;
+lv_obj_t *s_update_stage;
+lv_obj_t *s_update_result;
+lv_obj_t *s_update_bar;
+lv_obj_t *s_update_dismiss;
 bool s_playlist_flags[UI_MAX_ANIMATIONS];
 bool s_show_cycle_on = false;
 
@@ -163,7 +169,7 @@ lv_obj_t *s_set_firmware;
 lv_obj_t *s_set_boot;
 lv_obj_t *s_set_uptime;
 lv_obj_t *s_set_capacity;
-lv_obj_t *s_set_watch;
+lv_obj_t *s_set_ota;
 lv_obj_t *s_upg_panel_status;
 lv_obj_t *s_upg_panel_update;
 lv_obj_t *s_set_boards;
@@ -916,6 +922,12 @@ void on_panel_update(lv_event_t *e) {
   if (s_actions.panel_update != nullptr) s_actions.panel_update();
 }
 
+void on_update_dismiss(lv_event_t *e) {
+  (void)e;
+  if (s_actions.panel_update_dismiss != nullptr)
+    s_actions.panel_update_dismiss();
+}
+
 void on_upgrade_row(lv_event_t *e) {
   const int index = (int)(intptr_t)lv_event_get_user_data(e);
   if (s_actions.node_select != nullptr) s_actions.node_select(index);
@@ -1124,6 +1136,60 @@ lv_obj_t *make_screen(void) {
   lv_obj_set_style_bg_opa(s, LV_OPA_TRANSP, 0);
   lv_obj_clear_flag(s, LV_OBJ_FLAG_SCROLLABLE);
   return s;
+}
+
+void build_update_overlay(void) {
+  s_update_overlay = lv_obj_create(lv_screen_active());
+  lv_obj_remove_style_all(s_update_overlay);
+  lv_obj_set_pos(s_update_overlay, 0, 0);
+  lv_obj_set_size(s_update_overlay, kWidth, kHeight);
+  lv_obj_set_style_bg_color(s_update_overlay, C_BG, 0);
+  lv_obj_set_style_bg_opa(s_update_overlay, LV_OPA_COVER, 0);
+  lv_obj_clear_flag(s_update_overlay, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(s_update_overlay, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_flag(s_update_overlay, LV_OBJ_FLAG_HIDDEN);
+
+  s_update_title = make_label(s_update_overlay, "UPDATING PANEL",
+                              &lv_font_montserrat_28, C_ACCENT);
+  lv_obj_set_width(s_update_title, kWidth);
+  lv_obj_set_style_text_align(s_update_title, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(s_update_title, 0, 128);
+
+  s_update_stage = make_label(s_update_overlay, "preparing",
+                              &lv_font_montserrat_20, C_TEXT);
+  lv_obj_set_width(s_update_stage, kWidth);
+  lv_obj_set_style_text_align(s_update_stage, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(s_update_stage, 0, 188);
+
+  s_update_bar = lv_bar_create(s_update_overlay);
+  lv_obj_set_pos(s_update_bar, 140, 232);
+  lv_obj_set_size(s_update_bar, 520, 14);
+  lv_bar_set_range(s_update_bar, 0, 100);
+  lv_bar_set_value(s_update_bar, 0, LV_ANIM_OFF);
+  lv_obj_set_style_bg_color(s_update_bar, C_OFF, 0);
+  lv_obj_set_style_bg_color(s_update_bar, C_ACCENT, LV_PART_INDICATOR);
+  lv_obj_set_style_radius(s_update_bar, 7, 0);
+  lv_obj_set_style_radius(s_update_bar, 7, LV_PART_INDICATOR);
+
+  s_update_result = make_label(s_update_overlay, "",
+                               &lv_font_montserrat_14, C_MUTED);
+  lv_obj_set_width(s_update_result, 600);
+  lv_obj_set_style_text_align(s_update_result, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(s_update_result, 100, 264);
+  lv_label_set_long_mode(s_update_result, LV_LABEL_LONG_WRAP);
+
+  lv_obj_t *note = make_label(
+      s_update_overlay,
+      "Do not remove power. The screen may go blank while the image is written.",
+      &lv_font_montserrat_12, C_MUTED);
+  lv_obj_set_width(note, kWidth);
+  lv_obj_set_style_text_align(note, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(note, 0, 330);
+
+  s_update_dismiss = make_button(s_update_overlay, "DISMISS", 120, 40,
+                                 on_update_dismiss, nullptr);
+  lv_obj_set_pos(s_update_dismiss, 340, 380);
+  lv_obj_add_flag(s_update_dismiss, LV_OBJ_FLAG_HIDDEN);
 }
 
 void build_status_strip(void) {
@@ -1720,27 +1786,27 @@ void build_upgrade(void) {
   s_upgrade_summary = make_label(head, "", &lv_font_montserrat_12, C_MUTED);
   lv_obj_align(s_upgrade_summary, LV_ALIGN_RIGHT_MID, -12, 0);
 
-  lv_obj_t *controls = make_panel(s, 12, 62, 688, 92);
+  lv_obj_t *controls = make_panel(s, 12, 120, 688, 84);
   lv_obj_t *query = make_button(controls, "QUERY ALL", 116, 40,
                                 on_version_query, nullptr);
-  lv_obj_set_pos(query, 8, 8);
+  lv_obj_set_pos(query, 8, 0);
   lv_obj_t *all = make_button(controls, "UPGRADE ALL OUTDATED", 200, 40,
                               on_upgrade_all, nullptr);
-  lv_obj_set_pos(all, 132, 8);
+  lv_obj_set_pos(all, 132, 0);
   lv_obj_t *sel = make_button(controls, "UPGRADE SELECTED", 180, 40,
                               on_upgrade_start, nullptr);
   lv_obj_set_style_bg_color(sel, C_ACCENT, 0);
   lv_obj_set_style_border_color(sel, C_ACCENT, 0);
-  lv_obj_set_pos(sel, 340, 8);
+  lv_obj_set_pos(sel, 340, 0);
   s_upgrade_stop = make_button(controls, "STOP", 80, 40, on_upgrade_stop,
                                nullptr);
-  lv_obj_set_pos(s_upgrade_stop, 528, 8);
+  lv_obj_set_pos(s_upgrade_stop, 528, 0);
   s_upgrade_status = make_label(controls, "idle", &lv_font_montserrat_12, C_MUTED);
-  lv_obj_set_pos(s_upgrade_status, 8, 54);
+  lv_obj_set_pos(s_upgrade_status, 8, 44);
   lv_label_set_long_mode(s_upgrade_status, LV_LABEL_LONG_CLIP);
   lv_obj_set_width(s_upgrade_status, 400);
   s_upgrade_progress = lv_bar_create(controls);
-  lv_obj_set_pos(s_upgrade_progress, 416, 58);
+  lv_obj_set_pos(s_upgrade_progress, 416, 46);
   lv_obj_set_size(s_upgrade_progress, 240, 8);
   lv_bar_set_range(s_upgrade_progress, 0, 100);
   lv_bar_set_value(s_upgrade_progress, 0, LV_ANIM_OFF);
@@ -1752,8 +1818,8 @@ void build_upgrade(void) {
   /* One row for both firmware sources: the panel image on SD and the
    * GitHub release.  A panel update belongs here, with the node image,
    * not under SYSTEM. */
-  lv_obj_t *src = make_panel(s, 12, 158, 688, 44);
-  lv_obj_set_style_pad_all(src, 4, 0);
+  lv_obj_t *src = make_panel(s, 12, 62, 688, 52);
+  lv_obj_set_style_pad_all(src, 8, 0);
   lv_obj_t *pl = make_label(src, "PANEL", &lv_font_montserrat_12, C_MUTED);
   lv_obj_set_pos(pl, 0, 10);
   s_upg_panel_update = make_button(src, "FROM SD", 88, 28, on_panel_update,
@@ -1785,7 +1851,7 @@ void build_upgrade(void) {
    * scrolling list (firmware_release_whitepaper.md §4.10). */
   lv_obj_t *tiles = lv_obj_create(s);
   lv_obj_remove_style_all(tiles);
-  lv_obj_set_pos(tiles, 12, 206);
+  lv_obj_set_pos(tiles, 12, 208);
   lv_obj_set_size(tiles, 688, 242);
   lv_obj_set_style_bg_opa(tiles, LV_OPA_TRANSP, 0);
   lv_obj_clear_flag(tiles, LV_OBJ_FLAG_SCROLLABLE);
@@ -2054,7 +2120,9 @@ void build_settings(void) {
   s_set_boot = make_kv(sys, "Boot", 52);
   s_set_uptime = make_kv(sys, "Uptime", 74);
   s_set_capacity = make_kv(sys, "Capacity", 96);
-  s_set_watch = make_kv(sys, "Watchpoint", 118);
+  s_set_ota = make_kv(sys, "Last update", 118);
+  lv_obj_set_width(s_set_ota, 190);
+  lv_label_set_long_mode(s_set_ota, LV_LABEL_LONG_CLIP);
   s_set_can = make_kv(sys, "CAN", 140);
 
   lv_obj_t *state = make_panel(s, 356, 64, 344, 180);
@@ -2291,6 +2359,7 @@ void ui_init(const ui_actions_t *actions) {
   build_wifi();
   build_setup_hub();
   build_service_hub();
+  build_update_overlay();
 
   s_screen = UI_SCREEN_SHOW;
   ui_show_screen(UI_SCREEN_SHOW);
@@ -2313,6 +2382,7 @@ void ui_show_screen(int index) {
   if (s_nav != nullptr) lv_obj_delete(s_nav);
   s_nav = nullptr;
   build_nav(index);
+  if (s_update_overlay != nullptr) lv_obj_move_foreground(s_update_overlay);
 }
 
 int ui_current_screen(void) { return s_screen; }
@@ -2335,11 +2405,58 @@ void ui_update(const ui_snapshot_t *snapshot) {
   if (s_assign_position >= cap) s_assign_position = cap - 1;
 
   /* Status strip link state. */
-  lv_label_set_text_fmt(s_link_label, "%s  %s  boot %lu  uptime %lus",
+  lv_label_set_text_fmt(s_link_label, "fw %s  %s %s  boot %lu  %lus",
+                        s_snap->firmware_version,
                         s_snap->can_running ? "CAN" : "CAN OFF",
                         s_snap->can_mock ? "MOCK" : "HW",
                         (unsigned long)s_snap->boot_count,
                         (unsigned long)s_snap->uptime_s);
+
+  /* Update overlay: the network task owns the state, the main loop owns the
+   * backlight.  Keep the overlay above the rail while it is active. */
+  const bool updating = s_snap->panel_update_active;
+  set_hidden(s_update_overlay, !updating);
+  if (updating) {
+    lv_obj_move_foreground(s_update_overlay);
+    const bool failed = s_snap->panel_update_error;
+    const bool done = !failed && std::strcmp(s_snap->panel_update_stage,
+                                             "done") == 0;
+    lv_label_set_text(s_update_title,
+                      failed ? "UPDATE FAILED"
+                             : (done ? "UPDATE COMPLETE" : "UPDATING PANEL"));
+    lv_obj_set_style_text_color(s_update_title,
+                                failed ? C_ERR : C_ACCENT, 0);
+    char stage[80];
+    if (failed) {
+      std::snprintf(stage, sizeof(stage), "%s",
+                    s_snap->panel_update_result[0]
+                        ? s_snap->panel_update_result
+                        : "see the log");
+    } else if (s_snap->panel_update_progress >= 0) {
+      std::snprintf(stage, sizeof(stage), "%s  %d%%",
+                    s_snap->panel_update_stage[0]
+                        ? s_snap->panel_update_stage
+                        : "preparing",
+                    s_snap->panel_update_progress);
+    } else {
+      std::snprintf(stage, sizeof(stage), "%s",
+                    s_snap->panel_update_stage[0]
+                        ? s_snap->panel_update_stage
+                        : "preparing");
+    }
+    lv_label_set_text(s_update_stage, stage);
+    if (failed || s_snap->panel_update_progress < 0) {
+      lv_obj_add_flag(s_update_bar, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      lv_obj_clear_flag(s_update_bar, LV_OBJ_FLAG_HIDDEN);
+      lv_bar_set_value(s_update_bar, s_snap->panel_update_progress,
+                       LV_ANIM_OFF);
+    }
+    lv_label_set_text(s_update_result,
+                      done ? "Rebooting into the new image."
+                           : (failed ? s_snap->panel_update_result : ""));
+    set_hidden(s_update_dismiss, !failed);
+  }
 
   /* SHOW — now playing, transport, playlist and library.  A file that fails
    * validation is kept out of both lists and counted as skipped. */
@@ -2688,6 +2805,9 @@ void ui_update(const ui_snapshot_t *snapshot) {
     hash = (hash ^ n->ot_mask) * 16777619u;
     hash = (hash ^ n->diag_mask) * 16777619u;
     hash = (hash ^ n->health_valid) * 16777619u;
+    hash = (hash ^ (n->version_seen ? 1u : 0u)) * 16777619u;
+    for (const char *p = n->sw_version; *p != '\0'; ++p)
+      hash = (hash ^ (uint8_t)*p) * 16777619u;
   }
   hash = (hash ^ (uint32_t)s_snap->selected_node) * 16777619u;
   if (hash != s_nodes_shown_hash) {
@@ -2757,6 +2877,12 @@ void ui_update(const ui_snapshot_t *snapshot) {
       make_label(row, board, &lv_font_montserrat_14,
                  n->board_id >= 0 ? C_OK : C_WARN);
       make_label(row, state, &lv_font_montserrat_12, C_MUTED);
+      char sw[28];
+      std::snprintf(sw, sizeof(sw), "sw %s",
+                    n->version_seen && n->sw_version[0] ? n->sw_version
+                                                        : "--");
+      make_label(row, sw, &lv_font_montserrat_12,
+                 n->version_seen ? C_TEXT : C_MUTED);
       make_label(row, pos, &lv_font_montserrat_12, C_MUTED);
       make_label(row, health, &lv_font_montserrat_12, health_color);
     }
@@ -3018,7 +3144,7 @@ void ui_update(const ui_snapshot_t *snapshot) {
   }
   char head[128];
   if (s_snap->upgrade_image_build != 0) {
-    std::snprintf(head, sizeof(head), "%s  %lu  %s  %d/30  %s",
+    std::snprintf(head, sizeof(head), "NODE %s  %lu  %s  %d/30  %s",
                   s_snap->upgrade_image_version[0]
                       ? s_snap->upgrade_image_version
                       : "--",
@@ -3039,13 +3165,19 @@ void ui_update(const ui_snapshot_t *snapshot) {
   lv_bar_set_value(s_upgrade_progress, s_snap->upgrade_progress, LV_ANIM_OFF);
   const char *gh = s_snap->github_status[0] ? s_snap->github_status
                                             : "not queried";
-  lv_label_set_text(s_upg_github_status, gh);
   lv_color_t gh_color = C_MUTED;
-  if (std::strncmp(gh, "newer", 5) == 0 ||
-      std::strncmp(gh, "node", 4) == 0) gh_color = C_WARN;
-  else if (std::strncmp(gh, "same", 4) == 0) gh_color = C_OK;
-  else if (std::strncmp(gh, "older", 5) == 0) gh_color = C_OK;
-  else if (std::strncmp(gh, "error", 5) == 0) gh_color = C_ERR;
+  if (!s_snap->wifi_connected) {
+    gh = "connect to check";
+  } else if (std::strncmp(gh, "newer", 5) == 0 ||
+             std::strncmp(gh, "node", 4) == 0) {
+    gh_color = C_WARN;
+  } else if (std::strncmp(gh, "same", 4) == 0 ||
+             std::strncmp(gh, "older", 5) == 0) {
+    gh_color = C_OK;
+  } else if (std::strncmp(gh, "error", 5) == 0) {
+    gh_color = C_ERR;
+  }
+  lv_label_set_text(s_upg_github_status, gh);
   lv_obj_set_style_text_color(s_upg_github_status, gh_color, 0);
   if (s_snap->wifi_connected) {
     lv_obj_clear_state(s_upg_github_check, LV_STATE_DISABLED);
@@ -3272,7 +3404,19 @@ void ui_update(const ui_snapshot_t *snapshot) {
   lv_label_set_text_fmt(s_set_uptime, "%lu s", (unsigned long)s_snap->uptime_s);
   lv_label_set_text_fmt(s_set_capacity, "%lu positions",
                         (unsigned long)s_snap->capacity);
-  lv_label_set_text_fmt(s_set_watch, "%u", (unsigned)s_snap->last_watchpoint);
+  lv_label_set_text(s_set_ota,
+                    s_snap->ota_last_result[0] ? s_snap->ota_last_result
+                                               : "--");
+  lv_color_t ota_color = C_MUTED;
+  if (s_snap->ota_last_result[0]) {
+    if (std::strncmp(s_snap->ota_last_result, "rollback", 8) == 0)
+      ota_color = C_ERR;
+    else if (std::strncmp(s_snap->ota_last_result, "validated", 9) == 0)
+      ota_color = C_OK;
+    else
+      ota_color = C_WARN;
+  }
+  lv_obj_set_style_text_color(s_set_ota, ota_color, 0);
 
   /* Display timeout is a four-way choice, not a hidden cycle: show which
    * value is active instead of only its text. */
