@@ -63,7 +63,7 @@ Suspended_Spheres/
     └── RISK.md                 # Risk register and technical review
 ```
 
-All technical Markdown belongs in `doc/`. Only `README.md` and `AGENTS.md` sit at the repository root. Vendor board files and the pin reference stay in `boards/`. PC build and test code lives in `tests/`; `rp2040/` and `esp32gui/` are firmware-only. The current `esp32gui/` build has no WiFi, network OTA, Telegram or `.private` secrets; the planned onboarding and web/GitHub update path is in `doc/firmware_release_whitepaper.md` §3.7–§3.9. The shared core in `lib/motion_core/` is the only source exchanged between the firmware builds.
+All technical Markdown belongs in `doc/`. Only `README.md` and `AGENTS.md` sit at the repository root. Vendor board files and the pin reference stay in `boards/`. PC build and test code lives in `tests/`; `rp2040/` and `esp32gui/` are firmware-only. The `esp32gui/` build has explicit WiFi modes, network OTA and browser upload, with credentials in NVS and no `.private` secrets; the onboarding and web/GitHub update path is in `doc/firmware_release_whitepaper.md` §3.7–§3.9 and the UI contract in `doc/esp32gui_ui_design.md`. The shared core in `lib/motion_core/` is the only source exchanged between the firmware builds.
 
 ---
 
@@ -116,7 +116,7 @@ All technical Markdown belongs in `doc/`. Only `README.md` and `AGENTS.md` sit a
   AP is up. Settings **SETUP/SCAN/FORGET/SERVER** and the **WIFI** screen
   (SSID list, full-screen password/admin keypad with DONE/CANCEL, SET ADMIN)
   are the panel path. The bench
-  console has `wifi setup|forget|scan|status|list|key`, `service on|off`,
+  console has `wifi ap|off|forget|scan|retry|status|list|key`, `service on|off`,
   `github check|install|status` and `panelota`.  The GitHub owner/repository
   are compiled from `SS_GITHUB_OWNER`/`SS_GITHUB_REPO`; the release workflow
   fills them from the repository that ran the tag, so no extra variables

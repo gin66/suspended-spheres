@@ -99,8 +99,10 @@ esp32gui/                  PlatformIO project
 The first implemented stage is the board bring-up, the commissioning model
 and the UI. The CAN transport boundary selects a mock at build time because
 the bench has no bus wiring yet; the TWAI implementation is present and
-compile-guarded (`SS_CAN_MOCK`). No WiFi, network OTA, Telegram or `.private`
-secret is compiled into this project. The card-based field update is
+compile-guarded (`SS_CAN_MOCK`). WiFi onboarding, explicit CONNECT/AP,
+GitHub release pull and browser upload are implemented; no `.private` secret
+is compiled. Credentials live in NVS. The panel UI contract is
+`esp32gui_ui_design.md`; the image update is
 `firmware_release_whitepaper.md` §3.
 
 The local `app_log`, `app_watchdog` and `can_monitor` adapt the useful
@@ -161,14 +163,12 @@ Consequences, already paid for in the house panel:
 - `ARDUINO_USB_MODE=0`. GPIO 19/20 are the TWAI pins, not a USB-OTG CDC.
 - `setup()` drives `USB_SEL` low before anything else, then raises it only
   when the config says CAN is on and `twai_start()` runs.
-- **No WiFi and no secrets in the current `esp32gui/` build.** `template.h`,
-  `tpl_wifi`, `wifi_secrets.*`, `private_bot.h` and `private_sha.h` are not
-  used. The service path is USB/UART flashing through the CH9102 (UART switch
-  to ESP32, hold BOOT, tap RESET). A future network OTA path must keep
-  credentials outside the repository; none are present today. The field update
-  is the microSD path in `firmware_release_whitepaper.md` §3.3. The planned
-  WiFi onboarding and browser/GitHub image path are §3.7–§3.9 of that paper;
-  credentials go to NVS and are never compiled.
+- **No compiled secrets.** `template.h`, `tpl_wifi`, `wifi_secrets.*`,
+  `private_bot.h` and `private_sha.h` are not used. WiFi credentials and the
+  admin hash live in NVS (`Preferences` namespace `ssnet`); `FORGET` deletes
+  them. The service paths are USB/UART flashing through the CH9102, the
+  microSD image path (`firmware_release_whitepaper.md` §3.3), GitHub pull and
+  browser upload (§3.7–§3.9).
 - Diagnostics that must be read while the show runs are drawn on the panel.
   The UART0 log remains available; native USB does not, once CAN is on.
 - The pixel clock that stayed stable on this panel is 12 MHz
@@ -245,24 +245,30 @@ CAN callback only updates the RAM registry and queues `ASSIGN`.
 ## 7. Screens
 
 Enough to operate and commission the piece. Navigation is a right-hand
-88 px rail with an icon and short label per screen; the content area is
-712 × 480. The rail marks the active screen with an accent rule at its left
-edge, following the house-panel layout. The host harness renders each screen
-to a PNG before it is treated as done; the PNGs live in
-`esp32gui/host/png/`.
+88 px icon-only rail with five destinations: SHOW, SETUP, FIRMWARE, NETWORK,
+DIAGNOSTICS; the content area is 712 × 480. SETUP and DIAGNOSTICS open card
+hubs; SHOW opens the performance console with the playlist and transport. The rail marks the active section with an
+accent rule at its left edge. The full information architecture, network
+rules and disabled-state policy are in `esp32gui_ui_design.md`. The host
+harness renders each screen to a PNG before it is treated as done; the PNGs
+live in `esp32gui/host/png/`.
 
-| Screen | Shows |
+| Section / screen | Shows |
 |--------|--------|
-| Show | Pattern name, play / stop, elapsed time, bus state, discovered/assigned/online counts, unassigned steppers, thermal summary, test-run state |
-| Animations | HBP2 files on the card: name, size, duration, validity; refresh, select and load |
+| Show | Now playing, elapsed time, PLAY/PAUSE/STOP/CYCLE, playable playlist/library with add/remove, large immediate STOP while playing, compact CAN/board/thermal status |
+| Setup hub | Grid & Layout, Boards, Align Motors, Test & Config |
 | Grid | One cell per ball: assigned, free, thermal warning, fault; click a cell to select its board |
 | Nodes | Discovered boards by 6-byte UUID, board ID, online state, build, assigned positions, MCU temperature, TMC OTPW/OT, health age |
 | Motor | Selected board and axis (assigned axes are green); board health; HOME, UP, DOWN, STOP; tap a grid cell to choose the position, then assign/unassign |
 | Config | Grid size, test-run drop/speed/gap, serpentine, save/reset/clear, SPIFFS state |
+| Firmware | Fly image, node versions, fleet upgrade, panel update, GitHub check/install |
+| Network | Explicit OFF/CONNECT/AP, scan, AP join/browser QR, password rotate/edit, service |
+| Diagnostics hub | CAN Scope, Log, System |
+| Network | Explicit OFF / CONNECT / AP, scan, password keypad, service, AP password/rotate/edit, join/browser QR, reason |
+| Firmware | 30 tiles on one page in 6 × 5 order; board ID, waiting red, the one yellow Katapult board, green verified, dim excluded; `QUERY ALL`, `UPGRADE ALL OUTDATED`, `UPGRADE SELECTED`, `STOP`, image version/build/source and `n / 30` |
 | Log | Recent PSRAM log ring, boot count, last watchpoint, last safe hold, thermal transitions |
 | CAN | Received-frame scope by identifier (raw ID, type, count, last data), TX sent/rejected, RX drops, bus-off state; clear |
-| Upgrade | 30 tiles on one page in 6 × 5 order; board ID, waiting red, the one yellow Katapult board, green verified, dim excluded; `QUERY ALL`, `UPGRADE ALL OUTDATED`, `UPGRADE SELECTED`, `STOP`, image version/build/source and `n / 30` |
-| Settings | WiFi/SSID/IP/RSSI and CAN state, firmware, boot, uptime, position capacity, service path |
+| System | Firmware, boot, uptime, capacity, watchpoint, CAN state, network summary, panel update, screen timeout |
 
 The Animations screen is the file-selection UI. The SD enumeration and HBP2
 load/playback backend are not implemented yet, so the firmware reports that
@@ -288,10 +294,10 @@ The release identity, the panel image load and the identified board list with
 order is `firmware_release_tdd.md`. GitHub Releases of that image are created
 by the tag workflow in the release paper §1.6.
 
-This build has no WiFi stack. The Settings network fields are fed from the
-snapshot and report `not compiled` until a net-status source exists; the
-service path remains the CH9102 UART. There is no language switch: labels are
-short and the log is English-only.
+The Network screen is fed from the snapshot. WiFi is off after reset; CONNECT
+joins a selected or stored network and retries without AP fallback; AP is an
+explicit upload mode. Actions that need a network are disabled with a reason.
+There is no language switch: labels are short and the log is English-only.
 
 Commissioning text uses the rules in `Fly_Micro4_addressing.md`. The panel
 is the master that sends ASK and ASSIGN. It stores the host map
@@ -338,11 +344,9 @@ The screen flows are in §9.
 - House-panel application code: heater curves, SML power, water model,
   Matter, Telegram.
 - A second copy of the CAN ID map or the cubic frame layout.
-- In the current build: WiFi, network OTA, Telegram and every `.private`
-  secret. This panel is a wired CAN master; the CH9102 UART and the microSD
-  card are the service paths. The planned WiFi onboarding and browser/GitHub
-  image path are `firmware_release_whitepaper.md` §3.7–§3.9; credentials stay
-  in NVS, never in the repository.
+- Telegram and every `.private` secret. WiFi and network OTA are implemented
+  with NVS credentials; the CH9102 UART and the microSD card remain the
+  no-network service paths. Network behavior is in `esp32gui_ui_design.md`.
 
 ---
 

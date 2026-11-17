@@ -319,9 +319,9 @@ server starts off. The switch lives in RAM and is not part of the config
 record.
 
 - [ ] **B1** Link states `OFF`, `AP_SETUP`, `SCANNING`, `CONNECTING`,
-  `CONNECTED`, `FAILED` follow the table in the whitepaper §3.7. A wrong
-  password reaches `FAILED` and can return to `AP_SETUP`. `FORGET` clears
-  the credential flag.
+  `CONNECTED` follow the explicit-mode table in `esp32gui_ui_design.md`.
+  A wrong password stays `CONNECTING` for a visible retry and does not open
+  the setup AP. `FORGET` clears the credential flag and returns to `OFF`.
 - [ ] **B2** The setup window supplied as `now_ms` expires at 10 minutes and
   leaves `AP_SETUP`.
 - [ ] **B3** An upload with the server off, a bad password, a running show,
@@ -543,8 +543,10 @@ On clean commit `bc954a62`, build id `1794858657`:
 - Credentials and the admin hash live in NVS (`Preferences` namespace
   `ssnet`), not in SPIFFS or the version-2 config.  `wifi` reports
   `cred=1 admin=1`; `FORGET` removes them.
-- A stored SSID/password auto-connects two seconds after boot; the HTTP
-  service remains off until Settings **SERVER**.
+- WiFi is OFF after reset; even stored credentials do not start the radio.
+  The Network screen has explicit **OFF**, **CONNECT** and **AP** modes.
+- CONNECT keeps `NET_CONNECTING` and retries every 5 s after a failure; it
+  never opens the setup AP.  FORGET returns to OFF.
 - `WiFi.scanNetworks()` returns one entry per BSSID.  The firmware now folds
   entries with the same SSID into one row, keeping the strongest RSSI.  Join
   uses the SSID/password, so five APs with one SSID are one logical network;

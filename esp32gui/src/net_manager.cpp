@@ -54,9 +54,12 @@ bool s_service_on = false;
 bool s_server_on = false;
 bool s_sntp_started = false;
 uint32_t s_connect_deadline = 0;
+uint32_t s_retry_deadline = 0;
+uint8_t s_retry_count = 0;
 
 enum cmd_t { CMD_NONE, CMD_SETUP, CMD_FORGET, CMD_SCAN, CMD_SERVICE,
-             CMD_GITHUB_CHECK, CMD_CONNECT, CMD_SET_ADMIN, CMD_RETRY };
+             CMD_GITHUB_CHECK, CMD_GITHUB_INSTALL, CMD_CONNECT, CMD_SET_ADMIN,
+             CMD_RETRY, CMD_OFF, CMD_AP_NEW_KEY, CMD_AP_SET_KEY };
 volatile cmd_t s_cmd = CMD_NONE;
 volatile bool s_cmd_service_on = false;
 
@@ -66,6 +69,7 @@ int s_scan_count = 0;
 char s_pending_ssid[33] = "";
 char s_pending_pass[65] = "";
 char s_pending_admin[65] = "";
+char s_pending_ap_key[64] = "";
 bool s_scanning = false;
 
 uint8_t *s_up_json = nullptr;
@@ -240,8 +244,12 @@ void start_ap(void) {
   s_ap_up = true;
   const IPAddress ip = WiFi.softAPIP();
   lock();
-  s_link.have_credentials = false;
-  net_link_enable_setup(&s_link, millis());
+  s_link.state = NET_AP_SETUP;
+  s_link.have_credentials = s_have_cred;
+  s_link.setup_deadline_ms = millis() + NET_SETUP_WINDOW_MS;
+  s_link.reason[0] = '\0';
+  s_retry_deadline = 0;
+  s_retry_count = 0;
   std::snprintf(s_ip, sizeof(s_ip), "%s", ip.toString().c_str());
   s_rssi = 0;
   s_service_on = true;
@@ -252,8 +260,18 @@ void start_ap(void) {
 }
 
 void connect_sta(void) {
+  if (s_ap_up) {
+    WiFi.softAPdisconnect(true);
+    s_ap_up = false;
+    stop_server();
+    s_service_on = false;
+  }
   if (s_ssid[0] == '\0') {
-    start_ap();
+    lock();
+    s_link.state = NET_OFF;
+    s_link.reason[0] = '\0';
+    std::snprintf(s_link.reason, sizeof(s_link.reason), "no stored SSID");
+    unlock();
     return;
   }
   WiFi.mode(WIFI_STA);
@@ -263,21 +281,12 @@ void connect_sta(void) {
   s_link.have_credentials = true;
   s_link.reason[0] = '\0';
   s_connect_deadline = millis() + 20000u;
+  s_retry_deadline = 0;
   unlock();
   SS_LOGI("net", "connecting to %s", s_ssid);
 }
 
-void do_setup(void) {
-  lock();
-  const net_state_t state = s_link.state;
-  unlock();
-  if (state == NET_CONNECTED) WiFi.disconnect();
-  if (state == NET_OFF && s_have_cred) {
-    connect_sta();
-  } else {
-    start_ap();                 /* configure, or recover after a failure */
-  }
-}
+void do_setup(void) { start_ap(); }
 
 void do_forget(void) {
   s_prefs.remove("ssid");
@@ -287,8 +296,24 @@ void do_forget(void) {
   s_pass[0] = '\0';
   s_admin_hash[0] = '\0';
   s_have_cred = false;
-  WiFi.disconnect(true);
-  start_ap();
+  if (!s_ap_up) WiFi.disconnect(true);
+  WiFi.softAPdisconnect(true);
+  WiFi.mode(WIFI_OFF);
+  stop_server();
+  lock();
+  s_ap_up = false;
+  s_service_on = false;
+  s_retry_deadline = 0;
+  s_retry_count = 0;
+  s_link.state = NET_OFF;
+  s_link.have_credentials = false;
+  s_link.reason[0] = '\0';
+  std::snprintf(s_link.reason, sizeof(s_link.reason),
+                "credentials forgotten; WiFi off");
+  std::snprintf(s_ip, sizeof(s_ip), "%s", "");
+  s_rssi = 0;
+  unlock();
+  SS_LOGI("net", "credentials forgotten; WiFi off");
 }
 
 void do_scan(void) {
@@ -352,6 +377,8 @@ void finish_connected(void) {
   s_prefs.putString("ssid", s_ssid);
   s_prefs.putString("pass", s_pass);
   s_have_cred = true;
+  s_retry_deadline = 0;
+  s_retry_count = 0;
   if (s_ap_up) {
     WiFi.softAPdisconnect(true);
     s_ap_up = false;
@@ -368,15 +395,22 @@ void finish_connected(void) {
   SS_LOGI("net", "connected to %s, IP %s", s_ssid, s_ip);
 }
 
-void finish_failed(const char *reason) {
+void schedule_retry(const char *reason) {
+  WiFi.disconnect();
   lock();
-  net_link_result(&s_link, false, reason);
-  s_link.have_credentials = false;
+  s_link.state = NET_CONNECTING;
+  s_link.have_credentials = s_have_cred;
+  ++s_retry_count;
+  s_retry_deadline = millis() + 5000u;
+  std::snprintf(s_link.reason, sizeof(s_link.reason),
+                "%s; retry %u in 5 s",
+                reason != nullptr ? reason : "connect failed",
+                (unsigned)s_retry_count);
   std::snprintf(s_ip, sizeof(s_ip), "%s", "");
   s_rssi = 0;
   unlock();
-  SS_LOGW("net", "connect failed: %s", reason != nullptr ? reason : "?");
-  if (!s_ap_up) start_ap();
+  SS_LOGW("net", "connect failed: %s; retrying",
+          reason != nullptr ? reason : "?");
 }
 
 void poll_link(void) {
@@ -389,9 +423,21 @@ void poll_link(void) {
       finish_connected();
     } else {
       lock();
-      const bool timeout = (int32_t)(millis() - s_connect_deadline) >= 0;
+      const uint32_t now = millis();
+      const bool retry_due =
+          s_retry_deadline != 0 && (int32_t)(now - s_retry_deadline) >= 0;
+      const bool retry_wait = s_retry_deadline != 0 && !retry_due;
+      const bool timeout =
+          s_retry_deadline == 0 && (int32_t)(now - s_connect_deadline) >= 0;
+      if (retry_due) s_retry_deadline = 0;
       unlock();
-      if (timeout) finish_failed("connect timeout");
+      if (retry_due) {
+        connect_sta();
+      } else if (timeout) {
+        schedule_retry("connect timeout");
+      } else if (retry_wait) {
+        /* waiting for the next visible retry */
+      }
     }
   } else if (state == NET_CONNECTED) {
     if (WiFi.status() == WL_CONNECTED) {
@@ -401,7 +447,7 @@ void poll_link(void) {
       s_rssi = (int16_t)WiFi.RSSI();
       unlock();
     } else {
-      finish_failed("link lost");
+      schedule_retry("link lost");
     }
   } else if (state == NET_AP_SETUP || state == NET_FAILED) {
     if (WiFi.status() == WL_CONNECTED && !s_ap_up) finish_connected();
@@ -413,6 +459,7 @@ void poll_link(void) {
   unlock();
   if (expired) {
     WiFi.softAPdisconnect(true);
+    WiFi.mode(WIFI_OFF);
     s_ap_up = false;
     do_service(false);
     SS_LOGI("net", "setup window expired");
@@ -812,16 +859,61 @@ void register_handlers(void) {
   s_server.on("/api/images/fly", HTTP_POST, handle_upload_final, handle_upload);
 }
 
+bool apply_ap_key(const char *key) {
+  const size_t n = key != nullptr ? std::strlen(key) : 0;
+  if (n < 8 || n > 63) {
+    lock();
+    std::snprintf(s_link.reason, sizeof(s_link.reason),
+                  "AP password must be 8..63 characters");
+    unlock();
+    return false;
+  }
+  std::snprintf(s_ap_pass, sizeof(s_ap_pass), "%s", key);
+  s_prefs.putString("ap_pass", s_ap_pass);
+  if (s_ap_up) {
+    WiFi.softAPdisconnect(true);
+    s_ap_up = false;
+    start_ap();
+  }
+  return true;
+}
+
+void do_ap_new_key(void) {
+  char key[16];
+  random_password(key, 10);
+  if (apply_ap_key(key)) SS_LOGI("net", "AP key rotated");
+}
+
+void do_ap_set_key(void) {
+  char key[64];
+  lock();
+  std::snprintf(key, sizeof(key), "%s", s_pending_ap_key);
+  s_pending_ap_key[0] = '\0';
+  unlock();
+  if (apply_ap_key(key)) SS_LOGI("net", "AP key set by operator");
+}
+
+void do_off(void) {
+  if (!s_ap_up) WiFi.disconnect(true);
+  WiFi.softAPdisconnect(true);
+  WiFi.mode(WIFI_OFF);
+  stop_server();
+  lock();
+  s_ap_up = false;
+  s_service_on = false;
+  s_retry_deadline = 0;
+  s_retry_count = 0;
+  s_link.state = NET_OFF;
+  s_link.have_credentials = s_have_cred;
+  std::snprintf(s_link.reason, sizeof(s_link.reason), "WiFi off");
+  std::snprintf(s_ip, sizeof(s_ip), "%s", "");
+  s_rssi = 0;
+  unlock();
+  SS_LOGI("net", "WiFi off");
+}
+
 void net_task(void *arg) {
   (void)arg;
-  /* Stored credentials are an operator opt-in from an earlier session.  Join
-   * that network at boot, but keep the HTTP service off until Settings.  Give
-   * the Arduino WiFi driver a moment to finish its own initialization. */
-  vTaskDelay(pdMS_TO_TICKS(2000));
-  if (s_have_cred && s_ssid[0] != '\0') {
-    SS_LOGI("net", "auto-connect to stored %s", s_ssid);
-    connect_sta();
-  }
   for (;;) {
     vTaskDelay(pdMS_TO_TICKS(50));
     cmd_t cmd;
@@ -837,17 +929,25 @@ void net_task(void *arg) {
       case CMD_SCAN: do_scan(); break;
       case CMD_SERVICE: do_service(service_on); break;
       case CMD_GITHUB_CHECK: github_client_check(); break;
+      case CMD_GITHUB_INSTALL: github_client_install(); break;
+      case CMD_OFF: do_off(); break;
+      case CMD_AP_NEW_KEY: do_ap_new_key(); break;
+      case CMD_AP_SET_KEY: do_ap_set_key(); break;
       case CMD_CONNECT: {
         lock();
         std::snprintf(s_ssid, sizeof(s_ssid), "%s", s_pending_ssid);
         std::snprintf(s_pass, sizeof(s_pass), "%s", s_pending_pass);
         s_have_cred = true;
+        s_retry_count = 0;
         unlock();
         s_pending_pass[0] = '\0';
         connect_sta();
         break;
       }
       case CMD_RETRY:
+        lock();
+        s_retry_count = 0;
+        unlock();
         if (s_have_cred && s_ssid[0] != '\0') connect_sta();
         break;
       case CMD_SET_ADMIN: {
@@ -895,7 +995,7 @@ extern "C" void net_manager_init(void) {
       pdPASS) {
     SS_LOGE("net", "network task not started");
   }
-  SS_LOGI("net", "state OFF; WiFi setup is an operator action");
+  SS_LOGI("net", "state OFF; WiFi starts only on an explicit operator action");
 }
 
 extern "C" void net_manager_setup(void) {
@@ -941,6 +1041,35 @@ extern "C" void net_manager_retry(void) {
   unlock();
 }
 
+extern "C" void net_manager_ap(void) {
+  lock();
+  s_cmd = CMD_SETUP;
+  unlock();
+}
+
+
+
+extern "C" void net_manager_ap_new_key(void) {
+  lock();
+  s_cmd = CMD_AP_NEW_KEY;
+  unlock();
+}
+
+extern "C" bool net_manager_set_ap_key(const char *key) {
+  if (key == nullptr) return false;
+  lock();
+  std::snprintf(s_pending_ap_key, sizeof(s_pending_ap_key), "%s", key);
+  s_cmd = CMD_AP_SET_KEY;
+  unlock();
+  return true;
+}
+
+extern "C" void net_manager_off(void) {
+  lock();
+  s_cmd = CMD_OFF;
+  unlock();
+}
+
 extern "C" bool net_manager_connect(const char *ssid,
                                     const char *password) {
   if (ssid == nullptr || password == nullptr || ssid[0] == '\0' ||
@@ -966,6 +1095,12 @@ extern "C" bool net_manager_set_admin(const char *password) {
 extern "C" void net_manager_github_check(void) {
   lock();
   s_cmd = CMD_GITHUB_CHECK;
+  unlock();
+}
+
+extern "C" void net_manager_github_install(void) {
+  lock();
+  s_cmd = CMD_GITHUB_INSTALL;
   unlock();
 }
 
@@ -1005,6 +1140,7 @@ extern "C" void net_manager_snapshot(ui_snapshot_t *snap) {
   lock();
   snap->wifi_present = true;
   snap->wifi_connected = s_link.state == NET_CONNECTED;
+  snap->wifi_has_credentials = s_have_cred;
   std::snprintf(snap->wifi_state, sizeof(snap->wifi_state), "%s",
                 net_state_text(s_link.state));
   std::snprintf(snap->wifi_reason, sizeof(snap->wifi_reason), "%s",

@@ -167,7 +167,7 @@ ui_snapshot_t make_snapshot() {
   s.bus_ok = true;
   s.run_state[0] = '\0';
   std::snprintf(s.run_state, sizeof(s.run_state), "IDLE");
-  std::snprintf(s.pattern_name, sizeof(s.pattern_name), "COMMISSIONING");
+  std::snprintf(s.pattern_name, sizeof(s.pattern_name), "sine_120.hbp");
   s.uptime_s = 123;
   s.elapsed_ms = 0;
 
@@ -220,9 +220,10 @@ ui_snapshot_t make_snapshot() {
   std::snprintf(s.wifi_ap_ssid, sizeof(s.wifi_ap_ssid), "%s",
                 "SuspendedSpheres-A1B2");
   std::snprintf(s.wifi_ap_password, sizeof(s.wifi_ap_password), "%s",
-                "REDACTED");
+                "K7mQ4pR9X2");
   std::snprintf(s.wifi_reason, sizeof(s.wifi_reason), "%s",
                 "scan: 6 networks");
+  s.wifi_has_credentials = true;
   s.wifi_rssi = 0;
   s.wifi_scan_count = 6;
   const char *scan[] = {"Home-2.4G", "Workshop", "Guest",
@@ -257,6 +258,7 @@ ui_snapshot_t make_snapshot() {
     a->size_bytes = anim_rows[i].size;
     a->duration_ms = anim_rows[i].duration_ms;
     a->valid = anim_rows[i].valid;
+    a->in_playlist = (i < 2);
   }
   s.selected_animation = 0;
   std::snprintf(s.animation_source, sizeof(s.animation_source), "%s", "SD");
@@ -299,6 +301,7 @@ ui_snapshot_t make_snapshot() {
     std::memcpy(e->data, can_rows[i].data, can_rows[i].len);
   }
 
+  s.display_timeout_s = 60;
   s.boot_count = 7;
   s.last_watchpoint = 3;
   std::snprintf(s.firmware_version, sizeof(s.firmware_version), "%s",
@@ -355,9 +358,10 @@ int main(int argc, char **argv) {
 
   static const char *names[UI_SCREEN_COUNT] = {
       "show", "animations", "grid", "nodes", "motor", "config",
-      "log", "can", "upgrade", "settings", "wifi"};
+      "log", "can", "upgrade", "settings", "wifi", "setup", "diagnostics"};
   ui_snapshot_t upgrade_snap = make_upgrade_snapshot(snap);
   for (int i = 0; i < UI_SCREEN_COUNT; ++i) {
+    if (i == UI_SCREEN_ANIMATIONS) continue;  /* Library is part of SHOW. */
     ui_show_screen(i);
     ui_update(i == UI_SCREEN_UPGRADE ? &upgrade_snap : &snap);
     clear_background();
@@ -370,8 +374,49 @@ int main(int argc, char **argv) {
     render_to_png(filename);
   }
 
+  ui_snapshot_t wifi_snap = snap;
+  std::snprintf(wifi_snap.wifi_state, sizeof(wifi_snap.wifi_state), "%s",
+                "CONNECTED");
+  std::snprintf(wifi_snap.wifi_ssid, sizeof(wifi_snap.wifi_ssid), "%s",
+                "KiNet");
+  std::snprintf(wifi_snap.wifi_ip, sizeof(wifi_snap.wifi_ip), "%s",
+                "192.168.1.160");
+  wifi_snap.wifi_connected = true;
+  wifi_snap.wifi_rssi = -52;
+  wifi_snap.service_on = false;
+  wifi_snap.wifi_reason[0] = '\0';
+  std::snprintf(wifi_snap.github_status, sizeof(wifi_snap.github_status), "%s",
+                "same 0.1.0");
   ui_show_screen(UI_SCREEN_WIFI);
-  ui_update(&snap);
+  ui_update(&wifi_snap);
+  clear_background();
+  lv_obj_invalidate(lv_screen_active());
+  lv_refr_now(s_disp);
+  char wifi_connected_png[512];
+  std::snprintf(wifi_connected_png, sizeof(wifi_connected_png),
+                "%s/output_wifi_connected.png", output_dir);
+  render_to_png(wifi_connected_png);
+
+  ui_snapshot_t wifi_off = snap;
+  std::snprintf(wifi_off.wifi_state, sizeof(wifi_off.wifi_state), "%s", "OFF");
+  wifi_off.wifi_connected = false;
+  wifi_off.wifi_ip[0] = '\0';
+  wifi_off.service_on = false;
+  wifi_off.wifi_scan_count = 6;
+  std::snprintf(wifi_off.wifi_reason, sizeof(wifi_off.wifi_reason), "%s",
+                "WiFi is off; nothing starts until you choose a mode.");
+  ui_show_screen(UI_SCREEN_WIFI);
+  ui_update(&wifi_off);
+  clear_background();
+  lv_obj_invalidate(lv_screen_active());
+  lv_refr_now(s_disp);
+  char wifi_off_png[512];
+  std::snprintf(wifi_off_png, sizeof(wifi_off_png),
+                "%s/output_wifi_off.png", output_dir);
+  render_to_png(wifi_off_png);
+
+  ui_show_screen(UI_SCREEN_WIFI);
+  ui_update(&wifi_snap);
   ui_debug_open_wifi_modal(0);
   clear_background();
   lv_obj_invalidate(lv_screen_active());
@@ -380,6 +425,29 @@ int main(int argc, char **argv) {
   std::snprintf(keyboard_png, sizeof(keyboard_png),
                 "%s/output_wifi_keyboard.png", output_dir);
   render_to_png(keyboard_png);
+
+  ui_show_screen(UI_SCREEN_SHOW);
+  ui_update(&snap);
+  ui_debug_set_playing(1);
+  clear_background();
+  lv_obj_invalidate(lv_screen_active());
+  lv_refr_now(s_disp);
+  char playing_png[512];
+  std::snprintf(playing_png, sizeof(playing_png),
+                "%s/output_show_playing.png", output_dir);
+  render_to_png(playing_png);
+  ui_debug_set_playing(0);
+
+  ui_show_screen(UI_SCREEN_WIFI);
+  ui_update(&snap);
+  ui_debug_open_wifi_modal(2);
+  clear_background();
+  lv_obj_invalidate(lv_screen_active());
+  lv_refr_now(s_disp);
+  char ap_key_png[512];
+  std::snprintf(ap_key_png, sizeof(ap_key_png),
+                "%s/output_wifi_ap_key.png", output_dir);
+  render_to_png(ap_key_png);
 
   return 0;
 }

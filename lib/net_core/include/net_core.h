@@ -44,6 +44,8 @@ void net_link_scan_start(net_link_t *l);
 void net_link_scan_done(net_link_t *l, int found);
 void net_link_submit(net_link_t *l, const char *ssid, const char *password,
                      uint32_t now_ms);
+/* Failure keeps CONNECTING and the credential flag for a visible retry; it
+ * never falls back to AP_SETUP. */
 void net_link_result(net_link_t *l, bool connected, const char *reason);
 void net_link_forget(net_link_t *l, uint32_t now_ms);
 void net_link_poll(net_link_t *l, uint32_t now_ms);

@@ -94,6 +94,7 @@ typedef struct {
   uint32_t size_bytes;
   uint32_t duration_ms;
   bool valid;
+  bool in_playlist;
 } ui_animation_t;
 
 typedef struct {
@@ -192,11 +193,15 @@ typedef struct {
   char wifi_reason[64];
   char wifi_ap_ssid[32];
   char wifi_ap_password[16];
+  bool wifi_has_credentials;
   bool wifi_scanning;
   int wifi_scan_count;
   char wifi_scan_ssid[UI_MAX_WIFI_SCAN][33];
   bool service_on;
   char github_status[64];
+
+  /* Display */
+  uint16_t display_timeout_s;
 
   /* Diagnostics */
   uint32_t boot_count;
@@ -224,19 +229,31 @@ typedef struct {
   void (*can_clear)(void);
   void (*animation_refresh)(void);
   void (*animation_select)(int index);
+  void (*animation_add)(int index);
+  void (*animation_remove)(int index);
   void (*animation_load)(void);
+  void (*animation_pause)(void);
+  void (*animation_stop)(void);
+  void (*animation_stop_immediate)(void);
   void (*version_query_all)(void);
   void (*upgrade_selected)(void);
   void (*upgrade_all_outdated)(void);
   void (*upgrade_stop)(void);
   void (*panel_update)(void);
   void (*wifi_setup)(void);
+  void (*wifi_ap)(void);
+  void (*wifi_off)(void);
+  void (*wifi_retry)(void);
+  void (*wifi_new_ap_key)(void);
+  void (*wifi_set_ap_key)(const char *key);
   void (*wifi_forget)(void);
   void (*wifi_scan)(void);
   void (*service_toggle)(void);
   void (*github_check)(void);
+  void (*github_install)(void);
   void (*wifi_connect)(const char *ssid, const char *password);
   void (*wifi_set_admin)(const char *password);
+  void (*display_timeout_cycle)(void);
   void (*mock_inject)(void);  /* host harness only; may be NULL */
 } ui_actions_t;
 

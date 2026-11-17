@@ -13,6 +13,8 @@
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 
+#include <Preferences.h>
+
 #include <cstdio>
 #include <cstring>
 
@@ -51,6 +53,13 @@ ui_snapshot_t *s_snapshot = nullptr;
 lv_display_t *s_display = nullptr;
 SemaphoreHandle_t s_lvgl_mux = nullptr;
 uint32_t s_test_run_started_ms = 0;
+
+Preferences s_ui_prefs;
+const uint16_t kDisplayTimeouts[] = {0, 30, 60, 300};
+uint16_t s_display_timeout_s = 60;
+uint32_t s_display_last_ms = 0;
+bool s_display_on = true;
+bool s_display_wake_lock = false;
 int s_selected_animation = 0;
 bool s_animation_loading = false;
 char s_animation_status[64] = "SD file listing is not implemented";
@@ -177,12 +186,81 @@ void action_test_start(void) {
 
 void action_test_stop(void) { commission_test_run_stop(); }
 
+void action_display_timeout_cycle(void) {
+  const int n = (int)(sizeof(kDisplayTimeouts) / sizeof(kDisplayTimeouts[0]));
+  int idx = 0;
+  for (int i = 0; i < n; ++i) {
+    if (kDisplayTimeouts[i] == s_display_timeout_s) {
+      idx = i;
+      break;
+    }
+  }
+  s_display_timeout_s = kDisplayTimeouts[(idx + 1) % n];
+  s_display_last_ms = millis();
+  if (s_ui_prefs.begin("ssui", false)) {
+    s_ui_prefs.putUShort("timeout", s_display_timeout_s);
+    s_ui_prefs.end();
+  }
+  SS_LOGI("display", "off timeout %us", (unsigned)s_display_timeout_s);
+}
+
+void display_power_poll(void) {
+  if (!s_display_on || s_display_timeout_s == 0) return;
+  /* Never blank a running commissioning pass or a firmware queue. */
+  if (commission_test_run_active() || upgrade_manager_active()) {
+    s_display_last_ms = millis();
+    return;
+  }
+  if ((uint32_t)(millis() - s_display_last_ms) >=
+      (uint32_t)s_display_timeout_s * 1000u) {
+    s_display_on = false;
+    s_display_wake_lock = false;
+    board_ws7_backlight(false);
+    SS_LOGI("display", "backlight off after %us", (unsigned)s_display_timeout_s);
+  }
+}
+
+/* First touch only wakes the panel.  The full press is consumed so the same
+ * tap cannot activate the control underneath the finger. */
+void panel_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
+  board_ws7_touch_read_cb(indev, data);
+  const bool pressed = data->state == LV_INDEV_STATE_PRESSED;
+  if (s_display_wake_lock) {
+    data->state = LV_INDEV_STATE_RELEASED;
+    if (!pressed) {
+      s_display_wake_lock = false;
+      s_display_last_ms = millis();
+    }
+    return;
+  }
+  if (!s_display_on) {
+    if (pressed) {
+      s_display_on = true;
+      s_display_wake_lock = true;
+      s_display_last_ms = millis();
+      board_ws7_backlight(true);
+      SS_LOGI("display", "wake by first touch");
+    }
+    data->state = LV_INDEV_STATE_RELEASED;
+    return;
+  }
+  if (pressed) s_display_last_ms = millis();
+}
+
 void action_log_clear(void) { app_log_clear(); }
 
 void action_animation_refresh(void) {
   std::snprintf(s_animation_status, sizeof(s_animation_status),
                 "SD file listing is not implemented");
   SS_LOGW("anim", "animation refresh: SD file listing is not implemented");
+}
+
+void action_animation_add(int index) {
+  SS_LOGI("anim", "playlist add %d requested", index);
+}
+
+void action_animation_remove(int index) {
+  SS_LOGI("anim", "playlist remove %d requested", index);
 }
 
 void action_animation_select(int index) {
@@ -197,6 +275,25 @@ void action_animation_load(void) {
                   "HBP2 load and playback are not implemented");
     SS_LOGW("anim", "load selected: HBP2 load/playback is not implemented");
   }
+}
+
+void action_animation_pause(void) {
+  std::snprintf(s_animation_status, sizeof(s_animation_status),
+                "HBP2 pause is not implemented");
+  SS_LOGW("anim", "pause: HBP2 playback is not implemented");
+}
+
+void action_animation_stop(void) {
+  std::snprintf(s_animation_status, sizeof(s_animation_status),
+                "HBP2 stop is not implemented");
+  SS_LOGW("anim", "stop: HBP2 playback is not implemented");
+}
+
+void action_animation_stop_immediate(void) {
+  commission_stop_all();
+  std::snprintf(s_animation_status, sizeof(s_animation_status),
+                "immediate stop sent");
+  SS_LOGW("anim", "immediate stop sent to all boards");
 }
 
 void action_version_query_all(void) {
@@ -221,10 +318,19 @@ void action_upgrade_all_outdated(void) {
 void action_upgrade_stop(void) { upgrade_manager_stop(); }
 
 void action_wifi_setup(void) { net_manager_setup(); }
+void action_wifi_ap(void) { net_manager_ap(); }
+void action_wifi_new_ap_key(void) { net_manager_ap_new_key(); }
+void action_wifi_set_ap_key(const char *key) {
+  if (!net_manager_set_ap_key(key))
+    SS_LOGW("wifi", "AP key must be 8..63 characters");
+}
+void action_wifi_off(void) { net_manager_off(); }
+void action_wifi_retry(void) { net_manager_retry(); }
 void action_wifi_forget(void) { net_manager_forget(); }
 void action_wifi_scan(void) { net_manager_scan(); }
 void action_service_toggle(void) { net_manager_service_toggle(); }
 void action_github_check(void) { net_manager_github_check(); }
+void action_github_install(void) { net_manager_github_install(); }
 void action_wifi_connect(const char *ssid, const char *password) {
   if (!net_manager_connect(ssid, password))
     SS_LOGW("wifi", "connect refused: SSID/password required");
@@ -325,7 +431,8 @@ void build_snapshot(ui_snapshot_t *snap) {
                     ? "TEST RUN"
                     : (wd->safe_hold ? "SAFE HOLD" : "IDLE"));
   std::snprintf(snap->pattern_name, sizeof(snap->pattern_name), "%s",
-                "COMMISSIONING");
+                commission_test_run_active() ? "COMMISSIONING TEST"
+                                             : "NO ANIMATION");
   snap->elapsed_ms =
       commission_test_run_active() ? (millis() - s_test_run_started_ms) : 0;
   snap->uptime_s = millis() / 1000u;
@@ -404,6 +511,7 @@ void build_snapshot(ui_snapshot_t *snap) {
   snap->test_run_remaining = commission_test_run_remaining();
   snap->config_dirty = config_store_dirty();
 
+  snap->display_timeout_s = s_display_timeout_s;
   snap->boot_count = wd->boot_count;
   snap->last_watchpoint = wd->last_watchpoint;
   std::snprintf(snap->firmware_version, sizeof(snap->firmware_version),
@@ -478,6 +586,10 @@ void setup() {
   commission_init();
   upgrade_manager_init();
   net_manager_init();
+  if (s_ui_prefs.begin("ssui", false)) {
+    s_display_timeout_s = s_ui_prefs.getUShort("timeout", 60);
+    s_ui_prefs.end();
+  }
   can_monitor_start();
 
   /* Start CAN before LVGL builds the widget tree. The persistent RX task
@@ -501,7 +613,7 @@ void setup() {
     if (touch_ok) {
       lv_indev_t *indev = lv_indev_create();
       lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
-      lv_indev_set_read_cb(indev, board_ws7_touch_read_cb);
+      lv_indev_set_read_cb(indev, panel_touch_read_cb);
       lv_indev_set_display(indev, s_display);
     }
   }
@@ -520,23 +632,35 @@ void setup() {
   actions.config_clear_map = action_config_clear_map;
   actions.test_run_start = action_test_start;
   actions.test_run_stop = action_test_stop;
+  actions.display_timeout_cycle = action_display_timeout_cycle;
   actions.log_clear = action_log_clear;
   actions.can_start = action_can_start;
   actions.can_stop = action_can_stop;
   actions.can_clear = action_can_clear;
   actions.animation_refresh = action_animation_refresh;
   actions.animation_select = action_animation_select;
+  actions.animation_add = action_animation_add;
+  actions.animation_remove = action_animation_remove;
   actions.animation_load = action_animation_load;
+  actions.animation_pause = action_animation_pause;
+  actions.animation_stop = action_animation_stop;
+  actions.animation_stop_immediate = action_animation_stop_immediate;
   actions.version_query_all = action_version_query_all;
   actions.upgrade_selected = action_upgrade_selected;
   actions.upgrade_all_outdated = action_upgrade_all_outdated;
   actions.upgrade_stop = action_upgrade_stop;
   actions.panel_update = action_panel_update;
   actions.wifi_setup = action_wifi_setup;
+  actions.wifi_ap = action_wifi_ap;
+  actions.wifi_new_ap_key = action_wifi_new_ap_key;
+  actions.wifi_set_ap_key = action_wifi_set_ap_key;
+  actions.wifi_off = action_wifi_off;
+  actions.wifi_retry = action_wifi_retry;
   actions.wifi_forget = action_wifi_forget;
   actions.wifi_scan = action_wifi_scan;
   actions.service_toggle = action_service_toggle;
   actions.github_check = action_github_check;
+  actions.github_install = action_github_install;
   actions.wifi_connect = action_wifi_connect;
   actions.wifi_set_admin = action_wifi_set_admin;
 #ifdef SS_CAN_MOCK
@@ -547,6 +671,8 @@ void setup() {
   if (s_display != nullptr) {
     lv_refr_now(s_display);
     board_ws7_backlight(true);
+    s_display_on = true;
+    s_display_last_ms = millis();
   }
 
   panel_ota_boot_check(s_display != nullptr && can_transport_running());
@@ -575,6 +701,7 @@ void loop() {
   commission_poll();
   upgrade_manager_poll();
   app_watchdog_poll();
+  display_power_poll();
   app_watchdog_kick(SS_WATCH_ALL);
 
   delay(5);

@@ -10,11 +10,16 @@ extern "C" {
 
 void net_manager_init(void);
 void net_manager_setup(void);
+void net_manager_ap(void);
+void net_manager_ap_new_key(void);
+bool net_manager_set_ap_key(const char *key);
+void net_manager_off(void);
 void net_manager_forget(void);
 void net_manager_scan(void);
 void net_manager_service(bool on);
 void net_manager_service_toggle(void);
 void net_manager_github_check(void);
+void net_manager_github_install(void);
 void net_manager_retry(void);
 bool net_manager_connect(const char *ssid, const char *password);
 bool net_manager_set_admin(const char *password);

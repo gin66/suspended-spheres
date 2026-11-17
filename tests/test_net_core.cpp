@@ -57,16 +57,17 @@ static int test_b1_link(void) {
     net_link_submit(&l, "ssid", "wrong", 1000);
     ASSERT(l.state == NET_CONNECTING);
     net_link_result(&l, false, "wrong password");
-    ASSERT(l.state == NET_FAILED);
-    ASSERT(l.have_credentials == false);
+    ASSERT(l.state == NET_CONNECTING);
+    ASSERT(l.have_credentials == true);
+    ASSERT(strstr(l.reason, "retrying") != 0);
     net_link_enable_setup(&l, 2000);
-    ASSERT(l.state == NET_AP_SETUP);
+    ASSERT(l.state == NET_CONNECTING);
     net_link_submit(&l, "ssid", "right", 2000);
     net_link_result(&l, true, 0);
     ASSERT(l.state == NET_CONNECTED);
     ASSERT(l.have_credentials == true);
     net_link_forget(&l, 3000);
-    ASSERT(l.state == NET_AP_SETUP);
+    ASSERT(l.state == NET_OFF);
     ASSERT(l.have_credentials == false);
     return 0;
 }

@@ -58,18 +58,21 @@ void net_link_result(net_link_t *l, bool connected, const char *reason) {
         l->have_credentials = true;
         l->reason[0] = '\0';
     } else {
-        l->state = NET_FAILED;
-        l->have_credentials = false;
-        snprintf(l->reason, sizeof(l->reason), "%s",
+        /* A failed join stays in CONNECTING for a visible retry; it never
+         * falls back to the setup AP.  The caller keeps the stored pair. */
+        l->state = NET_CONNECTING;
+        l->have_credentials = true;
+        snprintf(l->reason, sizeof(l->reason), "%s; retrying",
                  reason ? reason : "connect failed");
     }
 }
 
 void net_link_forget(net_link_t *l, uint32_t now_ms) {
+    (void)now_ms;
     l->have_credentials = false;
-    l->state = NET_AP_SETUP;
-    l->setup_deadline_ms = now_ms + NET_SETUP_WINDOW_MS;
-    l->reason[0] = '\0';
+    l->state = NET_OFF;
+    l->setup_deadline_ms = 0;
+    snprintf(l->reason, sizeof(l->reason), "credentials forgotten; WiFi off");
 }
 
 void net_link_poll(net_link_t *l, uint32_t now_ms) {
