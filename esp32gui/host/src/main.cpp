@@ -232,7 +232,7 @@ ui_snapshot_t make_snapshot() {
                   scan[i]);
   s.service_on = true;
   std::snprintf(s.github_status, sizeof(s.github_status), "%s",
-                "current (1.4.2)");
+                "same 0.1.0");
 
   s.upgrade_active = false;
   s.upgrade_progress = 0;

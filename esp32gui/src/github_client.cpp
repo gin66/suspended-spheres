@@ -29,7 +29,7 @@
 
 namespace {
 
-char s_status[96] = "GitHub not checked";
+char s_status[96] = "not queried";
 char s_release[4096];
 net_github_result_t s_result;
 bool s_have_release = false;
@@ -44,18 +44,18 @@ bool fetch(const char *url, size_t max, uint8_t **out, size_t *out_len) {
   http.setTimeout(15000);
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   if (!http.begin(client, url)) {
-    std::snprintf(s_status, sizeof(s_status), "cannot open URL");
+    std::snprintf(s_status, sizeof(s_status), "error: cannot open URL");
     return false;
   }
   const int code = http.GET();
   if (code != HTTP_CODE_OK) {
-    std::snprintf(s_status, sizeof(s_status), "HTTP %d", code);
+    std::snprintf(s_status, sizeof(s_status), "error: HTTP %d", code);
     http.end();
     return false;
   }
   const int size = http.getSize();
   if (size <= 0 || (size_t)size > max) {
-    std::snprintf(s_status, sizeof(s_status), "bad size %d", size);
+    std::snprintf(s_status, sizeof(s_status), "error: bad size %d", size);
     http.end();
     return false;
   }
@@ -63,7 +63,7 @@ bool fetch(const char *url, size_t max, uint8_t **out, size_t *out_len) {
   if (buf == nullptr) buf = (uint8_t *)heap_caps_malloc((size_t)size,
                                                          MALLOC_CAP_INTERNAL);
   if (buf == nullptr) {
-    std::snprintf(s_status, sizeof(s_status), "no memory");
+    std::snprintf(s_status, sizeof(s_status), "error: no memory");
     http.end();
     return false;
   }
@@ -85,7 +85,7 @@ bool fetch(const char *url, size_t max, uint8_t **out, size_t *out_len) {
   http.end();
   if (off != (size_t)size) {
     heap_caps_free(buf);
-    std::snprintf(s_status, sizeof(s_status), "short read %u/%d",
+    std::snprintf(s_status, sizeof(s_status), "error: short read %u/%d",
                   (unsigned)off, size);
     return false;
   }
@@ -116,17 +116,17 @@ bool fetch_manifest(const rc_release_t *rel, const char *asset,
                 "https://github.com/%s/%s/releases/download/%s/%s",
                 SS_GITHUB_OWNER, SS_GITHUB_REPO, rel->tag, asset);
   if (!net_github_url_ok(url, SS_GITHUB_OWNER, SS_GITHUB_REPO)) {
-    std::snprintf(s_status, sizeof(s_status), "asset host rejected");
+    std::snprintf(s_status, sizeof(s_status), "error: asset host");
     return false;
   }
   char text[4096];
   if (!fetch_text(url, text, sizeof(text))) return false;
   if (rc_manifest_parse(text, m) != 0) {
-    std::snprintf(s_status, sizeof(s_status), "bad manifest");
+    std::snprintf(s_status, sizeof(s_status), "error: bad manifest");
     return false;
   }
   if (std::strcmp(m->target, target) != 0 || std::strcmp(m->kind, "app") != 0) {
-    std::snprintf(s_status, sizeof(s_status), "wrong target/kind");
+    std::snprintf(s_status, sizeof(s_status), "error: wrong target/kind");
     return false;
   }
   return true;
@@ -139,7 +139,7 @@ bool fetch_bin(const rc_release_t *rel, const rc_manifest_t *m, size_t max,
                 "https://github.com/%s/%s/releases/download/%s/%s",
                 SS_GITHUB_OWNER, SS_GITHUB_REPO, rel->tag, m->file);
   if (!net_github_url_ok(url, SS_GITHUB_OWNER, SS_GITHUB_REPO)) {
-    std::snprintf(s_status, sizeof(s_status), "asset host rejected");
+    std::snprintf(s_status, sizeof(s_status), "error: asset host");
     return false;
   }
   return fetch(url, max, data, len);
@@ -209,35 +209,36 @@ void install_release(const rc_release_t *rel) {
 
 extern "C" void github_client_check(void) {
   if (SS_GITHUB_OWNER[0] == '\0' || SS_GITHUB_REPO[0] == '\0') {
-    std::snprintf(s_status, sizeof(s_status), "GitHub repo not configured");
+    std::snprintf(s_status, sizeof(s_status), "error: repo not configured");
     return;
   }
   if (WiFi.status() != WL_CONNECTED) {
-    std::snprintf(s_status, sizeof(s_status), "WiFi not connected");
+    std::snprintf(s_status, sizeof(s_status), "error: WiFi off");
     return;
   }
   char reason[80];
   if (!net_github_enabled(sntp_valid(), reason, sizeof(reason))) {
-    std::snprintf(s_status, sizeof(s_status), "%s", reason);
+    std::snprintf(s_status, sizeof(s_status), "error: %s", reason);
     return;
   }
   char url[256];
   std::snprintf(url, sizeof(url),
                 "https://github.com/%s/%s/releases/latest/download/release.json",
                 SS_GITHUB_OWNER, SS_GITHUB_REPO);
+  std::snprintf(s_status, sizeof(s_status), "checking...");
   if (!fetch_text(url, s_release, sizeof(s_release))) return;
   if (net_github_check(s_release, SS_BUILD_ID, &s_result) != 0) {
-    std::snprintf(s_status, sizeof(s_status), "%s", s_result.reason);
+    std::snprintf(s_status, sizeof(s_status), "error: %s", s_result.reason);
     s_have_release = false;
     return;
   }
   s_have_release = true;
   if (s_result.update_available)
-    std::snprintf(s_status, sizeof(s_status), "update %s build %lu",
-                  s_result.version, (unsigned long)s_result.build);
+    std::snprintf(s_status, sizeof(s_status), "newer %s", s_result.version);
+  else if (s_result.build == SS_BUILD_ID)
+    std::snprintf(s_status, sizeof(s_status), "same %s", s_result.version);
   else
-    std::snprintf(s_status, sizeof(s_status), "current (%s)",
-                  s_result.version);
+    std::snprintf(s_status, sizeof(s_status), "older %s", s_result.version);
   SS_LOGI("github", "%s", s_status);
 }
 

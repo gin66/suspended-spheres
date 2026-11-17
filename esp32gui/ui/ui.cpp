@@ -2313,8 +2313,14 @@ void ui_update(const ui_snapshot_t *snapshot) {
   lv_label_set_text_fmt(s_set_capacity, "%lu positions",
                         (unsigned long)s_snap->capacity);
   lv_label_set_text_fmt(s_set_watch, "%u", (unsigned)s_snap->last_watchpoint);
-  lv_label_set_text(s_set_github,
-                    s_snap->github_status[0] ? s_snap->github_status : "--");
+  const char *gh = s_snap->github_status[0] ? s_snap->github_status : "--";
+  lv_label_set_text(s_set_github, gh);
+  lv_color_t gh_color = C_MUTED;
+  if (std::strncmp(gh, "newer", 5) == 0) gh_color = C_WARN;
+  else if (std::strncmp(gh, "same", 4) == 0) gh_color = C_OK;
+  else if (std::strncmp(gh, "older", 5) == 0) gh_color = C_OK;
+  else if (std::strncmp(gh, "error", 5) == 0) gh_color = C_ERR;
+  lv_obj_set_style_text_color(s_set_github, gh_color, 0);
 
   /* Log */
   uint32_t log_hash = 2166136261u;
