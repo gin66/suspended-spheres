@@ -81,6 +81,10 @@ jobs:
           mkdir -p "$HOME/.platformio/penv/bin"
           ln -sf "$PWD/.platformio-venv/bin/pio" "$HOME/.platformio/penv/bin/pio"
           sudo ln -sf "$PWD/.platformio-venv/bin/pio" /usr/local/bin/pio
+          if [ -x "$HOME/.platformio/penv/bin/pip" ]; then
+            "$HOME/.platformio/penv/bin/pip" install --force-reinstall "platformio==6.2.0"
+            "$HOME/.platformio/penv/bin/pio" --version
+          fi
           hash -r
           which -a pio
           pio --version
@@ -101,6 +105,7 @@ jobs:
           set -euo pipefail
           cd rp2040
           export PATH="$GITHUB_WORKSPACE/.platformio-venv/bin:$PATH"
+          export PYTHONEXE="$GITHUB_WORKSPACE/.platformio-venv/bin/python"
           pio --version
           pio run -e fly_micro4_katapult
 
@@ -115,6 +120,7 @@ jobs:
           set -euo pipefail
           cd esp32gui
           export PATH="$GITHUB_WORKSPACE/.platformio-venv/bin:$PATH"
+          export PYTHONEXE="$GITHUB_WORKSPACE/.platformio-venv/bin/python"
           pio --version
           pio run -e esp32can
 
