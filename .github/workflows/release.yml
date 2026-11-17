@@ -91,8 +91,9 @@ jobs:
         run: |
           set -euo pipefail
           cd rp2040
-          "$GITHUB_WORKSPACE/.platformio-venv/bin/pio" --version
-          "$GITHUB_WORKSPACE/.platformio-venv/bin/pio" run -e fly_micro4_katapult
+          export PATH="$GITHUB_WORKSPACE/.platformio-venv/bin:$PATH"
+          pio --version
+          pio run -e fly_micro4_katapult
 
       - name: Build the panel release image
         env:
@@ -104,8 +105,9 @@ jobs:
         run: |
           set -euo pipefail
           cd esp32gui
-          "$GITHUB_WORKSPACE/.platformio-venv/bin/pio" --version
-          "$GITHUB_WORKSPACE/.platformio-venv/bin/pio" run -e esp32can
+          export PATH="$GITHUB_WORKSPACE/.platformio-venv/bin:$PATH"
+          pio --version
+          pio run -e esp32can
 
       - name: Pack the release directory
         run: |
