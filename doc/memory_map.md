@@ -33,7 +33,7 @@ Partition table from `partitions_16m.csv`:
 | `ota_0` | `0x010000` | `0x600000` | application slot A, 6 MiB |
 | `ota_1` | `0x610000` | `0x600000` | application slot B, 6 MiB |
 | `coredump` | `0xC10000` | `0x040000` | 256 KiB |
-| `spiffs` | `0xC50000` | `0x3B0000` | 3.69 MiB config store |
+| `spiffs` | `0xC50000` | `0x3B0000` | 3.69 MiB config store; optional one-generation Fly bundle (`/fw_fly.*`, ~94 KiB) when no SD card is mounted |
 
 Current application image:
 

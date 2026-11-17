@@ -251,6 +251,13 @@ The card is FAT32 and may be read-only during a show. The panel scans only
 ignores a file whose manifest is missing, invalid, of the wrong target, or
 whose SHA-256 fails.
 
+The card is the library and the fallback, not a requirement.  With no card
+mounted, the panel stores one Fly generation as `/fw_fly.bin` and
+`/fw_fly.json` in the 3.69 MiB SPIFFS config partition (the bundle is about
+94 KiB).  When both stores hold an image, the highest valid `build` wins.
+The panel image never needs the card: the GitHub path downloads it into PSRAM
+and writes the inactive OTA slot.
+
 Selection is by highest valid `build` for the target. If two manifests claim
 the same build with different SHA-256 values, the panel refuses both and
 reports the conflict. Keep the previous release on the card; it is the
@@ -631,7 +638,8 @@ Flow:
    if enabled, the detached manifest signature. A wrong target, size or hash
    aborts before a write.
 4. Panel asset: write the inactive OTA slot, reboot, self-test and roll back on
-   failure. Fly asset: store in `/firmware/fly` for the board list in §4.
+   failure. Fly asset: store in `/firmware/fly` on the card, or in
+   `/fw_fly.*` SPIFFS when no card is mounted, for the board list in §4.
 5. A failed network fetch, TLS error, rate limit, missing asset or hash
    mismatch leaves the current image and the rollback slot untouched.
 

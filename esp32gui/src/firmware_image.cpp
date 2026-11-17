@@ -1,6 +1,7 @@
 #include "firmware_image.h"
 
 #include <Arduino.h>
+#include <SPIFFS.h>
 #include <dirent.h>
 #include <driver/gpio.h>
 #include <driver/sdspi_host.h>
@@ -29,6 +30,11 @@ namespace {
 constexpr const char *kMount = "/sdcard";
 constexpr const char *kFlyDir = "/sdcard/firmware/fly";
 constexpr const char *kPanelDir = "/sdcard/firmware/panel";
+/* Cardless fallback: one Fly generation in the config partition.  The bundle
+ * is ~94 KiB; the SPIFFS partition is 3.69 MiB. */
+constexpr const char *kSpiffsFlyBin = "/fw_fly.bin";
+constexpr const char *kSpiffsFlyJson = "/fw_fly.json";
+constexpr size_t kSpiffsReserve = 8192;
 constexpr int kMaxCandidates = PC_MAX_IMAGES;
 constexpr gpio_num_t kDummyCs = GPIO_NUM_6;
 
@@ -144,6 +150,136 @@ int find_candidate(const candidate_t *c, int count, const rc_manifest_t *m) {
   return -1;
 }
 
+bool spiffs_ready(void) {
+  /* config_store_init() mounts SPIFFS first at boot; this is a no-op then. */
+  return SPIFFS.begin(true);
+}
+
+bool load_spiffs_fly(void) {
+  if (!spiffs_ready()) return false;
+  File jf = SPIFFS.open(kSpiffsFlyJson, FILE_READ);
+  if (!jf) return false;
+  char text[2048];
+  const size_t n = jf.readBytes(text, sizeof(text) - 1);
+  jf.close();
+  text[n] = '\0';
+  rc_manifest_t m;
+  if (rc_manifest_parse(text, &m) != 0 ||
+      std::strcmp(m.target, RC_TARGET_FLY) != 0 ||
+      !rc_manifest_katapult_ok(&m)) {
+    SS_LOGW("image", "SPIFFS fly manifest rejected");
+    return false;
+  }
+  File bf = SPIFFS.open(kSpiffsFlyBin, FILE_READ);
+  if (!bf) {
+    SS_LOGW("image", "SPIFFS fly binary missing");
+    return false;
+  }
+  const size_t len = bf.size();
+  if (len == 0 || len != m.size) {
+    bf.close();
+    SS_LOGW("image", "SPIFFS fly size mismatch");
+    return false;
+  }
+  uint8_t *data = (uint8_t *)heap_caps_malloc(len, MALLOC_CAP_SPIRAM);
+  if (data == nullptr)
+    data = (uint8_t *)heap_caps_malloc(len, MALLOC_CAP_INTERNAL);
+  if (data == nullptr) {
+    bf.close();
+    SS_LOGE("image", "no memory for SPIFFS fly (%u bytes)", (unsigned)len);
+    return false;
+  }
+  const size_t got = bf.read(data, len);
+  bf.close();
+  char sha[65];
+  rc_sha256_hex(data, len, sha);
+  if (got != len || std::strcmp(sha, m.sha256) != 0) {
+    heap_caps_free(data);
+    SS_LOGW("image", "SPIFFS fly read/SHA-256 failed");
+    return false;
+  }
+  /* Both stores may hold a generation; the highest build wins. */
+  if (s_fly.present && m.build < s_fly.build) {
+    heap_caps_free(data);
+    return false;
+  }
+  if (s_fly_psram && s_fly.data != nullptr)
+    heap_caps_free((void *)s_fly.data);
+  std::memset(&s_fly, 0, sizeof(s_fly));
+  s_fly.present = true;
+  s_fly_psram = true;
+  s_fly.data = data;
+  s_fly.size = (uint32_t)len;
+  s_fly.build = m.build;
+  set_version(&s_fly, &m);
+  std::snprintf(s_fly.sha256, sizeof(s_fly.sha256), "%s", m.sha256);
+  std::snprintf(s_fly.source, sizeof(s_fly.source), "%s", "SPIFFS");
+  std::snprintf(s_fly.path, sizeof(s_fly.path), "%s", kSpiffsFlyBin);
+  SS_LOGI("image", "Fly %s build %lu from SPIFFS", s_fly.version,
+          (unsigned long)s_fly.build);
+  return true;
+}
+
+bool store_spiffs_fly(const rc_manifest_t *m, const uint8_t *data, size_t len,
+                      char *status, unsigned status_len) {
+  if (!spiffs_ready()) {
+    if (status && status_len) std::snprintf(status, status_len, "no SPIFFS");
+    return false;
+  }
+  char text[2048];
+  if (rc_manifest_emit(m, text, sizeof(text)) != 0) {
+    if (status && status_len) std::snprintf(status, status_len, "manifest failed");
+    return false;
+  }
+  const size_t tn = std::strlen(text);
+  const size_t used = SPIFFS.usedBytes();
+  const size_t total = SPIFFS.totalBytes();
+  if (total <= used || total - used < len + tn + kSpiffsReserve) {
+    if (status && status_len) std::snprintf(status, status_len, "SPIFFS full");
+    return false;
+  }
+  const char *tmp_bin = "/fw_fly.bin.tmp";
+  const char *tmp_json = "/fw_fly.json.tmp";
+  File f = SPIFFS.open(tmp_bin, FILE_WRITE);
+  if (!f) {
+    if (status && status_len) std::snprintf(status, status_len, "open failed");
+    return false;
+  }
+  const bool bin_ok = f.write(data, len) == len;
+  f.close();
+  if (!bin_ok) {
+    SPIFFS.remove(tmp_bin);
+    if (status && status_len) std::snprintf(status, status_len, "short write");
+    return false;
+  }
+  f = SPIFFS.open(tmp_json, FILE_WRITE);
+  if (!f) {
+    SPIFFS.remove(tmp_bin);
+    if (status && status_len) std::snprintf(status, status_len, "json open failed");
+    return false;
+  }
+  const bool json_ok = f.write((const uint8_t *)text, tn) == tn;
+  f.close();
+  if (!json_ok) {
+    SPIFFS.remove(tmp_bin);
+    SPIFFS.remove(tmp_json);
+    if (status && status_len) std::snprintf(status, status_len, "json write failed");
+    return false;
+  }
+  SPIFFS.remove(kSpiffsFlyBin);
+  SPIFFS.remove(kSpiffsFlyJson);
+  if (!SPIFFS.rename(tmp_bin, kSpiffsFlyBin) ||
+      !SPIFFS.rename(tmp_json, kSpiffsFlyJson)) {
+    if (status && status_len) std::snprintf(status, status_len, "rename failed");
+    return false;
+  }
+  firmware_image_reload();
+  if (status && status_len)
+    std::snprintf(status, status_len, "stored %s in SPIFFS", m->file);
+  SS_LOGI("image", "Fly bundle stored in SPIFFS");
+  return true;
+}
+
 void load_sd(void) {
   board_ws7_sd_cs_enable_oc_pp();
   board_ws7_sd_select(true);
@@ -252,6 +388,7 @@ extern "C" void firmware_image_init(void) {
   s_fly_psram = false;
 
   load_sd();
+  load_spiffs_fly();
   if (!s_fly.present) load_embedded();
 }
 
@@ -264,6 +401,7 @@ extern "C" void firmware_image_reload(void) {
   s_panel_present = false;
   s_fly_psram = false;
   load_sd();
+  load_spiffs_fly();
   if (!s_fly.present) load_embedded();
 }
 
@@ -274,10 +412,8 @@ extern "C" bool firmware_image_store_fly(const rc_manifest_t *m,
     if (status && status_len) std::snprintf(status, status_len, "bad bundle");
     return false;
   }
-  if (!s_sd_mounted) {
-    if (status && status_len) std::snprintf(status, status_len, "no SD card");
-    return false;
-  }
+  if (!s_sd_mounted)
+    return store_spiffs_fly(m, data, len, status, status_len);
   if (std::strchr(m->file, '/') != nullptr ||
       std::strstr(m->file, "..") != nullptr) {
     if (status && status_len) std::snprintf(status, status_len, "bad filename");
