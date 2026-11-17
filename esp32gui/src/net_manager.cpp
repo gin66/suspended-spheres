@@ -1154,6 +1154,7 @@ extern "C" void net_manager_snapshot(ui_snapshot_t *snap) {
     std::snprintf(snap->wifi_scan_ssid[i], sizeof(snap->wifi_scan_ssid[i]),
                   "%s", s_scan[i]);
   github_client_status(snap->github_status, sizeof(snap->github_status));
+  snap->github_update_available = github_client_update_available();
   snap->wifi_rssi = s_rssi;
   std::snprintf(snap->wifi_ip, sizeof(snap->wifi_ip), "%s", s_ip);
   if (s_link.state == NET_AP_SETUP) {

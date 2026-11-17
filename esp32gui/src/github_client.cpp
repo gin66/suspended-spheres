@@ -33,6 +33,7 @@ char s_status[96] = "not queried";
 char s_release[4096];
 net_github_result_t s_result;
 bool s_have_release = false;
+bool s_fly_update = false;
 
 bool sntp_valid(void) { return time(nullptr) > 1700000000; }
 
@@ -145,12 +146,21 @@ bool fetch_bin(const rc_release_t *rel, const rc_manifest_t *m, size_t max,
   return fetch(url, max, data, len);
 }
 
+bool fly_needs_update(const rc_release_t *rel) {
+  if (rel == nullptr || !rel->fly.present) return false;
+  const ss_fw_image_t *local = firmware_image_fly();
+  return local == nullptr || rel->fly.build > local->build;
+}
+
 void install_release(const rc_release_t *rel) {
+  const bool need_fly = fly_needs_update(rel);
+  const bool need_panel = rel->panel.present && rel->panel.build > SS_BUILD_ID;
+  bool fly_stored = false;
   rc_manifest_t fly_m;
   uint8_t *fly_bin = nullptr;
   size_t fly_len = 0;
   bool fly_ok = false;
-  if (rel->fly.present) {
+  if (need_fly) {
     for (int i = 0; i < rel->fly.asset_count; ++i) {
       if (!is_json_asset(rel->fly.assets[i])) continue;
       if (fetch_manifest(rel, rel->fly.assets[i], RC_TARGET_FLY, &fly_m)) {
@@ -162,12 +172,28 @@ void install_release(const rc_release_t *rel) {
   if (fly_ok &&
       fetch_bin(rel, &fly_m, 2u * 1024u * 1024u, &fly_bin, &fly_len)) {
     char text[80];
-    if (firmware_image_store_fly(&fly_m, fly_bin, fly_len, text,
-                                 sizeof(text)))
+    fly_stored = firmware_image_store_fly(&fly_m, fly_bin, fly_len, text,
+                                          sizeof(text));
+    if (fly_stored)
       SS_LOGI("github", "Fly stored: %s", text);
     else
       SS_LOGW("github", "Fly store failed: %s", text);
     heap_caps_free(fly_bin);
+  }
+
+  if (!need_panel) {
+    char version[16] = "--";
+    if (rel->fly.present) rc_semver_format(&rel->fly.version, version);
+    if (need_fly && !fly_stored) {
+      std::snprintf(s_status, sizeof(s_status), "node store failed");
+    } else if (need_fly) {
+      s_fly_update = false;
+      std::snprintf(s_status, sizeof(s_status), "node %s stored", version);
+    } else {
+      std::snprintf(s_status, sizeof(s_status), "nothing to apply");
+    }
+    SS_LOGI("github", "%s", s_status);
+    return;
   }
 
   rc_manifest_t panel_m;
@@ -227,23 +253,39 @@ extern "C" void github_client_check(void) {
                 SS_GITHUB_OWNER, SS_GITHUB_REPO);
   std::snprintf(s_status, sizeof(s_status), "checking...");
   if (!fetch_text(url, s_release, sizeof(s_release))) return;
-  if (net_github_check(s_release, SS_BUILD_ID, &s_result) != 0) {
-    std::snprintf(s_status, sizeof(s_status), "error: %s", s_result.reason);
+
+  rc_release_t rel;
+  if (rc_release_parse(s_release, &rel) != 0) {
+    std::snprintf(s_status, sizeof(s_status), "error: invalid release.json");
     s_have_release = false;
     return;
   }
+  const bool panel_ok = net_github_check(s_release, SS_BUILD_ID, &s_result) == 0;
+  if (!panel_ok && !rel.fly.present) {
+    std::snprintf(s_status, sizeof(s_status), "error: %s", s_result.reason);
+    s_have_release = false;
+    s_fly_update = false;
+    return;
+  }
+  s_fly_update = fly_needs_update(&rel);
   s_have_release = true;
-  if (s_result.update_available)
+
+  if (s_result.update_available) {
     std::snprintf(s_status, sizeof(s_status), "newer %s", s_result.version);
-  else if (s_result.build == SS_BUILD_ID)
+  } else if (s_fly_update) {
+    char version[16] = "--";
+    if (rel.fly.present) rc_semver_format(&rel.fly.version, version);
+    std::snprintf(s_status, sizeof(s_status), "node %s", version);
+  } else if (s_result.build == SS_BUILD_ID) {
     std::snprintf(s_status, sizeof(s_status), "same %s", s_result.version);
-  else
+  } else {
     std::snprintf(s_status, sizeof(s_status), "older %s", s_result.version);
+  }
   SS_LOGI("github", "%s", s_status);
 }
 
 extern "C" void github_client_install(void) {
-  if (!s_have_release || !s_result.update_available) {
+  if (!s_have_release || (!s_result.update_available && !s_fly_update)) {
     std::snprintf(s_status, sizeof(s_status), "no update checked");
     return;
   }
@@ -261,5 +303,5 @@ extern "C" void github_client_status(char *out, unsigned len) {
 }
 
 extern "C" bool github_client_update_available(void) {
-  return s_have_release && s_result.update_available;
+  return s_have_release && (s_result.update_available || s_fly_update);
 }

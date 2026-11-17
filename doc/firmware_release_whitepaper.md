@@ -640,6 +640,9 @@ Flow:
 4. Panel asset: write the inactive OTA slot, reboot, self-test and roll back on
    failure. Fly asset: store in `/firmware/fly` on the card, or in
    `/fw_fly.*` SPIFFS when no card is mounted, for the board list in §4.
+   The two targets are compared independently: when the panel build is
+   current but the Fly image is missing or older, `INSTALL` stores the node
+   bundle only and does not reboot the panel.
 5. A failed network fetch, TLS error, rate limit, missing asset or hash
    mismatch leaves the current image and the rollback slot untouched.
 

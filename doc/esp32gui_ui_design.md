@@ -203,6 +203,9 @@ No WiFi mode is entered.
 2. **SERVICE → FIRMWARE**: `CHECK`.
 3. If `newer`, `INSTALL` from the same row.  A failed join retries and stays
    in CONNECT; GitHub controls are disabled while disconnected.
+4. If the panel is already current but the Fly node image is missing or
+   older, the status reads `node <version>` and `INSTALL` stores only the node
+   bundle; the panel does not reboot.
 
 ### Browser upload without a public network
 

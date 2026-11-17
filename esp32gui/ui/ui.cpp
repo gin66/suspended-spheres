@@ -3041,16 +3041,18 @@ void ui_update(const ui_snapshot_t *snapshot) {
                                             : "not queried";
   lv_label_set_text(s_upg_github_status, gh);
   lv_color_t gh_color = C_MUTED;
-  if (std::strncmp(gh, "newer", 5) == 0) gh_color = C_WARN;
+  if (std::strncmp(gh, "newer", 5) == 0 ||
+      std::strncmp(gh, "node", 4) == 0) gh_color = C_WARN;
   else if (std::strncmp(gh, "same", 4) == 0) gh_color = C_OK;
   else if (std::strncmp(gh, "older", 5) == 0) gh_color = C_OK;
   else if (std::strncmp(gh, "error", 5) == 0) gh_color = C_ERR;
   lv_obj_set_style_text_color(s_upg_github_status, gh_color, 0);
-  const bool github_newer = std::strncmp(gh, "newer", 5) == 0;
   if (s_snap->wifi_connected) {
     lv_obj_clear_state(s_upg_github_check, LV_STATE_DISABLED);
-    if (github_newer) lv_obj_clear_state(s_upg_github_install, LV_STATE_DISABLED);
-    else lv_obj_add_state(s_upg_github_install, LV_STATE_DISABLED);
+    if (s_snap->github_update_available)
+      lv_obj_clear_state(s_upg_github_install, LV_STATE_DISABLED);
+    else
+      lv_obj_add_state(s_upg_github_install, LV_STATE_DISABLED);
   } else {
     lv_obj_add_state(s_upg_github_check, LV_STATE_DISABLED);
     lv_obj_add_state(s_upg_github_install, LV_STATE_DISABLED);

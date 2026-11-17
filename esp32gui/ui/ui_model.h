@@ -200,6 +200,7 @@ typedef struct {
   char wifi_scan_ssid[UI_MAX_WIFI_SCAN][33];
   bool service_on;
   char github_status[64];
+  bool github_update_available;
 
   /* Display */
   uint16_t display_timeout_s;
