@@ -91,17 +91,8 @@ jobs:
           .platformio-venv/bin/pio platform install "https://github.com/pioarduino/platform-espressif32/releases/download/55.03.312-1/platform-espressif32.zip"
           for d in "$HOME"/.platformio/platforms/espressif32*; do
             [ -f "$d/builder/frameworks/espidf.py" ] || continue
-            python3 - "$d" <<'PY'
-import pathlib
-import sys
-p = pathlib.Path(sys.argv[1]) / "builder" / "frameworks" / "espidf.py"
-s = p.read_text()
-old = 'pio_exe_path = str(Path(os.path.dirname(PYTHON_EXE)) / ("pio" + (".exe" if IS_WINDOWS else "")))'
-new = 'pio_exe_path = os.environ["SS_PIO_EXE"]'
-if old not in s:
-    raise SystemExit("hybrid child command pattern not found")
-p.write_text(s.replace(old, new))
-PY
+            sed -i 's|pio_exe_path = str(Path(os.path.dirname(PYTHON_EXE)) / ("pio" + (".exe" if IS_WINDOWS else "")))|pio_exe_path = os.environ["SS_PIO_EXE"]|' "$d/builder/frameworks/espidf.py"
+            grep -q 'os.environ\["SS_PIO_EXE"\]' "$d/builder/frameworks/espidf.py"
           done
 
       - name: Host tests
