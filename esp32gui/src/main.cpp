@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "animation_store.h"
 #include "app_log.h"
 #include "app_watchdog.h"
 #include "board_ws7.h"
@@ -284,9 +285,11 @@ void panel_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
 void action_log_clear(void) { app_log_clear(); }
 
 void action_animation_refresh(void) {
+  animation_store_refresh();
+  const int n = animation_store_count();
   std::snprintf(s_animation_status, sizeof(s_animation_status),
-                "SD file listing is not implemented");
-  SS_LOGW("anim", "animation refresh: SD file listing is not implemented");
+                "%d animation%s on SD", n, n == 1 ? "" : "s");
+  SS_LOGI("anim", "refresh: %s", s_animation_status);
 }
 
 void action_animation_add(int index) {
@@ -518,12 +521,19 @@ void build_snapshot(ui_snapshot_t *snap) {
   upgrade_manager_snapshot(snap);
   net_manager_snapshot(snap);
   snap->selected_node = commission_selected_index();
-  snap->animation_count = 0;
+  int animation_count = 0;
+  char animation_status[64] = "no animations";
+  animation_store_snapshot(&animation_count, snap->animations,
+                           UI_MAX_ANIMATIONS, animation_status,
+                           sizeof(animation_status));
+  if (s_selected_animation >= animation_count)
+    s_selected_animation = animation_count > 0 ? animation_count - 1 : 0;
+  snap->animation_count = animation_count;
   snap->selected_animation = s_selected_animation;
   snap->animation_loading = s_animation_loading;
   std::snprintf(snap->animation_source, sizeof(snap->animation_source), "SD");
   std::snprintf(snap->animation_status, sizeof(snap->animation_status), "%s",
-                s_animation_status);
+                animation_status);
   snap->grid_cols = cfg->grid_cols;
   snap->grid_rows = cfg->grid_rows;
   for (int pos = 0; pos < UI_MAX_POSITIONS; ++pos) {
@@ -631,6 +641,7 @@ void setup() {
   board_ws7_backlight(false);
 
   firmware_image_init();
+  animation_store_init();
   commission_init();
   upgrade_manager_init();
   net_manager_init();
@@ -750,6 +761,7 @@ void loop() {
   if (s_lvgl_mux != nullptr) xSemaphoreGive(s_lvgl_mux);
   commission_poll();
   upgrade_manager_poll();
+  animation_store_poll();
   app_watchdog_poll();
   display_power_poll();
   app_watchdog_kick(SS_WATCH_ALL);

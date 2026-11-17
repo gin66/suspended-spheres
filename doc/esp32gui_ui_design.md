@@ -77,9 +77,12 @@ playlist lists only playable animations.  A file that fails HBP2 validation
 is not a playlist entry; it is counted as invalid and kept out of the list.
 Health moves to a single status line at the bottom.
 
-Library is part of SHOW.  While an animation is playing the selected playlist
-stays visible and the library slot becomes the large square **STOP** target,
-so the choice is never hidden by the safety control.
+Library is part of SHOW.  The panel lists `/sdcard/animations/*.hbp`; the
+browser control page can upload a take to the same folder without removing the
+card.  Playback of HBP2 is still a separate master task, so `LOAD` reports
+that it is not implemented.  While an animation is playing the selected
+playlist stays visible and the library slot becomes the large square **STOP**
+target, so the choice is never hidden by the safety control.
 
 Firmware is deliberately not a top-level destination: it is a rare operation
 and it needs a network, so it lives in SERVICE where the reason and the image

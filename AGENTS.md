@@ -156,12 +156,17 @@ All technical Markdown belongs in `doc/`. Only `README.md` and `AGENTS.md` sit a
   ```
   It writes `patterns/<name>.report.json` and exits non-zero on violations.
   Add `--hbp patterns/<name>.hbp` to export a clean take as one HBP2 playback
-  file. With `npm run dev`
+  file.  `tools/export_sd_animations.sh` bakes every pattern into
+  `sd/animations/*.hbp` for copying to the panel's `/sdcard/animations`; the
+  control page has a **STORE ANIMATION** upload for the same folder. With `npm run dev`
   in `webapp/`, the viewer lists the files in `patterns/`, watches the selected
   one, and rebakes on save. The agent loop is: edit the JSON or generator, run
   `pattern_check`, read the report, repeat until `violations` is empty.
 - **Firmware release.** Pushing an tag `vMAJOR.MINOR.PATCH` is the
-  publish action. `.github/workflows/release.yml` creates the GitHub Release
+  publish action.  The workflow drops the Arduino RainMaker, Zigbee and
+  diagnostics managed components with `tools/drop_optional_components.py`
+  before the panel build; locally, run that script after `pio pkg install`
+  if the optional components are not wanted. `.github/workflows/release.yml` creates the GitHub Release
   after the host tests pass. The contract is
   `doc/firmware_release_whitepaper.md` §1.6. The test order is
   `doc/firmware_release_tdd.md`.

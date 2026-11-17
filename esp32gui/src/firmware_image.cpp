@@ -318,6 +318,7 @@ void load_sd(void) {
   mkdir(kFlyDir, 0777);
   mkdir(kPanelDir, 0777);
   mkdir("/sdcard/firmware/katapult", 0777);
+  mkdir("/sdcard/animations", 0777);
   uint64_t total_bytes = 0;
   uint64_t free_bytes = 0;
   if (esp_vfs_fat_info(kMount, &total_bytes, &free_bytes) == ESP_OK)

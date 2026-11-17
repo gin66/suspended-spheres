@@ -116,6 +116,13 @@ jobs:
           pio --version
           pio run -e fly_micro4_katapult
 
+      - name: Drop unused Arduino components
+        run: |
+          set -euo pipefail
+          cd esp32gui
+          pio pkg install -e esp32can
+          python3 ../tools/drop_optional_components.py
+
       - name: Build the panel release image
         env:
           SS_FW_VERSION: ${{ steps.meta.outputs.version }}

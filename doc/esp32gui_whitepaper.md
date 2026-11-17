@@ -256,7 +256,7 @@ in `esp32gui/host/png/`.
 
 | Section / screen | Shows |
 |--------|--------|
-| Show | Now playing, elapsed time, PLAY/PAUSE/STOP/CYCLE, playable playlist/library with add/remove, compact CAN/board/thermal status; while playing the library slot becomes the square immediate STOP and the playlist stays visible |
+| Show | Now playing, elapsed time, PLAY/PAUSE/STOP/CYCLE, `.hbp` library from `/sdcard/animations` with add/remove, compact CAN/board/thermal status; while playing the library slot becomes the square immediate STOP and the playlist stays visible |
 | Build hub | Grid & Layout, Boards, Align Motors, Test & Config |
 | Grid | One cell per ball: assigned, free, thermal warning, fault; click a cell to select its board |
 | Nodes | Discovered boards by 6-byte UUID, board ID, online state, running `sw` version, assigned positions, MCU temperature, TMC OTPW/OT, health age |

@@ -1,6 +1,8 @@
 #include "net_manager.h"
 
 #include <Arduino.h>
+#include <strings.h>
+#include <sys/stat.h>
 #include <Preferences.h>
 #include <WebServer.h>
 #include <WiFi.h>
@@ -16,6 +18,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "animation_store.h"
 #include "app_log.h"
 #include "firmware_image.h"
 #include "github_client.h"
@@ -83,6 +86,14 @@ size_t s_up_bin_cap = 0;
 bool s_up_started = false;
 bool s_up_denied = false;
 bool s_up_too_large = false;
+
+uint8_t *s_anim_buf = nullptr;
+size_t s_anim_len = 0;
+size_t s_anim_cap = 0;
+char s_anim_name[64] = "";
+bool s_anim_started = false;
+bool s_anim_denied = false;
+bool s_anim_too_large = false;
 
 void lock(void) {
   if (s_mutex != nullptr) xSemaphoreTake(s_mutex, portMAX_DELAY);
@@ -576,6 +587,10 @@ String control_page(void) {
   p += "<input type=file name=json accept=.json> ";
   p += "<input type=file name=bin accept=.bin> ";
   p += "<button>STORE FLY</button></form>";
+  p += "<form method=post enctype=multipart/form-data action=/api/animations>";
+  p += csrf_input();
+  p += "<input type=file name=file accept=.hbp> ";
+  p += "<button>STORE ANIMATION</button></form>";
   p += "<form method=post action=/api/upgrade/all>";
   p += csrf_input();
   p += "<button>UPGRADE ALL OUTDATED</button></form>";
@@ -803,6 +818,98 @@ void handle_upload(void) {
   }
 }
 
+void reset_anim_upload(void) {
+  if (s_anim_buf != nullptr) heap_caps_free(s_anim_buf);
+  s_anim_buf = nullptr;
+  s_anim_len = 0;
+  s_anim_cap = 0;
+  s_anim_name[0] = '\0';
+  s_anim_started = false;
+  s_anim_denied = false;
+  s_anim_too_large = false;
+}
+
+bool anim_name_ok(const char *name) {
+  if (name == nullptr || name[0] == '\0') return false;
+  if (std::strchr(name, '/') != nullptr || std::strstr(name, "..") != nullptr)
+    return false;
+  const size_t n = std::strlen(name);
+  return n > 4 && strcasecmp(name + n - 4, ".hbp") == 0;
+}
+
+void handle_anim_upload(void) {
+  HTTPUpload &upload = s_server.upload();
+  if (upload.status == UPLOAD_FILE_START) {
+    if (!s_anim_started) {
+      reset_anim_upload();
+      s_anim_started = true;
+      s_anim_denied = !authorized();
+      const char *name = upload.filename.c_str();
+      const char *slash = strrchr(name, '/');
+      if (slash != nullptr) name = slash + 1;
+      std::snprintf(s_anim_name, sizeof(s_anim_name), "%s", name);
+    }
+  } else if (upload.status == UPLOAD_FILE_ABORTED) {
+    reset_anim_upload();
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (s_anim_denied || s_anim_too_large) return;
+    if (!append(&s_anim_buf, &s_anim_len, &s_anim_cap, upload.buf,
+                upload.currentSize, 20u * 1024u * 1024u))
+      s_anim_too_large = true;
+  }
+}
+
+void handle_anim_final(void) {
+  if (s_anim_denied) {
+    reset_anim_upload();
+    send_unauthorized();
+    return;
+  }
+  if (!csrf_ok()) {
+    reset_anim_upload();
+    send_error(422, "csrf");
+    return;
+  }
+  if (s_anim_too_large || s_anim_buf == nullptr || s_anim_len < 8) {
+    reset_anim_upload();
+    send_error(413, "animation too large or empty");
+    return;
+  }
+  if (std::memcmp(s_anim_buf, "HBP2", 4) != 0 || !anim_name_ok(s_anim_name)) {
+    reset_anim_upload();
+    send_error(422, "not an HBP2 file or bad name");
+    return;
+  }
+  if (!firmware_image_sd_present()) {
+    reset_anim_upload();
+    send_error(503, "no SD card");
+    return;
+  }
+  mkdir("/sdcard/animations", 0777);
+  char path[128];
+  std::snprintf(path, sizeof(path), "/sdcard/animations/%s", s_anim_name);
+  FILE *f = std::fopen(path, "wb");
+  if (f == nullptr) {
+    reset_anim_upload();
+    send_error(500, "cannot write SD card");
+    return;
+  }
+  const bool ok = std::fwrite(s_anim_buf, 1, s_anim_len, f) == s_anim_len;
+  std::fclose(f);
+  const size_t written = s_anim_len;
+  reset_anim_upload();
+  if (!ok) {
+    send_error(500, "short write");
+    return;
+  }
+  animation_store_refresh();
+  char body[96];
+  std::snprintf(body, sizeof(body),
+                "{\"status\":\"ok\",\"bytes\":%u,\"count\":%d}",
+                (unsigned)written, animation_store_count());
+  s_server.send(200, "application/json", body);
+}
+
 void handle_upload_final(void) {
   if (s_up_denied) {
     reset_upload();
@@ -901,6 +1008,8 @@ void register_handlers(void) {
   s_server.on("/api/github/install", HTTP_POST, handle_github_install);
   s_server.on("/api/update/panel", HTTP_POST, handle_upload_final, handle_upload);
   s_server.on("/api/images/fly", HTTP_POST, handle_upload_final, handle_upload);
+  s_server.on("/api/animations", HTTP_POST, handle_anim_final,
+              handle_anim_upload);
 }
 
 bool apply_ap_key(const char *key) {

@@ -24,3 +24,6 @@ private_bot.h
 private_sha.h
 .env
 .env.*
+
+# Local SD-card staging folder
+sd/

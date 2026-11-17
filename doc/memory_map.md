@@ -78,6 +78,7 @@ The largest internal-RAM objects in this build:
 | Upgrade worker stack | 16 384 | static 4 096-word stack, created on UPGRADE |
 | Network task stack | 20 480 | dynamic; TLS, `release.json`, panel/Fly manifests |
 | Release metadata | ~3 200 | static `rc_release_t`, one per task, not on the net stack |
+| Animation library | ~1 800 | 32 cached `.hbp` rows, copied under a critical section |
 | `s_can_buf` | 24 576 | CAN scope text snapshot, 256 × 96 B |
 | UI snapshot | 18 952 | PSRAM (`s_snapshot`) and LVGL copy (`s_snap`) |
 | CAN monitor table | 14 336 | 256 × 56 B identifier rows |
