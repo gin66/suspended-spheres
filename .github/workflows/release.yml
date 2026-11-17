@@ -115,6 +115,7 @@ jobs:
           SS_BUILD_ID: ${{ steps.meta.outputs.build }}
           SS_RELEASE: '1'
           SS_PYTHONEXE: ${{ github.workspace }}/.platformio-venv/bin/python
+          PIOVERBOSE: '1'
           SS_GITHUB_OWNER: ${{ github.repository_owner }}
           SS_GITHUB_REPO: ${{ github.event.repository.name }}
         run: |
