@@ -370,5 +370,16 @@ int main(int argc, char **argv) {
     render_to_png(filename);
   }
 
+  ui_show_screen(UI_SCREEN_WIFI);
+  ui_update(&snap);
+  ui_debug_open_wifi_modal(0);
+  clear_background();
+  lv_obj_invalidate(lv_screen_active());
+  lv_refr_now(s_disp);
+  char keyboard_png[512];
+  std::snprintf(keyboard_png, sizeof(keyboard_png),
+                "%s/output_wifi_keyboard.png", output_dir);
+  render_to_png(keyboard_png);
+
   return 0;
 }

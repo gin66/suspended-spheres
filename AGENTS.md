@@ -114,7 +114,8 @@ All technical Markdown belongs in `doc/`. Only `README.md` and `AGENTS.md` sit a
   **SCAN**, **FORGET** and **SERVER** control the same state. Credentials and
   the admin hash live in NVS. The setup page is `http://192.168.4.1` while the
   AP is up. Settings **SETUP/SCAN/FORGET/SERVER** and the **WIFI** screen
-  (SSID list, password keyboard, SET ADMIN) are the panel path. The bench
+  (SSID list, full-screen password/admin keypad with DONE/CANCEL, SET ADMIN)
+  are the panel path. The bench
   console has `wifi setup|forget|scan|status|list|key`, `service on|off`,
   `github check|install|status` and `panelota`.  The GitHub owner/repository
   are compiled from `SS_GITHUB_OWNER`/`SS_GITHUB_REPO`; the release workflow
