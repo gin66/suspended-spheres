@@ -151,7 +151,11 @@ lv_obj_t *s_wifi_status;
 lv_obj_t *s_wifi_selected;
 lv_obj_t *s_wifi_pass;
 lv_obj_t *s_wifi_admin;
-lv_obj_t *s_wifi_keyboard;
+lv_obj_t *s_wifi_modal;
+lv_obj_t *s_wifi_modal_ta;
+lv_obj_t *s_wifi_modal_title;
+lv_obj_t *s_wifi_modal_kb;
+int s_wifi_modal_target = 0;
 lv_obj_t *s_wifi_scan_btn;
 lv_obj_t *s_wifi_reason;
 int s_wifi_selected_index = -1;
@@ -590,8 +594,6 @@ void on_wifi_join(lv_event_t *e) {
   if (ssid != nullptr && ssid[0] != '\0' && pass != nullptr && pass[0] != '\0') {
     s_actions.wifi_connect(ssid, pass);
     lv_textarea_set_text(s_wifi_pass, "");
-    if (s_wifi_keyboard != nullptr)
-      lv_obj_add_flag(s_wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
   }
 }
 
@@ -614,38 +616,57 @@ void on_wifi_row(lv_event_t *e) {
   s_wifi_selected_index = (int)(intptr_t)lv_event_get_user_data(e);
 }
 
+void wifi_close_modal(bool keep) {
+  if (s_wifi_modal == nullptr) return;
+  if (keep) {
+    const char *text = lv_textarea_get_text(s_wifi_modal_ta);
+    if (s_wifi_modal_target == 0)
+      lv_textarea_set_text(s_wifi_pass, text);
+    else
+      lv_textarea_set_text(s_wifi_admin, text);
+  }
+  lv_obj_add_flag(s_wifi_modal, LV_OBJ_FLAG_HIDDEN);
+}
+
+void wifi_open_modal(int target) {
+  if (s_wifi_modal == nullptr) return;
+  s_wifi_modal_target = target;
+  lv_label_set_text(s_wifi_modal_title,
+                    target == 0 ? "WiFi password" : "Admin password");
+  const char *text = target == 0 ? lv_textarea_get_text(s_wifi_pass)
+                                 : lv_textarea_get_text(s_wifi_admin);
+  lv_textarea_set_text(s_wifi_modal_ta, text);
+  lv_textarea_set_password_mode(s_wifi_modal_ta, true);
+  lv_keyboard_set_textarea(s_wifi_modal_kb, s_wifi_modal_ta);
+  lv_obj_clear_flag(s_wifi_modal, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_move_foreground(s_wifi_modal);
+}
+
 void on_wifi_pass_focus(lv_event_t *e) {
   (void)e;
-  if (s_wifi_keyboard != nullptr) {
-    lv_keyboard_set_textarea(s_wifi_keyboard, s_wifi_pass);
-    lv_obj_clear_flag(s_wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(s_wifi_keyboard);
-  }
+  wifi_open_modal(0);
 }
 
 void on_wifi_admin_focus(lv_event_t *e) {
   (void)e;
-  if (s_wifi_keyboard != nullptr) {
-    lv_keyboard_set_textarea(s_wifi_keyboard, s_wifi_admin);
-    lv_obj_clear_flag(s_wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(s_wifi_keyboard);
-  }
+  wifi_open_modal(1);
+}
+
+void on_wifi_modal_done(lv_event_t *e) {
+  (void)e;
+  wifi_close_modal(true);
+}
+
+void on_wifi_modal_cancel(lv_event_t *e) {
+  (void)e;
+  wifi_close_modal(false);
 }
 
 void on_wifi_kb_ready(lv_event_t *e) {
   (void)e;
-  lv_obj_t *ta = lv_keyboard_get_textarea(s_wifi_keyboard);
-  if (ta == s_wifi_pass) on_wifi_join(nullptr);
-  else if (ta == s_wifi_admin) on_wifi_admin(nullptr);
-  if (s_wifi_keyboard != nullptr)
-    lv_obj_add_flag(s_wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
+  wifi_close_modal(true);
 }
 
-void on_wifi_kb_cancel(lv_event_t *e) {
-  (void)e;
-  if (s_wifi_keyboard != nullptr)
-    lv_obj_add_flag(s_wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
-}
 
 void on_panel_update(lv_event_t *e) {
   (void)e;
@@ -1375,7 +1396,7 @@ void build_wifi(void) {
   lv_obj_set_pos(sel_lbl, 8, 0);
   s_wifi_selected = make_label(right, "--", &lv_font_montserrat_14, C_TEXT);
   lv_obj_set_pos(s_wifi_selected, 100, 0);
-  lv_obj_set_width(s_wifi_selected, 250);
+  lv_obj_set_width(s_wifi_selected, 130);
   lv_label_set_long_mode(s_wifi_selected, LV_LABEL_LONG_CLIP);
 
   lv_obj_t *pass_lbl = make_label(right, "Password", &lv_font_montserrat_12,
@@ -1388,6 +1409,11 @@ void build_wifi(void) {
   lv_textarea_set_password_mode(s_wifi_pass, true);
   lv_textarea_set_placeholder_text(s_wifi_pass, "WiFi password");
   lv_obj_add_event_cb(s_wifi_pass, on_wifi_pass_focus, LV_EVENT_FOCUSED, nullptr);
+  lv_obj_add_event_cb(s_wifi_pass, on_wifi_pass_focus, LV_EVENT_CLICKED, nullptr);
+  lv_obj_t *kbd = make_button(right, "KEYBOARD", 96, 26, on_wifi_pass_focus,
+                              nullptr);
+  lv_obj_set_pos(kbd, 240, 0);
+  lv_obj_set_style_text_font(kbd, &lv_font_montserrat_12, 0);
 
   lv_obj_t *admin_lbl = make_label(right, "Admin", &lv_font_montserrat_12,
                                    C_MUTED);
@@ -1399,6 +1425,8 @@ void build_wifi(void) {
   lv_textarea_set_password_mode(s_wifi_admin, true);
   lv_textarea_set_placeholder_text(s_wifi_admin, "Admin password");
   lv_obj_add_event_cb(s_wifi_admin, on_wifi_admin_focus, LV_EVENT_FOCUSED,
+                      nullptr);
+  lv_obj_add_event_cb(s_wifi_admin, on_wifi_admin_focus, LV_EVENT_CLICKED,
                       nullptr);
 
   lv_obj_t *join = make_button(right, "JOIN", 100, 44, on_wifi_join, nullptr);
@@ -1415,15 +1443,47 @@ void build_wifi(void) {
   lv_obj_set_width(s_wifi_reason, 344);
   lv_label_set_long_mode(s_wifi_reason, LV_LABEL_LONG_WRAP);
 
-  s_wifi_keyboard = lv_keyboard_create(s);
-  lv_obj_set_pos(s_wifi_keyboard, 12, 268);
-  lv_obj_set_size(s_wifi_keyboard, 688, 176);
-  lv_keyboard_set_mode(s_wifi_keyboard, LV_KEYBOARD_MODE_TEXT_LOWER);
-  lv_obj_add_event_cb(s_wifi_keyboard, on_wifi_kb_ready, LV_EVENT_READY,
+#ifndef ESP32GUI_HOST
+  /* Full-screen entry modal.  The field and Cancel/Done buttons are above a
+   * full-width keyboard; the host harness skips the widget. */
+  s_wifi_modal = lv_obj_create(lv_screen_active());
+  lv_obj_remove_style_all(s_wifi_modal);
+  lv_obj_set_pos(s_wifi_modal, 0, 0);
+  lv_obj_set_size(s_wifi_modal, kWidth, kHeight);
+  lv_obj_set_style_bg_color(s_wifi_modal, C_BG, 0);
+  lv_obj_set_style_bg_opa(s_wifi_modal, LV_OPA_COVER, 0);
+  lv_obj_clear_flag(s_wifi_modal, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(s_wifi_modal, LV_OBJ_FLAG_HIDDEN);
+
+  s_wifi_modal_title = make_label(s_wifi_modal, "WiFi password",
+                                  &lv_font_montserrat_20, C_TEXT);
+  lv_obj_set_pos(s_wifi_modal_title, 16, 10);
+
+  lv_obj_t *done = make_button(s_wifi_modal, "DONE", 92, 40, on_wifi_modal_done,
+                               nullptr);
+  lv_obj_set_pos(done, 576, 8);
+  lv_obj_t *cancel = make_button(s_wifi_modal, "CANCEL", 100, 40,
+                                 on_wifi_modal_cancel, nullptr);
+  lv_obj_set_pos(cancel, 684, 8);
+
+  s_wifi_modal_ta = lv_textarea_create(s_wifi_modal);
+  lv_obj_set_pos(s_wifi_modal_ta, 12, 58);
+  lv_obj_set_size(s_wifi_modal_ta, 776, 56);
+  lv_obj_set_style_text_font(s_wifi_modal_ta, &lv_font_montserrat_20, 0);
+  lv_textarea_set_one_line(s_wifi_modal_ta, true);
+  lv_textarea_set_password_mode(s_wifi_modal_ta, true);
+  lv_textarea_set_placeholder_text(s_wifi_modal_ta, "Enter password");
+
+  s_wifi_modal_kb = lv_keyboard_create(s_wifi_modal);
+  lv_obj_set_pos(s_wifi_modal_kb, 12, 126);
+  lv_obj_set_size(s_wifi_modal_kb, 776, 344);
+  lv_keyboard_set_mode(s_wifi_modal_kb, LV_KEYBOARD_MODE_TEXT_LOWER);
+  lv_keyboard_set_textarea(s_wifi_modal_kb, s_wifi_modal_ta);
+  lv_obj_add_event_cb(s_wifi_modal_kb, on_wifi_kb_ready, LV_EVENT_READY,
                       nullptr);
-  lv_obj_add_event_cb(s_wifi_keyboard, on_wifi_kb_cancel, LV_EVENT_CANCEL,
+  lv_obj_add_event_cb(s_wifi_modal_kb, on_wifi_modal_cancel, LV_EVENT_CANCEL,
                       nullptr);
-  lv_obj_add_flag(s_wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
+#endif
   s_wifi_shown_hash = 0;
 }
 
@@ -1538,8 +1598,8 @@ void ui_show_screen(int index) {
   for (int i = 0; i < UI_SCREEN_COUNT; ++i) {
     set_hidden(s_screens[i], i != index);
   }
-  if (s_wifi_keyboard != nullptr && index != UI_SCREEN_WIFI)
-    lv_obj_add_flag(s_wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
+  if (s_wifi_modal != nullptr)
+    lv_obj_add_flag(s_wifi_modal, LV_OBJ_FLAG_HIDDEN);
   if (s_nav != nullptr) lv_obj_delete(s_nav);
   s_nav = nullptr;
   build_nav(index);

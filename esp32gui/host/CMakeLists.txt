@@ -42,6 +42,8 @@ add_executable(esp32gui_host
   ${CMAKE_SOURCE_DIR}/../ui/ui.cpp
 )
 
+target_compile_definitions(esp32gui_host PRIVATE ESP32GUI_HOST=1)
+
 target_include_directories(esp32gui_host PRIVATE
   ${CMAKE_SOURCE_DIR}
   ${LVGL_ROOT_DIR}/src/libs/lodepng
