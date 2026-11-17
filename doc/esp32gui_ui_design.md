@@ -111,7 +111,9 @@ opens the AP as a side effect.
 ### 3.3 CONNECT retry
 
 A failed CONNECT does **not** fall back to AP.  The panel stays in
-`CONNECTING`, reports the reason, and retries every 5 s.  The operator can
+`CONNECTING`, reports the ESP32 disconnect reason (`wrong password`,
+`SSID not found`, `beacon lost`, with the numeric code), and retries every
+5 s.  The operator can
 stop it with **OFF** or switch to **AP**.  The retry loop is intentionally
 visible: a wrong password is a configuration error, not an invitation to
 start an access point.
@@ -179,7 +181,10 @@ The reason line remains visible so the operator knows what to do next.
   `http://192.168.4.1`.
 - Outside AP mode: scan list with `SCAN` on the left, selected SSID/password
   and `CONNECT` on the right, and service/forget/admin below.  There is no
-  GitHub control here.
+  GitHub control here.  Each scan row shows the security mode and RSSI.
+- The password keypad has an explicit **SHOW**/**HIDE** toggle.  The field is
+  masked by default; showing it is an operator action, and the AP key modal
+  stays visible by design.
 
 Every panel has 12 px inner padding.  Controls stop at the inner edge; do
 not place a 32 px button at `y` such that `y + height` exceeds the panel

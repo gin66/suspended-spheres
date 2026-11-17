@@ -198,6 +198,8 @@ typedef struct {
   bool wifi_scanning;
   int wifi_scan_count;
   char wifi_scan_ssid[UI_MAX_WIFI_SCAN][33];
+  int8_t wifi_scan_rssi[UI_MAX_WIFI_SCAN];
+  char wifi_scan_auth[UI_MAX_WIFI_SCAN][8];
   bool service_on;
   char github_status[64];
   bool github_update_available;

@@ -42,6 +42,7 @@ net_link_t s_link;
 bool s_have_cred = false;
 char s_ssid[33] = "";
 char s_pass[65] = "";
+uint8_t s_last_reason = 0;
 char s_admin_salt[33] = "";
 char s_admin_hash[65] = "";
 char s_ap_ssid[33] = "";
@@ -65,6 +66,7 @@ volatile bool s_cmd_service_on = false;
 
 char s_scan[12][33];
 int s_scan_rssi[12];
+uint8_t s_scan_auth[12];
 int s_scan_count = 0;
 char s_pending_ssid[33] = "";
 char s_pending_pass[65] = "";
@@ -274,16 +276,27 @@ void connect_sta(void) {
     unlock();
     return;
   }
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(s_ssid, s_pass);
+  if (WiFi.getMode() != WIFI_STA) {
+    WiFi.mode(WIFI_STA);
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+  wl_status_t begin_status = WiFi.begin(s_ssid, s_pass);
+  if (begin_status == WL_CONNECT_FAILED) {
+    /* The first set_config after WIFI_OFF can race the STA start. */
+    vTaskDelay(pdMS_TO_TICKS(200));
+    begin_status = WiFi.begin(s_ssid, s_pass);
+  }
+  SS_LOGI("net", "begin %s -> status %d", s_ssid, (int)begin_status);
   lock();
   s_link.state = NET_CONNECTING;
   s_link.have_credentials = true;
   s_link.reason[0] = '\0';
+  s_last_reason = 0;
   s_connect_deadline = millis() + 20000u;
   s_retry_deadline = 0;
   unlock();
-  SS_LOGI("net", "connecting to %s", s_ssid);
+  SS_LOGI("net", "connecting to %s (password %s)", s_ssid,
+          s_pass[0] ? "set" : "empty");
 }
 
 void do_setup(void) { start_ap(); }
@@ -335,11 +348,15 @@ void do_scan(void) {
       }
     }
     if (found >= 0) {
-      if (rssi > s_scan_rssi[found]) s_scan_rssi[found] = rssi;
+      if (rssi > s_scan_rssi[found]) {
+        s_scan_rssi[found] = rssi;
+        s_scan_auth[found] = (uint8_t)WiFi.encryptionType(i);
+      }
     } else {
       std::snprintf(s_scan[s_scan_count], sizeof(s_scan[s_scan_count]), "%s",
                     ssid.c_str());
       s_scan_rssi[s_scan_count] = rssi;
+      s_scan_auth[s_scan_count] = (uint8_t)WiFi.encryptionType(i);
       ++s_scan_count;
     }
   }
@@ -395,6 +412,23 @@ void finish_connected(void) {
   SS_LOGI("net", "connected to %s, IP %s", s_ssid, s_ip);
 }
 
+const char *wifi_failure_text(wl_status_t status, uint8_t reason) {
+  if (reason == 201) return "SSID not found";        /* NO_AP_FOUND */
+  if (reason == 202) return "auth failed";           /* AUTH_FAIL */
+  if (reason == 203) return "association failed";    /* ASSOC_FAIL */
+  if (reason == 204) return "wrong password";        /* HANDSHAKE_TIMEOUT */
+  if (reason == 15) return "wrong password";         /* 4WAY_HANDSHAKE_TIMEOUT */
+  if (reason == 200) return "beacon lost";           /* BEACON_TIMEOUT */
+  switch (status) {
+    case WL_NO_SSID_AVAIL: return "SSID not found";
+    case WL_CONNECT_FAILED: return "connect failed";
+    case WL_CONNECTION_LOST: return "link lost";
+    case WL_DISCONNECTED: return "disconnected";
+    case WL_IDLE_STATUS: return "idle";
+    default: return "connect timeout";
+  }
+}
+
 void schedule_retry(const char *reason) {
   WiFi.disconnect();
   lock();
@@ -434,7 +468,12 @@ void poll_link(void) {
       if (retry_due) {
         connect_sta();
       } else if (timeout) {
-        schedule_retry("connect timeout");
+        const wl_status_t st = WiFi.status();
+        const uint8_t why = s_last_reason;
+        char text[48];
+        std::snprintf(text, sizeof(text), "%s (%u)",
+                      wifi_failure_text(st, why), (unsigned)why);
+        schedule_retry(text);
       } else if (retry_wait) {
         /* waiting for the next visible retry */
       }
@@ -447,7 +486,12 @@ void poll_link(void) {
       s_rssi = (int16_t)WiFi.RSSI();
       unlock();
     } else {
-      schedule_retry("link lost");
+      const wl_status_t st = WiFi.status();
+      const uint8_t why = s_last_reason;
+      char text[48];
+      std::snprintf(text, sizeof(text), "%s (%u)",
+                    wifi_failure_text(st, why), (unsigned)why);
+      schedule_retry(text);
     }
   } else if (state == NET_AP_SETUP || state == NET_FAILED) {
     if (WiFi.status() == WL_CONNECTED && !s_ap_up) finish_connected();
@@ -988,6 +1032,12 @@ extern "C" void net_manager_init(void) {
     SS_LOGE("net", "event loop: %s", esp_err_to_name(err));
   load_nvs();
   net_link_init(&s_link);
+  WiFi.onEvent(
+      [](arduino_event_id_t event, arduino_event_info_t info) {
+        if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED)
+          s_last_reason = (uint8_t)info.wifi_sta_disconnected.reason;
+      },
+      ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   WiFi.persistent(false);
   WiFi.setAutoReconnect(false);
   WiFi.disconnect(true);
@@ -1137,6 +1187,19 @@ extern "C" const char *net_manager_scan_ssid(int index) {
   return s_scan[index];
 }
 
+const char *auth_text(uint8_t mode) {
+  switch (mode) {
+    case 1: return "WEP";
+    case 2: return "WPA";
+    case 3: return "WPA2";
+    case 4: return "W2/3";
+    case 5: return "ENT";
+    case 6: return "WPA3";
+    case 7: return "W2/3";
+    default: return "OPEN";
+  }
+}
+
 extern "C" void net_manager_snapshot(ui_snapshot_t *snap) {
   if (snap == nullptr) return;
   lock();
@@ -1150,9 +1213,13 @@ extern "C" void net_manager_snapshot(ui_snapshot_t *snap) {
   snap->service_on = s_service_on;
   snap->wifi_scanning = s_scanning;
   snap->wifi_scan_count = s_scan_count;
-  for (int i = 0; i < s_scan_count && i < UI_MAX_WIFI_SCAN; ++i)
+  for (int i = 0; i < s_scan_count && i < UI_MAX_WIFI_SCAN; ++i) {
     std::snprintf(snap->wifi_scan_ssid[i], sizeof(snap->wifi_scan_ssid[i]),
                   "%s", s_scan[i]);
+    snap->wifi_scan_rssi[i] = s_scan_rssi[i];
+    std::snprintf(snap->wifi_scan_auth[i], sizeof(snap->wifi_scan_auth[i]),
+                  "%s", auth_text(s_scan_auth[i]));
+  }
   github_client_status(snap->github_status, sizeof(snap->github_status));
   snap->github_update_available = github_client_update_available();
   snap->wifi_rssi = s_rssi;

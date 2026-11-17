@@ -234,9 +234,15 @@ ui_snapshot_t make_snapshot() {
   s.wifi_scan_count = 6;
   const char *scan[] = {"Home-2.4G", "Workshop", "Guest",
                         "Lab-AP", "Neighbour", "Cafe"};
-  for (int i = 0; i < 6; ++i)
+  const int8_t scan_rssi[] = {-42, -55, -61, -68, -74, -81};
+  const char *scan_auth[] = {"WPA2", "WPA2", "W2/3", "WPA2", "WPA3", "OPEN"};
+  for (int i = 0; i < 6; ++i) {
     std::snprintf(s.wifi_scan_ssid[i], sizeof(s.wifi_scan_ssid[i]), "%s",
                   scan[i]);
+    s.wifi_scan_rssi[i] = scan_rssi[i];
+    std::snprintf(s.wifi_scan_auth[i], sizeof(s.wifi_scan_auth[i]), "%s",
+                  scan_auth[i]);
+  }
   s.service_on = true;
   std::snprintf(s.github_status, sizeof(s.github_status), "%s",
                 "same 0.1.0");

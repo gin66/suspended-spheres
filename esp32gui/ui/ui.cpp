@@ -192,6 +192,8 @@ lv_obj_t *s_wifi_modal;
 lv_obj_t *s_wifi_modal_ta;
 lv_obj_t *s_wifi_modal_title;
 lv_obj_t *s_wifi_modal_kb;
+lv_obj_t *s_wifi_modal_show_btn;
+bool s_wifi_modal_show = false;
 int s_wifi_modal_target = 0;
 bool s_wifi_upper = false;
 bool s_wifi_symbols = false;
@@ -876,7 +878,14 @@ void wifi_open_modal(int target) {
                                                        ? s_snap->wifi_ap_password
                                                        : s_wifi_ap_key_buf));
   lv_textarea_set_text(s_wifi_modal_ta, text);
-  lv_textarea_set_password_mode(s_wifi_modal_ta, target != 2);
+  s_wifi_modal_show = (target == 2);
+  lv_textarea_set_password_mode(s_wifi_modal_ta, !s_wifi_modal_show);
+  if (s_wifi_modal_show_btn != nullptr) {
+    set_hidden(s_wifi_modal_show_btn, target == 2);
+    lv_obj_t *l = lv_obj_get_child(s_wifi_modal_show_btn, 0);
+    if (l != nullptr)
+      lv_label_set_text(l, s_wifi_modal_show ? "HIDE" : "SHOW");
+  }
   wifi_build_keypad();
   lv_obj_clear_flag(s_wifi_modal, LV_OBJ_FLAG_HIDDEN);
   lv_obj_move_foreground(s_wifi_modal);
@@ -890,6 +899,14 @@ void on_wifi_pass_focus(lv_event_t *e) {
 void on_wifi_admin_focus(lv_event_t *e) {
   (void)e;
   wifi_open_modal(1);
+}
+
+void on_wifi_modal_show(lv_event_t *e) {
+  (void)e;
+  s_wifi_modal_show = !s_wifi_modal_show;
+  lv_textarea_set_password_mode(s_wifi_modal_ta, !s_wifi_modal_show);
+  lv_obj_t *l = lv_obj_get_child(s_wifi_modal_show_btn, 0);
+  if (l != nullptr) lv_label_set_text(l, s_wifi_modal_show ? "HIDE" : "SHOW");
 }
 
 void on_wifi_modal_done(lv_event_t *e) {
@@ -2075,6 +2092,11 @@ void build_wifi(void) {
                                   &lv_font_montserrat_20, C_TEXT);
   lv_obj_set_pos(s_wifi_modal_title, 16, 10);
 
+  s_wifi_modal_show_btn = make_button(s_wifi_modal, "SHOW", 92, 40,
+                                      on_wifi_modal_show, nullptr);
+  lv_obj_set_style_text_font(s_wifi_modal_show_btn,
+                             &lv_font_montserrat_14, 0);
+  lv_obj_set_pos(s_wifi_modal_show_btn, 470, 8);
   lv_obj_t *done = make_button(s_wifi_modal, "DONE", 92, 40, on_wifi_modal_done,
                                nullptr);
   lv_obj_set_style_bg_color(done, C_ACCENT, 0);
@@ -3227,8 +3249,14 @@ void ui_update(const ui_snapshot_t *snapshot) {
     s_wifi_shown_hash = wifi_hash;
     lv_obj_clean(s_wifi_list);
     for (int i = 0; i < s_snap->wifi_scan_count && i < UI_MAX_WIFI_SCAN; ++i) {
-      lv_obj_t *b = make_button(s_wifi_list, s_snap->wifi_scan_ssid[i], 264,
-                                44, on_wifi_row, (void *)(intptr_t)i);
+      char row[56];
+      std::snprintf(row, sizeof(row), "%s  %s  %d dBm",
+                    s_snap->wifi_scan_ssid[i],
+                    s_snap->wifi_scan_auth[i][0] ? s_snap->wifi_scan_auth[i]
+                                                 : "--",
+                    (int)s_snap->wifi_scan_rssi[i]);
+      lv_obj_t *b = make_button(s_wifi_list, row, 264, 44, on_wifi_row,
+                                (void *)(intptr_t)i);
       lv_obj_set_style_text_font(b, &lv_font_montserrat_14, 0);
     }
   }

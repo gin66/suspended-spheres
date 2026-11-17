@@ -262,7 +262,7 @@ in `esp32gui/host/png/`.
 | Nodes | Discovered boards by 6-byte UUID, board ID, online state, running `sw` version, assigned positions, MCU temperature, TMC OTPW/OT, health age |
 | Motor | Selected board and axis (assigned axes are green); board health; HOME, UP, DOWN, STOP; tap a grid cell to choose the position, then assign/unassign |
 | Config | Grid size, test-run drop/speed/gap, serpentine, save/reset/clear, SPIFFS state |
-| Connect | Explicit OFF / CONNECT / AP, scan, password keypad, service, AP password/rotate/edit, join/browser QR, reason |
+| Connect | Explicit OFF / CONNECT / AP, scan with security and RSSI, password keypad with SHOW/HIDE, service, AP password/rotate/edit, join/browser QR, disconnect reason |
 | Service hub | Firmware, CAN scope, Log, System |
 | Firmware | Fly node image, panel image from SD, GitHub check/install, fleet upgrade; 30 tiles on one page in 6 × 5 order; board ID, neutral queued, the one yellow Katapult board, green verified, dim excluded; `QUERY ALL`, `UPGRADE ALL OUTDATED`, `UPGRADE SELECTED`, `STOP`, image version/build/source and `n / 30` |
 | CAN | Received-frame scope by identifier (raw ID, type, count, last data), TX sent/rejected, RX drops, bus-off state; clear |
